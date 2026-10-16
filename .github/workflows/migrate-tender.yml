@@ -40,13 +40,22 @@ jobs:
           import os
           import sys
           from urllib.parse import urlsplit
-          uri = urlsplit(os.environ["TENDER_DATABASE_URL"])
-          host = (uri.hostname or "").lower()
-          username = uri.username or ""
+          raw = os.environ["TENDER_DATABASE_URL"].strip()
+          # Check for the incorrect direct host even when brackets make the URI unparseable.
+          if "db.svrculrtxjudkcljhutn.supabase.co" in raw.lower():
+              print("::error::Your saved GitHub secret still contains Tender's DIRECT Supabase database hostname. It cannot be reached by this GitHub runner. Open Supabase -> Connect -> Session pooler, copy that whole URI (port 5432), and UPDATE the existing TENDER_DATABASE_URL secret.")
+              sys.exit(1)
           try:
+              uri = urlsplit(raw)
+              host = (uri.hostname or "").lower()
+              username = uri.username or ""
               port = uri.port
           except ValueError:
-              port = None
+              print("::error::Malformed PostgreSQL connection URI. Copy the full Session pooler URI exactly from Supabase -> Connect. Do not put [square brackets] around the host or paste the [YOUR-PASSWORD] placeholder. Never share the full URI or password.")
+              sys.exit(1)
+          if not uri.password or uri.password == "[YOUR-PASSWORD]":
+              print("::error::Database password missing or still a placeholder. Replace [YOUR-PASSWORD] privately in the copied Session pooler URI (URL-encode special characters).")
+              sys.exit(1)
           if host.startswith("db.") and host.endswith(".supabase.co"):
               print("::error::Direct Supabase connection is IPv6-only on the free plan and GitHub Actions cannot reach it. In Supabase -> Connect, choose Session pooler (port 5432), then UPDATE GitHub secret TENDER_DATABASE_URL with that full connection URI.")
               sys.exit(1)
