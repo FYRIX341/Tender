@@ -2,6 +2,15 @@
 
 **Stay close. Stay crispy.** A responsive HTML/CSS/JavaScript messenger featuring Buffalo the mascot, private DMs, friend requests, group chats, and customizable forum-like **Pieces** with chat, discussions, and galleries.
 
+
+## 🍗 Tender 0.2 — The Crispy Update
+
+**MAJOR UPDATE:** [Read the changelog and migration instructions](RELEASE_0_2.md).
+
+**Existing users:** To unlock the new features, run [migration_0_2.sql](migration_0_2.sql) **once** in your existing Supabase SQL Editor. Do not rerun the initial schema and do not create a new database. Your existing Supabase `config.js` stays the same. The original DMs and Pieces remain intact.
+
+**Important:** In-app notifications and browser notifications with the page open are supported; closed-browser push is not yet implemented. Rich GIF link embedding works, but a searchable third-party GIF catalog is not integrated. This remains a small beta with free-tier limits.
+
 ## Live hosting
 
 Source: https://github.com/FYRIX341/Tender
