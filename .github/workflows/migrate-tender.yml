@@ -1,0 +1,63 @@
+name: Run Tender 0.2 Migration
+
+# Manual-only. Does NOT run on normal code pushes or Pages deployments.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tender-production-db-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Apply existing Tender 0.2 SQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout migration file
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify safe setup
+        shell: bash
+        env:
+          TENDER_DATABASE_URL: ${{ secrets.TENDER_DATABASE_URL }}
+        run: |
+          if [[ -z "${TENDER_DATABASE_URL:-}" ]]; then
+            echo "::error::TENDER_DATABASE_URL is missing. Add it under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          if [[ "$TENDER_DATABASE_URL" != postgresql://* && "$TENDER_DATABASE_URL" != postgres://* ]]; then
+            echo "::error::TENDER_DATABASE_URL must be a PostgreSQL URI from Supabase Connect -> Session pooler."
+            exit 1
+          fi
+          if [[ ! -f migration_0_2.sql ]]; then
+            echo "::error::migration_0_2.sql was not found in the repository."
+            exit 1
+          fi
+          echo "Database URL secret found; migration file found. No credentials will be printed."
+
+      - name: Install PostgreSQL client if necessary
+        shell: bash
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql-client
+          fi
+
+      - name: Apply Tender 0.2 migration
+        shell: bash
+        env:
+          TENDER_DATABASE_URL: ${{ secrets.TENDER_DATABASE_URL }}
+          PGSSLMODE: require
+          PGCONNECT_TIMEOUT: "20"
+        run: |
+          # No shell tracing: never log the database password.
+          set +x
+          # migration_0_2.sql contains BEGIN/COMMIT, so errors roll back changes.
+          psql --no-psqlrc --quiet --set ON_ERROR_STOP=1 --dbname="$TENDER_DATABASE_URL" --file=migration_0_2.sql
+          echo "Tender 0.2 migration completed successfully."
