@@ -2,6 +2,21 @@
 
 A manual GitHub Actions workflow executes the existing `migration_0_2.sql` against your **existing Supabase project**. There is no need to paste SQL into your phone.
 
+## Fix: GitHub Actions says `Network is unreachable`
+
+If the log mentions `db.svrculrtxjudkcljhutn.supabase.co` and an IPv6 address, the secret contains the **Direct connection** URL. GitHub's runner can't reach that IPv6 address on Supabase's free plan.
+
+**You do not need to rerun or paste SQL, reset your password, or create a new project.**
+
+1. In the **existing Tender** Supabase project, click **Connect**.
+2. Change connection type from **Direct connection** to **Session pooler** (not Transaction pooler). Choose **URI** and verify port **5432**.
+3. Copy the whole URI. It will have a host such as `aws-0-REGION.pooler.supabase.com` (actual host varies), and the username must be `postgres.svrculrtxjudkcljhutn`. **Do not invent the pooler host; copy it from Supabase.**
+4. Replace the `[YOUR-PASSWORD]` portion privately with your database password (URL-encode special characters).
+5. Go to [GitHub Actions secrets](https://github.com/FYRIX341/Tender/settings/secrets/actions), click the **existing** `TENDER_DATABASE_URL`, then **Update secret** and replace its value with the complete Session pooler URI.
+6. Return to [Run Tender 0.2 Migration](https://github.com/FYRIX341/Tender/actions/workflows/migrate-tender.yml), click **Run workflow**, select `main`, and run again.
+
+The workflow now rejects direct/incorrect connection hosts **before** running any SQL, with an explanation that doesn't expose the secret.
+
 ## One-time setup
 
 1. Open your existing **Tender** project in [Supabase](https://supabase.com/dashboard/projects).
