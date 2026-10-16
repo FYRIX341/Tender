@@ -1,6 +1,6 @@
 name: Run Tender 0.2 Migration
 
-# Manual-only. Does NOT run on normal code pushes or Pages deployments.
+# Manual-only. Uses the Supabase HTTPS Management API (not an IPv6 PostgreSQL connection).
 on:
   workflow_dispatch:
 
@@ -13,86 +13,95 @@ concurrency:
 
 jobs:
   migrate:
-    name: Apply existing Tender 0.2 SQL
+    name: Apply Tender 0.2 over Supabase HTTPS API
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout migration file
+      - name: Checkout existing SQL migration
         uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Verify safe setup
+      - name: Run Supabase migration via HTTPS (no database connection URL)
         shell: bash
         env:
-          TENDER_DATABASE_URL: ${{ secrets.TENDER_DATABASE_URL }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          if [[ -z "${TENDER_DATABASE_URL:-}" ]]; then
-            echo "::error::TENDER_DATABASE_URL is missing. Add it under Settings -> Secrets and variables -> Actions."
-            exit 1
-          fi
-          if [[ "$TENDER_DATABASE_URL" != postgresql://* && "$TENDER_DATABASE_URL" != postgres://* ]]; then
-            echo "::error::TENDER_DATABASE_URL must be a PostgreSQL URI from Supabase Connect -> Session pooler."
-            exit 1
-          fi
-          # Parse only the host/user/port: NEVER print credentials or connection URI.
-          python3 - <<'PY'
-          import os
-          import sys
-          from urllib.parse import urlsplit
-          raw = os.environ["TENDER_DATABASE_URL"].strip()
-          # Check for the incorrect direct host even when brackets make the URI unparseable.
-          if "db.svrculrtxjudkcljhutn.supabase.co" in raw.lower():
-              print("::error::Your saved GitHub secret still contains Tender's DIRECT Supabase database hostname. It cannot be reached by this GitHub runner. Open Supabase -> Connect -> Session pooler, copy that whole URI (port 5432), and UPDATE the existing TENDER_DATABASE_URL secret.")
-              sys.exit(1)
-          try:
-              uri = urlsplit(raw)
-              host = (uri.hostname or "").lower()
-              username = uri.username or ""
-              port = uri.port
-          except ValueError:
-              print("::error::Malformed PostgreSQL connection URI. Copy the full Session pooler URI exactly from Supabase -> Connect. Do not put [square brackets] around the host or paste the [YOUR-PASSWORD] placeholder. Never share the full URI or password.")
-              sys.exit(1)
-          if not uri.password or uri.password == "[YOUR-PASSWORD]":
-              print("::error::Database password missing or still a placeholder. Replace [YOUR-PASSWORD] privately in the copied Session pooler URI (URL-encode special characters).")
-              sys.exit(1)
-          if host.startswith("db.") and host.endswith(".supabase.co"):
-              print("::error::Direct Supabase connection is IPv6-only on the free plan and GitHub Actions cannot reach it. In Supabase -> Connect, choose Session pooler (port 5432), then UPDATE GitHub secret TENDER_DATABASE_URL with that full connection URI.")
-              sys.exit(1)
-          if not host.endswith(".pooler.supabase.com") or port != 5432:
-              print("::error::Use Supabase's SESSION POOLER URI (host ends in .pooler.supabase.com, port 5432). Do not use Direct or Transaction pooler.")
-              sys.exit(1)
-          if username != "postgres.svrculrtxjudkcljhutn":
-              print("::error::The session-pooler username must be postgres.<Tender project ref>. Copy the entire Session pooler URI from the Tender Supabase project's Connect dialog.")
-              sys.exit(1)
-          if uri.path != "/postgres":
-              print("::error::The session-pooler URI must point to the postgres database. Copy the entire URI from Supabase Connect.")
-              sys.exit(1)
-          print("Session pooler URL validated (host/username/port, no credentials printed).")
-          PY
-          if [[ ! -f migration_0_2.sql ]]; then
-            echo "::error::migration_0_2.sql was not found in the repository."
-            exit 1
-          fi
-          echo "Database URL secret found; migration file found. No credentials will be printed."
-
-      - name: Install PostgreSQL client if necessary
-        shell: bash
-        run: |
-          if ! command -v psql >/dev/null 2>&1; then
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq postgresql-client
-          fi
-
-      - name: Apply Tender 0.2 migration
-        shell: bash
-        env:
-          TENDER_DATABASE_URL: ${{ secrets.TENDER_DATABASE_URL }}
-          PGSSLMODE: require
-          PGCONNECT_TIMEOUT: "20"
-        run: |
-          # No shell tracing: never log the database password.
           set +x
-          # migration_0_2.sql contains BEGIN/COMMIT, so errors roll back changes.
-          psql --no-psqlrc --quiet --set ON_ERROR_STOP=1 --dbname="$TENDER_DATABASE_URL" --file=migration_0_2.sql
-          echo "Tender 0.2 migration completed successfully."
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
+          import urllib.error
+          import urllib.request
+
+          project_ref = "svrculrtxjudkcljhutn"
+          token = os.getenv("SUPABASE_ACCESS_TOKEN", "").strip()
+          sql_path = pathlib.Path("migration_0_2.sql")
+
+          if not token:
+              print("::error::Missing SUPABASE_ACCESS_TOKEN. Create a scoped token at supabase.com/dashboard/account/tokens with Database Read & Write access to your Tender project; save it privately in GitHub Actions Secrets as SUPABASE_ACCESS_TOKEN.")
+              sys.exit(1)
+          if not token.startswith("sbp_"):
+              print("::error::This must be a Supabase PERSONAL ACCESS TOKEN (sbp_...), not the publishable key, database password, or PostgreSQL URL.")
+              sys.exit(1)
+          if not sql_path.is_file():
+              print("::error::migration_0_2.sql was not found; no SQL was run.")
+              sys.exit(1)
+          sql = sql_path.read_text(encoding="utf-8")
+          if not sql.strip().startswith("-- Tender 0.2") or "BEGIN;" not in sql or "COMMIT;" not in sql:
+              print("::error::The Tender 0.2 migration is missing expected transaction guards; refusing to run.")
+              sys.exit(1)
+
+          endpoint = f"https://api.supabase.com/v1/projects/{project_ref}/database/query"
+          def run_query(statement, read_only=False):
+              body = json.dumps({"query": statement, "read_only": read_only}).encode("utf-8")
+              request = urllib.request.Request(
+                  endpoint,
+                  data=body,
+                  headers={
+                      "Authorization": "Bearer " + token,
+                      "Content-Type": "application/json",
+                      "Accept": "application/json",
+                      "User-Agent": "Tender-GitHub-Migration/0.2",
+                  },
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=180) as response:
+                      response_body = response.read(65536).decode("utf-8", "replace")
+                      if response.status not in (200, 201, 204):
+                          raise RuntimeError(f"Unexpected HTTP {response.status}")
+              except urllib.error.HTTPError as err:
+                  response_body = err.read(2048).decode("utf-8", "replace")
+                  # Never print a token if the provider reflects an Authorization value.
+                  response_body = response_body.replace(token, "[REDACTED]")
+                  print(f"::error::Supabase Management API returned HTTP {err.code}.")
+                  if err.code == 401:
+                      print("::error::Token is invalid or expired; check the SUPABASE_ACCESS_TOKEN secret.")
+                  elif err.code == 403:
+                      print("::error::Token needs Database -> Read & Write for this Tender project, or your Supabase account lacks permission.")
+                  elif err.code == 404:
+                      print("::error::Database query API is unavailable for this project/account. No IPv6 database connection was attempted.")
+                  else:
+                      print("::error::API error detail (no credential): " + response_body[:1500])
+                  sys.exit(1)
+              except (urllib.error.URLError, TimeoutError) as err:
+                  print("::error::Supabase HTTPS request failed or timed out; do not rerun blindly because a timeout may occur after the query starts.")
+                  sys.exit(1)
+              try:
+                  parsed = json.loads(response_body) if response_body.strip() else None
+              except json.JSONDecodeError:
+                  parsed = None
+              if isinstance(parsed, dict) and parsed.get("error"):
+                  print("::error::Supabase reported SQL/API error (no credentials printed): " + str(parsed["error"])[:1500].replace(token, "[REDACTED]"))
+                  sys.exit(1)
+              return parsed
+
+          # Preflight checks token and project without modifying data.
+          run_query("SELECT 1 AS tender_connection_check;", read_only=True)
+          print("Supabase HTTPS API authenticated to Tender. Applying the unchanged 0.2 migration...")
+          run_query(sql, read_only=False)
+          print("Tender 0.2 SQL migration request succeeded. Check the app and SQL tables to verify the resulting changes.")
+          PY
