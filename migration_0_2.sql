@@ -9,6 +9,7 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS profile_effect text NOT NUL
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS chat_theme text NOT NULL DEFAULT 'dark' CHECK (chat_theme IN ('dark','light','midnight','cozy'));
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS notification_mode text NOT NULL DEFAULT 'all' CHECK (notification_mode IN ('all','mentions','none'));
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS notification_sound boolean NOT NULL DEFAULT true;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS notification_tone text NOT NULL DEFAULT 'pop' CHECK(notification_tone IN ('pop','chime','soft'));
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS allow_dm_requests boolean NOT NULL DEFAULT false;
 
 ALTER TABLE public.pieces ADD COLUMN IF NOT EXISTS banner_url text;
@@ -155,7 +156,7 @@ CREATE POLICY "blocks own delete" ON public.user_blocks FOR DELETE TO authentica
 -- DM sends are stopped if either participant blocks the other.
 CREATE OR REPLACE FUNCTION public.can_send_tender_dm(cid uuid, uid uuid)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
-SELECT NOT EXISTS (
+SELECT uid=auth.uid() AND NOT EXISTS (
  SELECT 1 FROM public.conversations c JOIN public.conversation_members cm ON cm.conversation_id=c.id
  JOIN public.user_blocks b ON (b.blocker_id=cm.user_id AND b.blocked_id=uid) OR (b.blocker_id=uid AND b.blocked_id=cm.user_id)
  WHERE c.id=cid AND c.kind='dm'
@@ -167,8 +168,13 @@ CREATE POLICY "messages send own" ON public.messages FOR INSERT TO authenticated
  AND public.can_send_tender_dm(conversation_id,auth.uid())
 );
 
+CREATE OR REPLACE FUNCTION public.can_tender_friend(a uuid,b uuid)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
+SELECT a=auth.uid() AND NOT EXISTS(SELECT 1 FROM public.user_blocks WHERE (blocker_id=a AND blocked_id=b) OR (blocker_id=b AND blocked_id=a)); $$;
+REVOKE ALL ON FUNCTION public.can_tender_friend(uuid,uuid) FROM public,anon;
+GRANT EXECUTE ON FUNCTION public.can_tender_friend(uuid,uuid) TO authenticated;
 DROP POLICY IF EXISTS "friendships request" ON public.friendships;
-CREATE POLICY "friendships request" ON public.friendships FOR INSERT TO authenticated WITH CHECK(requester=auth.uid() AND status='pending' AND NOT EXISTS (SELECT 1 FROM public.user_blocks b WHERE b.blocker_id=auth.uid() AND b.blocked_id=recipient));
+CREATE POLICY "friendships request" ON public.friendships FOR INSERT TO authenticated WITH CHECK(requester=auth.uid() AND status='pending' AND public.can_tender_friend(requester,recipient));
 
 CREATE TABLE IF NOT EXISTS public.piece_events (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
