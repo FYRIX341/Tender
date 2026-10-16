@@ -35,6 +35,32 @@ jobs:
             echo "::error::TENDER_DATABASE_URL must be a PostgreSQL URI from Supabase Connect -> Session pooler."
             exit 1
           fi
+          # Parse only the host/user/port: NEVER print credentials or connection URI.
+          python3 - <<'PY'
+          import os
+          import sys
+          from urllib.parse import urlsplit
+          uri = urlsplit(os.environ["TENDER_DATABASE_URL"])
+          host = (uri.hostname or "").lower()
+          username = uri.username or ""
+          try:
+              port = uri.port
+          except ValueError:
+              port = None
+          if host.startswith("db.") and host.endswith(".supabase.co"):
+              print("::error::Direct Supabase connection is IPv6-only on the free plan and GitHub Actions cannot reach it. In Supabase -> Connect, choose Session pooler (port 5432), then UPDATE GitHub secret TENDER_DATABASE_URL with that full connection URI.")
+              sys.exit(1)
+          if not host.endswith(".pooler.supabase.com") or port != 5432:
+              print("::error::Use Supabase's SESSION POOLER URI (host ends in .pooler.supabase.com, port 5432). Do not use Direct or Transaction pooler.")
+              sys.exit(1)
+          if username != "postgres.svrculrtxjudkcljhutn":
+              print("::error::The session-pooler username must be postgres.<Tender project ref>. Copy the entire Session pooler URI from the Tender Supabase project's Connect dialog.")
+              sys.exit(1)
+          if uri.path != "/postgres":
+              print("::error::The session-pooler URI must point to the postgres database. Copy the entire URI from Supabase Connect.")
+              sys.exit(1)
+          print("Session pooler URL validated (host/username/port, no credentials printed).")
+          PY
           if [[ ! -f migration_0_2.sql ]]; then
             echo "::error::migration_0_2.sql was not found in the repository."
             exit 1
