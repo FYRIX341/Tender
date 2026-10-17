@@ -43,6 +43,26 @@ BEGIN
  END IF;
 END $$;
 CREATE INDEX IF NOT EXISTS tender_channel_message_idx ON public.piece_messages(channel_id,created_at);
+
+-- A category editor must never move a channel into a different Piece or
+-- change #general's default identity; older messages map to that channel.
+CREATE OR REPLACE FUNCTION public.tender_guard_channel_identity()
+RETURNS trigger LANGUAGE plpgsql SET search_path=''
+AS $tender$
+BEGIN
+ IF NEW.piece_id IS DISTINCT FROM OLD.piece_id
+    OR NEW.is_default IS DISTINCT FROM OLD.is_default
+    OR (OLD.is_default AND NEW.name IS DISTINCT FROM OLD.name) THEN
+   RAISE EXCEPTION 'The Piece, default flag and #general identity cannot be changed';
+ END IF;
+ RETURN NEW;
+END;
+$tender$;
+DROP TRIGGER IF EXISTS tender_guard_channel_identity_trigger ON public.piece_channels;
+CREATE TRIGGER tender_guard_channel_identity_trigger
+ BEFORE UPDATE ON public.piece_channels
+ FOR EACH ROW EXECUTE FUNCTION public.tender_guard_channel_identity();
+
 CREATE TABLE IF NOT EXISTS public.piece_channel_reads(
  channel_id uuid NOT NULL REFERENCES public.piece_channels(id) ON DELETE CASCADE,
  user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -101,6 +121,12 @@ END $$;
 DROP TRIGGER IF EXISTS tender_piece_create_general ON public.pieces;
 CREATE TRIGGER tender_piece_create_general AFTER INSERT ON public.pieces
  FOR EACH ROW EXECUTE FUNCTION public.tender_ensure_general_channel();
+-- Permit actual animated profile GIF uploads. The original public buckets
+-- were intentionally image-only; this changes their allowed MIME list, not access.
+UPDATE storage.buckets
+ SET allowed_mime_types=ARRAY['image/png','image/jpeg','image/webp','image/gif']
+ WHERE id IN ('tender-avatars','tender-banners');
+
 -- Existing default messages remain linked to their Piece via piece_id and map to #general.
 -- Profile and Piece owners may customize new fields through existing owner/self update RLS.
 COMMIT;
