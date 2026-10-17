@@ -409,7 +409,7 @@ function scheduleReconcile(active=true,kind='',event=null){
    if(['messages','piece_messages','reactions','poll_votes','conversation_reads'].includes(kind)){
      if(selected&&((area==='chats')||(['pieces','discover'].includes(area)&&tab==='chat'))){
        await loadActive();
-       if(selected===state.selected&&area===state.area&&tab===state.pieceTab)syncActiveStream();
+       if(selected===state.selected&&area===state.area&&tab===state.pieceTab){syncActiveStream();if(kind==='piece_messages'&&document.visibilityState==='visible')markChannelRead().catch(console.warn)}
      }
    }else{
      await refreshData();if(active&&selected)await loadActive();
@@ -951,7 +951,7 @@ async function loadActive(){
  activeMessages=fresh;activeReactions=reactions;activePosts=posts;activeGallery=gallery;
  await Promise.all([prepareAttachmentUrls(),loadPolls()]);
 }
-async function goTo(area,id=null){state.area=area;state.selected=id;state.search='';state.mobileDetail=!!id||['discover','settings'].includes(area);if(area==='friends'&&!id)state.mobileDetail=true;if(area==='pieces'||area==='discover')state.pieceTab='chat';state.channelId=channelsFor(id).find(c=>c.is_default)?.id||channelsFor(id)[0]?.id||null;replyTo=null;if(id&&['chats','pieces','discover'].includes(area))await loadActive();if(state.area!==area||state.selected!==id)return;applyLocalAppearance();render();if(area==='chats'&&id){markRead(id);subscribeTyping().catch(console.warn)}else if(['pieces','discover'].includes(area)&&id&&state.pieceTab==='chat'){subscribeTyping().catch(console.warn)}else{unsubTyping()}if(area==='friends')markRead(null,true);}
+async function goTo(area,id=null){state.area=area;state.selected=id;state.search='';state.mobileDetail=!!id||['discover','settings'].includes(area);if(area==='friends'&&!id)state.mobileDetail=true;if(area==='pieces'||area==='discover')state.pieceTab='chat';state.channelId=channelsFor(id).find(c=>c.is_default)?.id||channelsFor(id)[0]?.id||null;replyTo=null;if(id&&['chats','pieces','discover'].includes(area))await loadActive();if(state.area!==area||state.selected!==id)return;applyLocalAppearance();render();if(area==='chats'&&id){markRead(id);subscribeTyping().catch(console.warn)}else if(['pieces','discover'].includes(area)&&id&&state.pieceTab==='chat'){markChannelRead().catch(console.warn);subscribeTyping().catch(console.warn)}else{unsubTyping()}if(area==='friends')markRead(null,true);}
 let confirmationResolve=null;
 function tenderConfirm(title,description,action='Confirm',danger=true){
  if(confirmationResolve){confirmationResolve(false);confirmationResolve=null}
@@ -1005,6 +1005,22 @@ function newPieceModal(p=null){
      <div class="field"><label>Banner image (max 3 MB)</label><input class="input" type="file" name="banner" accept="image/png,image/jpeg,image/webp"></div>`:''}
    <p class="hint">Only the Piece owner can edit its name, image and settings.</p>
    <button class="btn full top-spacer" type="submit">${editing?'Save Piece changes':'Create Piece'} 🍗</button>
+ </form>`);
+}
+function channelEditorModal(channel=null){
+ const piece=selectedPiece();
+ if(!piece||!channelReady)return toast('Channels will be available when Tender 0.4 migration completes.',true);
+ if(!memberships.some(m=>m.piece_id===piece.id&&m.user_id===user.id&&['owner','moderator'].includes(m.role)))return toast('Only Piece staff can manage channels.',true);
+ modal(channel?'Edit #'+channel.name:'Create channel', 'Give this Piece a place for a specific topic.',`
+ <form id="channel-form" class="channel-form">
+ <input type="hidden" name="id" value="${esc(channel?.id||'')}">
+ <div class="field"><label>Channel name</label><input name="name" class="input" required maxlength="40" pattern="[a-z0-9][a-z0-9_-]*" value="${esc(channel?.name||'')}" placeholder="general-chat"></div>
+ <div class="field"><label>Channel type</label><select class="input" name="kind"><option value="text" ${channel?.kind!=='announcements'?'selected':''}># Text chat</option><option value="announcements" ${channel?.kind==='announcements'?'selected':''}>📣 Announcements</option></select></div>
+ <div class="field"><label>Category</label><input name="category" class="input" maxlength="35" required value="${esc(channel?.category||'TEXT CHANNELS')}" placeholder="TEXT CHANNELS"></div>
+ <div class="field"><label>Topic</label><textarea name="topic" class="input textarea" maxlength="280" rows="2" placeholder="What is this channel about?">${esc(channel?.topic||'')}</textarea></div>
+ <div class="field"><label>Sort order</label><input type="number" name="position" class="input" min="0" max="999" value="${Number(channel?.position||0)}"></div>
+ <button class="btn full" type="submit">${channel?'Save channel':'Create channel'}</button>
+ ${channel&&!channel.is_default?`<button class="btn danger full" type="button" data-action="delete-channel" data-id="${esc(channel.id)}">Delete channel</button>`:''}
  </form>`);
 }
 function newPostModal(){modal('New discussion','Start a topic in '+selectedPiece().name,`<form id="post-form"><div class="field"><label>Title</label><input class="input" name="title" maxlength="130" minlength="3" required placeholder="What should we discuss?"></div><div class="field"><label>Post</label><textarea class="input textarea" name="body" maxlength="8000" required placeholder="Write something interesting..."></textarea></div><div class="field"><label>Tags (comma-separated, optional)</label><input class="input" name="tags" maxlength="100" placeholder="art, help, questions"></div><button class="btn full" type="submit">Publish discussion</button></form>`)}
@@ -1211,8 +1227,32 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='go-back'){state.mobileDetail=false;state.selected=null;render();return}
  if(a==='open-chat'){await goTo('chats',id);return}
  if(a==='open-friend'){await goTo('friends',id);return}
+ if(a==='rail-piece'){await goTo('pieces',id);return}
+ if(a==='select-channel'){
+  const selected=pieceChannels.find(c=>c.id===id&&c.piece_id===state.selected);
+  if(!selected||!inPiece(selected.piece_id))return toast('Channel unavailable.',true);
+  if(state.channelId===id&&state.pieceTab==='chat')return;
+  state.channelId=id;state.pieceTab='chat';replyTo=null;
+  await loadActive();renderSidebar();renderMain();markChannelRead().catch(console.warn);subscribeTyping().catch(console.warn);return;
+ }
+ if(a==='piece-home'){state.pieceTab='forum';await loadActive();renderSidebar();renderMain();unsubTyping();return}
+ if(a==='new-channel'){channelEditorModal();return}
+ if(a==='edit-channel'){
+  const selected=pieceChannels.find(c=>c.id===id&&c.piece_id===state.selected);
+  if(selected)channelEditorModal(selected);return;
+ }
+ if(a==='delete-channel'){
+  const selected=pieceChannels.find(c=>c.id===id&&c.piece_id===state.selected&&!c.is_default);
+  if(!selected||!ownPiece(selected.piece_id))return toast('Only the owner can remove this channel.',true);
+  if(!await tenderConfirm('Delete #'+selected.name+'?','Its messages will remain in the Piece and move back to #general.','Delete channel'))return;
+  await safe(async()=>{
+   assert(await q('piece_channels').delete().eq('id',selected.id).eq('piece_id',state.selected));
+   closeModal();await loadChannelData();state.channelId=channelsFor(state.selected).find(c=>c.is_default)?.id||null;
+   state.pieceTab='chat';await loadActive();render();toast('Channel deleted. Messages moved to #general.');
+  });return;
+ }
  if(a==='open-piece'){await goTo(state.area==='discover'?'discover':'pieces',id);return}
- if(a==='piece-tab'){state.pieceTab=tab;await loadActive();renderMain();if(tab==='chat')subscribeTyping().catch(console.warn);else unsubTyping();return}
+ if(a==='piece-tab'){state.pieceTab=tab;await loadActive();renderSidebar();renderMain();if(tab==='chat'){markChannelRead().catch(console.warn);subscribeTyping().catch(console.warn)}else unsubTyping();return}
  if(a==='new-chat'){newChatModal();return}
  if(a==='new-piece'){newPieceModal();return}
  if(a==='edit-piece'){newPieceModal(selectedPiece());return}
@@ -1255,6 +1295,27 @@ async function submitForm(form){switch(form.id){
  case'composer-form':return sendMessage(form);
  case'friend-search-form':return safe(async()=>{let h=String(new FormData(form).get('handle')).trim().toLowerCase();let target=assert(await q('profiles').select('id,handle,display_name,avatar_url').eq('handle',h).maybeSingle());let res=document.getElementById('friend-search-results');if(!res)return;if(!target){res.innerHTML='<p class="notice-inline">No user with that username. Double-check their spelling.</p>';return}if(target.id===user.id){res.innerHTML='<p class="notice-inline">That\'s you, Buffalo! 🍗</p>';return}let f=friendships.find(f=>[f.requester,f.recipient].includes(user.id)&&[f.requester,f.recipient].includes(target.id));res.innerHTML=`<div class="friend-row">${profileFace(target)}<div class="friend-data">${profileName(target)}<p>@${esc(target.handle)}</p></div>${f?`<span class="tag">${esc(f.status)}</span>`:`<button class="btn sm" data-action="request-friend" data-id="${target.id}">Add friend</button>`}</div>`;return});
  case'group-form':return safe(async()=>{let data=new FormData(form),name=String(data.get('group_name')).trim(),members=data.getAll('member');let cid=assert(await db.rpc('start_group',{group_name:name,member_ids:members}));closeModal();await refreshData();await goTo('chats',cid);toast('Group created!')});
+ case'channel-form':return safe(async()=>{
+  if(!channelReady)throw Error('Channel backend is not ready.');
+  const d=new FormData(form),piece=selectedPiece(),staff=memberships.some(m=>m.piece_id===piece?.id&&m.user_id===user.id&&['owner','moderator'].includes(m.role));
+  if(!piece||!staff)throw Error('Only Piece staff can manage channels.');
+  const name=String(d.get('name')||'').trim().toLowerCase().replace(/\s+/g,'-');
+  if(!/^[a-z0-9][a-z0-9_-]{0,39}$/.test(name))throw Error('Use 1–40 lowercase letters, numbers, _ or - in a channel name.');
+  const data={piece_id:piece.id,name,kind:d.get('kind')==='announcements'?'announcements':'text',topic:String(d.get('topic')||'').trim().slice(0,280),
+   category:String(d.get('category')||'TEXT CHANNELS').trim().slice(0,35)||'TEXT CHANNELS',
+   position:Math.min(999,Math.max(0,Number(d.get('position'))||0))};
+  const id=String(d.get('id')||'');
+  if(id){
+   const existing=pieceChannels.find(c=>c.id===id&&c.piece_id===piece.id);
+   if(!existing)throw Error('Channel no longer exists.');
+   assert(await q('piece_channels').update(data).eq('id',id).eq('piece_id',piece.id));
+  }else{
+   const added=assert(await q('piece_channels').insert(data).select('id').single());
+   state.channelId=added.id;
+  }
+  await loadChannelData();closeModal();state.pieceTab='chat';await loadActive();render();
+  markChannelRead().catch(console.warn);toast(id?'Channel saved!':'New channel created! 🍗');
+ });
  case'piece-form':return safe(async()=>{
   const d=new FormData(form),name=String(d.get('name')||'').trim(),description=String(d.get('description')||'').trim();
   const color=String(d.get('color')||'#f47735'),is_public=d.get('visibility')==='public';
