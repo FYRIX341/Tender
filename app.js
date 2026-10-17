@@ -320,7 +320,10 @@ async function authSubmit(form){const data=new FormData(form), email=String(data
  await safe(async()=>{if(state.loginMode==='signup'){const handle=String(data.get('handle')).trim().toLowerCase(),display_name=String(data.get('display_name')).trim();if(!/^[a-z0-9_]{3,20}$/.test(handle))throw Error('Username needs 3–20 letters, numbers or underscores.');const r=await db.auth.signUp({email,password,options:{data:{handle,display_name},emailRedirectTo:location.origin+location.pathname}});assert(r);toast(r.data.session?'Welcome to Tender!':'Check your inbox to confirm your email, then sign in.');if(!r.data.session){state.loginMode='login';renderAuth()}}
  else{assert(await db.auth.signInWithPassword({email,password}));toast('Welcome back! 🍗')}})}
 async function initialize(){ROOT.innerHTML='<div class="loading-screen"><img src="buffalo.webp" alt="Buffalo"><h1>tender<span>.</span></h1><p>Loading your messages...</p></div>';try{await refreshData();applyTheme();render();subscribe();if(extendedReady)renderNavBadges();
-  const invitation=new URLSearchParams(window.location.search).get('piece');
+  const params=new URLSearchParams(window.location.search);
+   const targetChat=params.get('chat');
+   if(targetChat&&conversations.some(c=>c.id===targetChat))await goTo('chats',targetChat);
+   const invitation=params.get('piece');
   if(invitation&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invitation)&&pieces.some(p=>p.id===invitation))await goTo('pieces',invitation);
  }catch(e){toast(e.message||'Unable to load the app',true);ROOT.innerHTML=empty('Something went wrong','Could not load Tender. Try refreshing.') }}
 async function refreshData(){if(!user)return;const [a,b,c,d,e]=await Promise.all([q('profiles').select('*').order('created_at',{ascending:false}).limit(300),q('friendships').select('*'),q('conversations').select('*,conversation_members(user_id)').order('created_at',{ascending:false}),q('pieces').select('*').order('created_at',{ascending:false}).limit(100),q('piece_members').select('*')]);profiles=assert(a)||[];my=profiles.find(x=>x.id===user.id)||{id:user.id,handle:'member',display_name:user.email||'Account'};friendships=assert(b)||[];conversations=assert(c)||[];pieces=assert(d)||[];memberships=assert(e)||[];await refreshExtras();}
@@ -867,6 +870,29 @@ document.addEventListener('dblclick',event=>{
 document.addEventListener('submit',event=>{if(event.target.matches('form')){event.preventDefault();submitForm(event.target).catch(e=>{console.error(e);toast(e.message||'Error',true)})}});
 document.addEventListener('click',event=>{let t=event.target.closest('[data-action]');if(!t)return;if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
 document.addEventListener('input',e=>{if(e.target.id==='message-box'&&user&&state.selected){const key='tender-draft:'+user.id+':'+[state.area,state.selected,state.pieceTab].join(':');if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
+// Type-to-chat works like a desktop messenger: printable keystrokes land
+// in the current composer, never in settings or behind an open modal.
+document.addEventListener('keydown',event=>{
+ if(event.defaultPrevented||event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
+ if(event.key.length!==1||event.target?.closest?.('input,textarea,select,button,[contenteditable="true"],[role="dialog"]'))return;
+ if(document.getElementById('modal-root')?.children?.length)return;
+ if(!user||!state.selected||!(state.area==='chats'||(['pieces','discover'].includes(state.area)&&state.pieceTab==='chat')))return;
+ const field=document.getElementById('message-box');
+ if(!field||field.disabled||!field.isConnected||field.getClientRects().length===0)return;
+ event.preventDefault();
+ field.focus();
+ const caret=Number.isInteger(field.selectionStart)?field.selectionStart:field.value.length;
+ const end=Number.isInteger(field.selectionEnd)?field.selectionEnd:caret;
+ field.setRangeText(event.key,caret,end,'end');
+ field.dispatchEvent(new Event('input',{bubbles:true}));
+});
+if('serviceWorker' in navigator){
+ navigator.serviceWorker.addEventListener('message',event=>{
+  if(event.data?.type==='tender-notification-open'&&user&&event.data.conversationId&&conversations.some(c=>c.id===event.data.conversationId)){
+   goTo('chats',event.data.conversationId).catch(console.warn);
+  }
+ });
+}
 document.addEventListener('keydown',e=>{
  if(e.target?.matches?.('[data-split]')&&['ArrowLeft','ArrowRight','Home'].includes(e.key)){
    e.preventDefault();const which=e.target.dataset.split,spec=splitterSpec[which],dir=which==='info'?-1:1;
