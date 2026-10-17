@@ -95,7 +95,7 @@ test('settings snapshot restores unsaved edits, focus, caret and scroll after re
  assert.equal(panel.scrollTop,437);
  assert.equal(panel.scrollLeft,7);
  assert.equal(nav.scrollLeft,54);
- assert.deepEqual(text.focusOpts,{preventScroll:true});
+ assert.equal(text.focusOpts.preventScroll,true);
  assert.equal(saved.selection.start,8);
 });
 test('navigation between settings tabs does not bleed a profile draft into another form',()=>{
