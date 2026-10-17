@@ -39,19 +39,33 @@ const esc=(value='')=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<'
 const fmt = iso => {try{return new Date(iso).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});}catch{return ''}};
 const relative = iso => {let d=(Date.now()-new Date(iso).getTime())/1000;return d<60?'just now':d<3600?Math.floor(d/60)+'m ago':d<86400?Math.floor(d/3600)+'h ago':new Date(iso).toLocaleDateString();};
 const validUrl = url => {try{let u=new URL(url,location.origin);return ['http:','https:'].includes(u.protocol)?u.href:'#';}catch{return '#'}};
+const tenderSafeColor=(value,fallback='#f47735')=>/^#[0-9a-f]{6}$/i.test(String(value||''))?value:fallback;
+const nameStyles=['classic','serif','mono','rounded','display','retro'];
+const nameEffects=['solid','gradient','neon','shadow'];
+function styledName(person,tag='span'){
+ const style=nameStyles.includes(person?.name_style)?person.name_style:'classic';
+ const effect=nameEffects.includes(person?.name_effect)?person.name_effect:'solid';
+ const color=tenderSafeColor(person?.name_color,'#ffffff');
+ const first=tenderSafeColor(person?.profile_gradient_start,'#21385d'),second=tenderSafeColor(person?.profile_gradient_end,'#563561');
+ return `<${tag} class="tender-styled-name name-font-${style} name-effect-${effect}" style="--name-color:${esc(color)};--name-gradient-a:${esc(first)};--name-gradient-b:${esc(second)}">${esc(person?.display_name||'Tender member')}</${tag}>`;
+}
+function profileGradientStyle(p){
+ const a=tenderSafeColor(p?.profile_gradient_start,'#21385d'),b=tenderSafeColor(p?.profile_gradient_end,'#563561');
+ return `--profile-start:${esc(a)};--profile-end:${esc(b)};`;
+}
 const avatars = p => `<span class="avatar md">${p?.avatar_url?`<img src="${esc(validUrl(p.avatar_url))}" alt="">`:esc((p?.display_name||p?.handle||'?').slice(0,1).toUpperCase())}</span>`;
 // Piece avatars reuse the existing text "icon" column: HTTPS storage image URL or legacy emoji.
 // Existing emoji icons remain compatible; no SQL migration is necessary.
 const pieceHasPhoto = p => typeof p?.icon==='string' && /^https:\/\//i.test(p.icon) && validUrl(p.icon)!=='#';
 function pieceAvatar(p,extra=''){
  const color=/^#[0-9a-f]{6}$/i.test(p?.color||'')?p.color:'#f47735';
- return `<span class="piece-avatar ${esc(extra)}" style="background:${esc(color)}33">${pieceHasPhoto(p)?`<img class="piece-avatar-image" src="${esc(validUrl(p.icon))}" alt="" loading="lazy">`:esc(p?.icon||'🍗')}</span>`;
+ return `<span class="piece-avatar ${esc(extra)} piece-shape-${['round','rounded','square','squircle'].includes(p?.icon_shape)?p.icon_shape:'rounded'}" style="background:${esc(color)}33">${pieceHasPhoto(p)?`<img class="piece-avatar-image" src="${esc(validUrl(p.icon))}" alt="" loading="lazy">`:esc(p?.icon||'🍗')}</span>`;
 }
-const profileFace=p=>`<button type="button" class="profile-click profile-face" data-action="open-profile" data-id="${esc(p.id||'')}" aria-label="View ${esc(p.display_name||'member')}'s profile" title="View profile">${avatars(p)}</button>`;
-const profileName=p=>`<button type="button" class="profile-click profile-name" data-action="open-profile" data-id="${esc(p.id||'')}" title="View ${esc(p.display_name||'member')}'s profile">${esc(p.display_name||'Tender member')}</button>`;
+const profileFace=p=>`<button type="button" class="profile-click profile-face" data-action="mini-profile" data-id="${esc(p.id||'')}" aria-label="View ${esc(p.display_name||'member')}'s profile" title="View profile">${avatars(p)}</button>`;
+const profileName=p=>`<button type="button" class="profile-click profile-name" data-action="mini-profile" data-id="${esc(p.id||'')}" title="View ${esc(p.display_name||'member')}'s profile">${styledName(p)}</button>`;
 const config = window.TENDER_CONFIG || {};
 let db, session, user, my, profiles=[], friendships=[], conversations=[], pieces=[], memberships=[], activeMessages=[], activePosts=[], activeGallery=[], activeComments=[], activeReactions=[], activeMembers=[], selectedPost=null, channel=null;
-let state={area:'chats', selected:null, pieceTab:'chat', settingsTab:'profile', search:'', loginMode:'login', mobileDetail:false, setup:false, busy:false, authReady:false};
+let state={area:'chats', selected:null, channelId:null, pieceTab:'chat', settingsTab:'profile', search:'', loginMode:'login', mobileDetail:false, setup:false, busy:false, authReady:false};
 let realtimeChannel=null, realtimeRefreshTimer=null;
 function toast(message,bad=false){const div=document.createElement('div');div.className='toast';div.textContent=message;div.style.borderColor=bad?'#bb4b5f':'';TOASTER.append(div);setTimeout(()=>div.remove(),5000);}
 async function safe(work){if(state.busy)return;state.busy=true;try{await work()}catch(e){console.error('Tender:',e);toast(e.message||'Something went wrong.',true)}finally{state.busy=false}}
@@ -65,9 +79,130 @@ function avatarFor(c){return c.kind==='group'?`<span class="squad-avatar">👥</
 function inPiece(pid){return memberships.some(m=>m.piece_id===pid && m.user_id===user.id)}
 function ownPiece(pid){return pieces.some(p=>p.id===pid&&p.owner_id===user.id)}
 const selectedPiece=()=>pieces.find(x=>x.id===state.selected);
+// Tender 0.4 — membership-scoped channels, read cursors and honest live presence.
+// Legacy Piece messages (without channel_id) always belong to #general.
+function channelsFor(pid){
+ const rows=pieceChannels.filter(c=>c.piece_id===pid).sort((a,b)=>(a.position||0)-(b.position||0)||(a.created_at||'').localeCompare(b.created_at||''));
+ return rows.length?rows:[{id:'legacy-'+pid,piece_id:pid,name:'general',kind:'text',topic:'Main Piece chat',category:'TEXT CHANNELS',is_default:true}];
+}
+function selectedChannel(pid=state.selected){
+ const list=channelsFor(pid);
+ return list.find(c=>c.id===state.channelId)||list.find(c=>c.is_default)||list[0];
+}
+const channelUnreadCount=id=>channelUnread.find(x=>x.channel_id===id)?.unread_count||0;
+const pieceUnreadCount=pid=>channelsFor(pid).reduce((sum,c)=>sum+Number(channelUnreadCount(c.id)||0),0);
+function railPieceHTML(){
+ if(!user)return '';
+ const joined=pieces.filter(p=>inPiece(p.id)).slice(0,80);
+ return `<div class="rail-piece-divider" role="separator"></div><div class="rail-piece-list" aria-label="Your Pieces">
+ ${joined.map(p=>`<button type="button" class="rail-piece ${state.selected===p.id&&['pieces','discover'].includes(state.area)?'active':''} ${pieceUnreadCount(p.id)?'has-unread':''}" data-action="rail-piece" data-id="${esc(p.id)}" title="${esc(p.name)}" aria-label="Open Piece ${esc(p.name)}">${pieceAvatar(p)}${pieceUnreadCount(p.id)?`<span class="rail-piece-unread" aria-label="${pieceUnreadCount(p.id)} unread Piece messages">${Math.min(99,pieceUnreadCount(p.id))}</span>`:''}</button>`).join('')}
+ </div><button type="button" class="rail-piece-add" data-action="new-piece" title="Create a Piece" aria-label="Create Piece">${ico('plus','icon-sm')}</button>`;
+}
+let unreadRefreshTimer=null;
+async function loadChannelData(){
+ if(!user||!db)return;
+ try{
+  const result=await q('piece_channels').select('*').order('position',{ascending:true}).limit(1000);
+  if(result.error){channelReady=false;pieceChannels=[];channelUnread=[];return}
+  channelReady=true;pieceChannels=result.data||[];
+  await loadChannelUnreads();
+ }catch(e){channelReady=false;pieceChannels=[];channelUnread=[];console.warn('Tender channel setup pending',e)}
+}
+async function loadChannelUnreads(){
+ if(!user||!channelReady)return;
+ try{const r=await db.rpc('tender_channel_unreads');if(!r.error)channelUnread=r.data||[]}catch(e){console.warn('Unread counts unavailable',e)}
+}
+function scheduleChannelUnreadRefresh(){
+ if(!user||!channelReady)return;
+ clearTimeout(unreadRefreshTimer);
+ unreadRefreshTimer=setTimeout(async()=>{await loadChannelUnreads();renderPieceRail();if(['pieces','discover'].includes(state.area))renderSidebar()},500);
+}
+function renderPieceRail(){
+ const rail=document.querySelector('.rail-piece-zone');if(rail)rail.innerHTML=railPieceHTML();
+ const piecesBtn=document.querySelector('.rail-btn[data-area="pieces"]');
+ if(piecesBtn){piecesBtn.querySelector('.unread-badge')?.remove();const total=pieces.filter(p=>inPiece(p.id)).reduce((n,p)=>n+pieceUnreadCount(p.id),0);if(total)piecesBtn.insertAdjacentHTML('beforeend',renderBadge(total))}
+}
+async function markChannelRead(){
+ if(!user||!channelReady||!state.selected||!['pieces','discover'].includes(state.area)||state.pieceTab!=='chat')return;
+ const c=selectedChannel();if(!c||c.id.startsWith('legacy-')||!inPiece(c.piece_id))return;
+ try{
+  const r=await q('piece_channel_reads').upsert({channel_id:c.id,user_id:user.id,last_read_at:new Date().toISOString()},{onConflict:'channel_id,user_id'});
+  if(r.error)throw r.error;
+  const row=channelUnread.find(x=>x.channel_id===c.id);if(row)row.unread_count=0;
+  renderPieceRail();
+ }catch(e){console.warn('Piece read cursor failed',e)}
+}
+let presenceChannel=null;
+let presenceRoster=new Map();
+function activePresence(id){
+ if(!id)return 'offline';
+ if(id===user?.id){
+  const current=my?.presence_mode||'online';
+  return current==='invisible'?'offline':current;
+ }
+ // Other users' saved profile data may be stale; the live presence roster
+ // is authoritative, and Invisible users untrack themselves.
+ return presenceRoster.get(id)||'offline';
+}
+function onlineForGroup(conversation){
+ const ids=[...new Set((conversation?.conversation_members||[]).map(m=>m.user_id))];
+ const online=ids.filter(id=>activePresence(id)!=='offline').length;
+ const offline=ids.length-online;
+ return {online,offline,status:online>offline?'online':'offline'};
+}
+function presenceDotHTML(status,label=''){
+ const valid=['online','idle','dnd'].includes(status)?status:'offline';
+ return `<span class="tender-presence-dot ${valid}" aria-label="${esc(label||(valid==='offline'?'Offline':valid))}" title="${esc(label||(valid==='offline'?'Offline':valid))}"></span>`;
+}
+async function startPresence(){
+ if(!db||!user)return;
+ if(presenceChannel){await db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}
+ presenceRoster=new Map();
+ const sessionUser=user.id;
+ const channel=db.channel('tender-online-v1',{config:{presence:{key:sessionUser}}});
+ presenceChannel=channel;
+ const update=()=>{
+  const next=new Map();for(const [id,rows] of Object.entries(channel.presenceState()||{})){
+   if(id===sessionUser||!Array.isArray(rows))continue;
+   const item=rows.find(row=>row.user_id===id&&['online','idle','dnd'].includes(row.status));
+   if(item)next.set(id,item.status);
+  }
+  presenceRoster=next;
+  if(user?.id===sessionUser){updatePresenceMarkers();renderInfoPanel()}
+ };
+ channel.on('presence',{event:'sync'},update);
+ channel.subscribe(async status=>{
+  if(status==='SUBSCRIBED'&&user?.id===sessionUser){
+   if(my?.presence_mode!=='invisible')await channel.track({user_id:sessionUser,status:my?.presence_mode||'online'});
+  }
+ });
+}
+async function publishPresence(){
+ if(!presenceChannel||!user)return;
+ if(my?.presence_mode==='invisible')await presenceChannel.untrack();
+ else await presenceChannel.track({user_id:user.id,status:my?.presence_mode||'online'});
+ updatePresenceMarkers();
+}
+function updatePresenceMarkers(){
+ document.querySelectorAll('[data-presence-id]').forEach(el=>{
+  const id=el.dataset.presenceId,status=activePresence(id);
+  el.className='tender-presence-dot '+(['online','idle','dnd'].includes(status)?status:'offline');
+  el.title=status;
+  const info=el.closest('.dm-row')?.querySelector('.grow p');
+  if(info)info.textContent=status==='offline'?'Offline':status==='dnd'?'Do Not Disturb':status==='idle'?'Idle':'Online';
+ });
+ document.querySelectorAll('[data-group-presence]').forEach(el=>{
+  const c=getConversation(el.dataset.groupPresence);if(!c)return;
+  const summary=onlineForGroup(c);
+  el.className='tender-presence-dot '+summary.status;
+  el.title=summary.online+' online · '+summary.offline+' offline';
+  const info=el.closest('.dm-row')?.querySelector('.grow p');if(info)info.textContent=summary.online+' online · '+summary.offline+' offline';
+ });
+}
+
 function empty(title,description,action='',label=''){return `<div class="empty-content"><img src="buffalo.webp" alt="Buffalo"><h2>${esc(title)}</h2><p>${esc(description)}</p>${action?`<button class="btn" data-action="${esc(action)}">${esc(label)}</button>`:''}</div>`}
 // Tender 0.2 helpers. Shared DB features are gated behind migration_0_2.sql.
-let extendedReady=false, pronounsReady=false, pieceRepliesReady=false, notifications=[], customEmojis=[], reads=[], bookmarks=[], blockedUsers=[], pieceEvents=[], pieceRoles=[], roleAssignments=[], activePolls=[], activePollVotes=[];
+let extendedReady=false, pronounsReady=false, pieceRepliesReady=false, channelReady=false, visualReady=false, pieceChannels=[],channelUnread=[], notifications=[], customEmojis=[], reads=[], bookmarks=[], blockedUsers=[], pieceEvents=[], pieceRoles=[], roleAssignments=[], activePolls=[], activePollVotes=[];
 let attachmentUrls=new Map(), replyTo=null, recordedVoice=null, voiceRecorder=null, voiceChunks=[], typingChannel=null, typingTimeout=null, typingLast=0, reconcileTimer=null, notificationReady=false;
 const chosenTheme=()=>my?.chat_theme||localStorage.getItem('tender-theme')||'dark';
 function applyTheme(){const theme=chosenTheme();document.documentElement.dataset.tenderTheme=theme;document.documentElement.style.setProperty('--personal-accent',my?.accent_color||'#f47735');applyLocalAppearance()}
@@ -227,6 +362,7 @@ async function refreshExtras(){
  }catch(e){console.warn('0.2 optional features unavailable',e)}
  try{const probe=await q('profiles').select('pronouns').limit(1);pronounsReady=!probe.error}catch{pronounsReady=false}
  try{const probe=await q('piece_messages').select('reply_to').limit(1);pieceRepliesReady=!probe.error}catch{pieceRepliesReady=false}
+ try{const probe=await q('profiles').select('name_style,name_effect,profile_gradient_start').limit(1);visualReady=!probe.error}catch{visualReady=false}
  applyTheme();
 }
 async function loadPolls(){activePolls=[];activePollVotes=[];if(!extendedReady||state.area!=='chats'||!state.selected)return;const ids=activeMessages.map(m=>m.poll_id).filter(Boolean);if(!ids.length)return;const [p,v]=await Promise.all([q('polls').select('*').in('id',ids),q('poll_votes').select('*').in('poll_id',ids)]);if(!p.error)activePolls=p.data||[];if(!v.error)activePollVotes=v.data||[]}
@@ -236,7 +372,7 @@ async function markRead(cid=null,friend=false){if(!extendedReady||!user)return;t
  if(cid){await db.from('conversation_reads').upsert({conversation_id:cid,user_id:user.id,last_read_at:new Date().toISOString()},{onConflict:'conversation_id,user_id'});}
  if(cid||friend){await db.rpc('mark_tender_notifications_read',{cid:cid||null,pid:null,include_friends:friend});notifications.forEach(n=>{if(cid&&n.conversation_id===cid||friend&&n.kind==='friend')n.is_read=true});renderSidebar();renderNavBadges();}
  }catch(e){console.warn('Read receipts:',e)}}
-function renderNavBadges(){const chatButton=document.querySelector('.rail-btn[data-area="chats"]'),friendButton=document.querySelector('.rail-btn[data-area="friends"]');for(const [el,n] of [[chatButton,notifications.filter(x=>x.kind==='message'&&!x.is_read).length],[friendButton,unreadFriends()]]){if(!el)continue;el.querySelector('.unread-badge')?.remove();if(n)el.insertAdjacentHTML('beforeend',renderBadge(n))}document.title=unreadAll()?`(${unreadAll()}) Tender 🍗`:'Tender 🍗'}
+function renderNavBadges(){renderPieceRail();const chatButton=document.querySelector('.rail-btn[data-area="chats"]'),friendButton=document.querySelector('.rail-btn[data-area="friends"]');for(const [el,n] of [[chatButton,notifications.filter(x=>x.kind==='message'&&!x.is_read).length],[friendButton,unreadFriends()]]){if(!el)continue;el.querySelector('.unread-badge')?.remove();if(n)el.insertAdjacentHTML('beforeend',renderBadge(n))}document.title=unreadAll()?`(${unreadAll()}) Tender 🍗`:'Tender 🍗'}
 function soundPing(){if(audioPrefs().deafened||!my?.notification_sound||my?.presence_mode==='dnd')return;try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return;const c=new C(),o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.setValueAtTime(my.notification_tone==='soft'?480:my.notification_tone==='chime'?900:680,c.currentTime);o.frequency.exponentialRampToValueAtTime(my.notification_tone==='soft'?550:my.notification_tone==='chime'?1150:920,c.currentTime+.08);g.gain.setValueAtTime(.001,c.currentTime);g.gain.exponentialRampToValueAtTime(.04,c.currentTime+.02);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.17);o.connect(g).connect(c.destination);o.start();o.stop(c.currentTime+.2);o.onended=()=>c.close();}catch{}}
 // Notifications require HTTPS and an explicit permission grant. The service worker
 // enables notifications on mobile while the Tender page is open; it is NOT a push server.
@@ -294,7 +430,7 @@ function scheduleReconcile(active=true,kind='',event=null){
    if(['messages','piece_messages','reactions','poll_votes','conversation_reads'].includes(kind)){
      if(selected&&((area==='chats')||(['pieces','discover'].includes(area)&&tab==='chat'))){
        await loadActive();
-       if(selected===state.selected&&area===state.area&&tab===state.pieceTab)syncActiveStream();
+       if(selected===state.selected&&area===state.area&&tab===state.pieceTab){syncActiveStream();if(kind==='piece_messages'&&document.visibilityState==='visible'){const view=document.querySelector('#main .chat-scroll');if(view&&view.scrollHeight-view.scrollTop-view.clientHeight<110)markChannelRead().catch(console.warn)}}
      }
    }else{
      await refreshData();if(active&&selected)await loadActive();
@@ -335,7 +471,62 @@ async function subscribeTyping(){if(typingChannel){db.removeChannel(typingChanne
  const prefix=state.area==='chats'?'dm':'piece';
  typingChannel=db.channel('typing-'+prefix+'-'+state.selected,{config:{broadcast:{self:false}}}).on('broadcast',{event:'typing'},payload=>{const e=payload.payload;if(e?.user_id===user.id)return;const el=document.getElementById('typing-line');if(!el)return;el.textContent=`${pby(e.user_id).display_name} is typing…`;clearTimeout(typingTimeout);typingTimeout=setTimeout(()=>{if(el)el.textContent=''},2800)}).subscribe();}
 function broadcastTyping(){if(!typingChannel||Date.now()-typingLast<1100)return;typingLast=Date.now();typingChannel.send({type:'broadcast',event:'typing',payload:{user_id:user.id}}).catch(()=>{})}
-function emojiPicker(mode='insert'){const defaults=['😀','😂','😭','❤️','🔥','👍','🥹','😎','😍','🤯','💀','🥳','🤝','😡','😴','✨','🍗','⭐','💜','🎉','👀','🙌','💯','💀','🤍','🤔','👏','💬','🙏','🥰'];modal('Emoji & stickers','Send something crispy!',`<div class="emoji-grid">${defaults.map(e=>`<button data-action="emoji-insert" data-emoji="${e}" class="emoji-option">${e}</button>`).join('')}${customEmojis.filter(x=>!x.piece_id||x.piece_id===state.selected).map(e=>`<button data-action="emoji-insert" data-emoji=":${esc(e.shortcode)}:" class="emoji-option"><img src="${esc(db.storage.from('tender-emoji').getPublicUrl(e.image_path).data.publicUrl)}" alt=":${esc(e.shortcode)}:"></button>`).join('')}</div><button class="btn secondary top-spacer" data-action="custom-emoji">${ico('plus')} Upload custom emoji</button>`) }
+// Searchable complete Unicode 18.0 emoji catalog. Render 150 items per page.
+const emojiCategories=['All','Recent','Smileys','People','Components','Nature','Food','Travel','Activities','Objects','Symbols','Flags','Custom'];
+let emojiCategory='All',emojiOffset=0,emojiComposerRange=null,emojiPickerMode='insert',emojiReactionTarget=null;
+function emojiHistory(){
+ try{const v=JSON.parse(localStorage.getItem('tender-emoji-recent:'+user.id)||'[]');
+ return Array.isArray(v)?v.filter(x=>typeof x==='string').slice(0,42):[]}
+ catch{return []}
+}
+function storeEmojiHistory(glyph){
+ if(user)localStorage.setItem('tender-emoji-recent:'+user.id,JSON.stringify([glyph,...emojiHistory().filter(x=>x!==glyph)].slice(0,42)));
+}
+function emojiResults(category,search=''){
+ const raw=window.TENDER_EMOJI_CATALOG?.items||[];
+ let items=raw;
+ if(category==='Custom')return customEmojis.filter(x=>!x.piece_id||x.piece_id===state.selected)
+  .filter(x=>!search||x.shortcode.toLowerCase().includes(search))
+  .map(x=>({glyph:':'+x.shortcode+':',name:x.shortcode,image_path:x.image_path}));
+ if(category==='Recent'){
+  items=emojiHistory().map(g=>raw.find(x=>x[0]===g)||[g,'Recently used',-1]);
+ }else if(category!=='All'){
+  const mapping={Smileys:0,People:1,Components:2,Nature:3,Food:4,Travel:5,Activities:6,Objects:7,Symbols:8,Flags:9};
+  items=items.filter(x=>x[2]===mapping[category]);
+ }
+ if(search)items=items.filter(x=>x[1].toLowerCase().includes(search)||x[0].includes(search));
+ return items.map(x=>({glyph:x[0],name:x[1]}));
+}
+function renderEmojiResults(reset=true){
+ const grid=document.getElementById('tender-emoji-results');if(!grid)return;
+ const search=String(document.getElementById('tender-emoji-search')?.value||'').trim().toLowerCase();
+ const all=emojiResults(emojiCategory,search);
+ if(reset){emojiOffset=0;grid.replaceChildren()}
+ const chunk=all.slice(emojiOffset,emojiOffset+150);
+ grid.insertAdjacentHTML('beforeend',chunk.map(e=>`<button class="tender-emoji-cell" type="button" data-action="emoji-insert" data-emoji="${esc(e.glyph)}" title="${esc(e.name)}" aria-label="${esc(e.name)}">${e.image_path?`<img src="${esc(db.storage.from('tender-emoji').getPublicUrl(e.image_path).data.publicUrl)}" alt="">`:esc(e.glyph)}</button>`).join(''));
+ emojiOffset+=chunk.length;
+ const more=document.getElementById('tender-emoji-more');if(more)more.hidden=emojiOffset>=all.length;
+ const count=document.getElementById('tender-emoji-count');if(count)count.textContent=all.length?emojiOffset+' of '+all.length:'No matching emojis';
+ document.querySelectorAll('.tender-emoji-category').forEach(el=>{const selected=el.dataset.category===emojiCategory;el.classList.toggle('active',selected);el.setAttribute('aria-pressed',String(selected))});
+}
+function emojiPicker(mode='insert',targetType='',targetId=''){
+ emojiPickerMode=mode;emojiReactionTarget=mode==='reaction'?{type:targetType,id:targetId}:null;
+ const field=document.getElementById('message-box');
+ emojiComposerRange=field?{start:field.selectionStart,end:field.selectionEnd}:null;
+ emojiCategory='All';emojiOffset=0;
+ const hasCatalog=!!window.TENDER_EMOJI_CATALOG?.items?.length;
+ modal(mode==='reaction'?'React with any emoji':'Emoji, GIFs & stickers',hasCatalog?'Search thousands of free Unicode 18.0 emojis.':'Complete emoji data is loading. Refresh Tender if it stays unavailable.',`
+ <div class="tender-emoji-picker">
+  ${mode==='reaction'?'<div class="tender-emoji-reaction-hint">Pick any emoji to react to this message.</div>':`<nav class="tender-emoji-switch"><button data-action="gif-picker" type="button">GIFs</button><button data-action="emoji-category" data-category="Custom" type="button">Stickers</button><span class="selected">Emoji</span></nav>`}
+  <label class="tender-emoji-search">${ico('search','icon-sm')}<input id="tender-emoji-search" class="input" type="search" placeholder="Search emoji, e.g. cat, rainbow, heart…" aria-label="Search emoji" autocomplete="off"></label>
+  <div class="tender-emoji-categories" role="group" aria-label="Emoji categories">${emojiCategories.filter(c=>mode!=='reaction'||c!=='Custom').map(c=>`<button class="tender-emoji-category ${c==='All'?'active':''}" data-action="emoji-category" data-category="${c}" type="button" aria-pressed="${c==='All'}">${c}</button>`).join('')}</div>
+  <div id="tender-emoji-results" class="tender-emoji-results"></div>
+  <footer class="tender-emoji-footer"><span id="tender-emoji-count" class="hint">Loading…</span><button class="btn secondary sm" id="tender-emoji-more" data-action="emoji-more" hidden type="button">More emoji</button><button class="btn secondary sm" data-action="custom-emoji" type="button">Upload sticker</button></footer>
+ </div>`);
+ renderEmojiResults();
+ document.getElementById('tender-emoji-search')?.focus();
+}
+
 function customEmojiModal(){modal('Upload an emoji','Personal emojis work in DMs; Piece emojis can be shared with their community.',`<form id="custom-emoji-form"><div class="field"><label>Shortcode (2–24 letters/numbers)</label><input class="input" name="shortcode" pattern="[a-z0-9_]{2,24}" placeholder="buffalodance" required></div><div class="field"><label>PNG/WEBP/GIF under 256 KB</label><input class="input" type="file" name="file" accept="image/png,image/webp,image/gif" required></div>${state.area==='pieces'&&ownPiece(state.selected)?'<label class="checkbox-line"><input type="checkbox" name="piece"> Share with this Piece</label>':''}<button class="btn full" type="submit">Upload emoji</button></form>`)}
 function gifModal(){modal('Share a GIF','Paste a GIPHY or Tenor media GIF link. No paid GIF API needed.',`<form id="gif-form"><div class="field"><label>Direct GIF URL</label><input class="input" name="url" type="url" required placeholder="https://media.tenor.com/.../gif.gif"></div><button type="submit" class="btn full">Insert GIF</button></form><p class="hint">Find a GIF on a provider's website and copy its media address. GIF links are hosted by their providers.</p>`)}
 function pollModal(){if(state.area!=='chats'||!state.selected)return;modal('Create a poll','Ask your chat to vote.',`<form id="poll-form"><div class="field"><label>Question</label><input class="input" name="question" minlength="3" maxlength="200" required></div>${[1,2,3,4].map((i)=>`<div class="field"><label>Option ${i}</label><input class="input" name="option${i}" maxlength="100" ${i<3?'required':''} placeholder="Answer ${i}"></div>`).join('')}<button class="btn full" type="submit">Post poll</button></form>`)}
@@ -387,10 +578,10 @@ function profileCardHTML(person){
  const isSelf=person.id===user?.id;
  return `<div class="tender-profile-dialog">
   <section class="profile-dialog-identity">
-   <div class="profile-dialog-banner" ${person.banner_url?`style="background-image:linear-gradient(#07091440,#07091499),url(&quot;${esc(validUrl(person.banner_url))}&quot;)"`:''}></div>
+   <div class="profile-dialog-banner" style="${profileGradientStyle(person)}${person.banner_url?`background-image:linear-gradient(#07091440,#07091499),url(&quot;${esc(validUrl(person.banner_url))}&quot;);`:''}"></div>
    <div class="profile-dialog-id">
     <div class="profile-dialog-avatar effect-${esc(person.profile_effect||'none')}">${avatars(person)}</div>
-    <div class="profile-dialog-name-row"><div><h2>${esc(person.display_name||'Tender member')}</h2><p>@${esc(person.handle||'member')}${person.pronouns?' · '+esc(person.pronouns):''}</p></div>${profileStatus(person)}</div>
+    <div class="profile-dialog-name-row"><div>${styledName(person,'h2')}<p>@${esc(person.handle||'member')}${person.pronouns?' · '+esc(person.pronouns):''}</p></div>${profileStatus(person)}</div>
     ${person.game_status?`<div class="profile-dialog-status">${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</div>`:''}
     <div class="profile-dialog-buttons">${profileActions(person)}</div>
     <div class="profile-dialog-meta"><span>🍗 Tender member</span><span>${isSelf?'Your profile':'Public profile'}</span></div>
@@ -403,6 +594,42 @@ function profileCardHTML(person){
   </section>
  </div>`;
 }
+// Small Discord-inspired popover: tapping an avatar never forces the large modal.
+function closeMiniProfile(){
+ document.getElementById('tender-mini-profile')?.remove();
+}
+function miniProfileHTML(person){
+ return `<div class="mini-profile-banner" style="${profileGradientStyle(person)}${person.banner_url?`background-image:linear-gradient(#0002,#0005),url(&quot;${esc(validUrl(person.banner_url))}&quot;);`:''}"></div>
+ <div class="mini-profile-content">
+  <div class="mini-profile-avatar">${avatars(person)}${presenceDotHTML(activePresence(person.id))}</div>
+  <div class="mini-profile-identity">${styledName(person,'h3')}<small>@${esc(person.handle||'member')}${person.pronouns?' · '+esc(person.pronouns):''}</small></div>
+  ${person.game_status?`<p class="mini-profile-status">${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</p>`:''}
+  <div class="mini-profile-bio">${esc((person.bio||'No bio yet. 🍗').slice(0,240)).replace(/\n/g,'<br>')}</div>
+  <div class="mini-profile-buttons">${profileActions(person,true)}<button type="button" class="btn secondary sm" data-action="open-full-profile" data-id="${esc(person.id)}">Full profile ${ico('external','icon-sm')}</button></div>
+ </div>`;
+}
+async function showMiniProfile(id,trigger){
+ if(!user||!id)return;
+ const existing=document.getElementById('tender-mini-profile');
+ if(existing?.dataset.userId===id){closeMiniProfile();return}
+ closeMiniProfile();
+ let person=profiles.find(p=>p.id===id);
+ if(!person){const r=await q('profiles').select('*').eq('id',id).maybeSingle();if(r.error)throw r.error;person=r.data}
+ if(!person)return toast('Profile unavailable.',true);
+ const el=document.createElement('div');el.id='tender-mini-profile';el.className='tender-mini-profile';el.dataset.userId=id;
+ el.setAttribute('role','dialog');el.setAttribute('aria-label','Profile of '+(person.display_name||'member'));
+ el.innerHTML=miniProfileHTML(person);
+ document.body.appendChild(el);
+ const rect=trigger?.getBoundingClientRect?.()||{left:24,right:60,top:100,bottom:125};
+ const width=Math.min(320,window.innerWidth-20),height=el.offsetHeight||335;
+ const left=Math.max(10,Math.min(window.innerWidth-width-10,rect.right+12+width>window.innerWidth?rect.left-width-12:rect.right+12));
+ const top=Math.max(10,Math.min(window.innerHeight-height-10,rect.top-45));
+ el.style.left=left+'px';el.style.top=top+'px';el.style.width=width+'px';
+}
+document.addEventListener('pointerdown',event=>{
+ const pop=document.getElementById('tender-mini-profile');
+ if(pop&&!pop.contains(event.target)&&!event.target.closest?.('[data-action="mini-profile"]'))closeMiniProfile();
+},true);
 async function showProfile(id){
  if(!id||!user)return;
  let person=profiles.find(p=>p.id===id);
@@ -413,7 +640,11 @@ async function showProfile(id){
  if(!person)return toast('Profile unavailable.',true);
  modal(person.display_name||'Member profile','Tender profile',profileCardHTML(person));
 }
-function profileBanner(p){const isSelf=p.id===user?.id;return `<div class="profile-banner crispy-profile effect-${esc(p.profile_effect||'none')}" ${p.banner_url?`style="background-image:linear-gradient(0deg,#17191d7a,transparent),url('${esc(validUrl(p.banner_url))}')"`:''}>${avatars(p)}${isSelf?'<span class="banner-hint">Your Tender profile</span>':''}</div>`}
+function profileBanner(p){
+ const isSelf=p.id===user?.id;
+ return `<div class="profile-banner crispy-profile effect-${esc(p.profile_effect||'none')}" style="${profileGradientStyle(p)}${p.banner_url?`background-image:linear-gradient(0deg,#17191d7a,transparent),url(&quot;${esc(validUrl(p.banner_url))}&quot;);`:''}">${avatars(p)}${isSelf?'<span class="banner-hint">Your Tender profile</span>':''}</div>`;
+}
+
 async function uploadPublicAsset(file,bucket,limit,mimes,prefix){if(!file||file.size>limit||!mimes.includes(file.type))throw Error('This file type or size is not supported.');const extension=({"image/png":"png","image/jpeg":"jpg","image/webp":"webp","image/gif":"gif"})[file.type];const path=`${user.id}/${prefix}-${crypto.randomUUID()}.${extension}`;assert(await db.storage.from(bucket).upload(path,file,{contentType:file.type,upsert:false}));return {url:db.storage.from(bucket).getPublicUrl(path).data.publicUrl,path}}
 function deviceNotificationsPanel(){
  const secure=window.isSecureContext===true,enabled=secure&&typeof Notification!=='undefined';
@@ -441,26 +672,26 @@ async function boot(){
    if(user)await initialize();else renderAuth();
  }catch(e){ROOT.innerHTML=empty('Could not reach Tender','Check the public Supabase URL and key in config.js.');toast(e.message||'Could not connect.',true)}
 }
-function reset(){notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];state.selected=null;state.area='chats';state.mobileDetail=false}
+function reset(){notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;state.channelId=null;presenceRoster.clear();if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
 function renderSetup(){ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Your friends. Your spaces. Your flavor.</p></div><div class="login-panel"><div class="eyebrow">Tender setup</div><h2>Almost ready to connect.</h2><p>This website needs a free online Supabase project for accounts, messages and Pieces. It's not a local chat simulator.</p><div class="setup-box"><h3>🍗 Connect the shared database</h3><p>1. Create a free project at <a href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Supabase</a>.<br>2. Run <strong>schema.sql</strong> in the project's SQL editor.<br>3. Copy its Project URL and publishable (anon) key into <strong>config.js</strong> on GitHub.<br>4. Refresh this website. Everyone will connect to the same database.</p><details><summary>Important security information</summary>Only use the public publishable/anon key. Never put a service_role key or other secret in GitHub. Set URL configuration for email confirmation in Supabase Auth.</details></div><p class="hint">Your Tender HTML interface is deployed separately from the database. A GitHub Pages link alone cannot deliver live messaging.</p><a class="btn" href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Connect Supabase ${ico('external')}</a></div></div>`}
 function renderAuth(){state.mobileDetail=false;ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Stay close. Stay crispy. 🍗</p></div><div class="login-panel"><div class="eyebrow">Welcome to Tender</div><h2>${state.loginMode==='login'?'Good to have you back.':'Your people are waiting.'}</h2><p>${state.loginMode==='login'?'Sign in to catch up with your people.':'Create your account to join the conversation.'}</p><div class="login-tabs"><button class="${state.loginMode==='login'?'selected':''}" data-action="auth-tab" data-tab="login">Log in</button><button class="${state.loginMode==='signup'?'selected':''}" data-action="auth-tab" data-tab="signup">Sign up</button></div><form id="auth-form">${state.loginMode==='signup'?`<div class="field"><label for="handle">Username (3–20 letters, numbers, underscores)</label><input class="input" id="handle" name="handle" minlength="3" maxlength="20" pattern="[a-zA-Z0-9_]{3,20}" required autocomplete="username" placeholder="buffalofan"></div><div class="field"><label for="display">Display name</label><input class="input" id="display" name="display_name" maxlength="40" required placeholder="Your name"></div>`:''}<div class="field"><label for="email">Email address</label><input class="input" id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com"></div><div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" minlength="8" autocomplete="${state.loginMode==='login'?'current-password':'new-password'}" required placeholder="At least 8 characters"></div><button class="btn full top-spacer" type="submit">${state.loginMode==='login'?'Log in':'Create account'} ${ico('back')}</button></form><p class="hint top-spacer">Tender is an early beta. Please don't post private information in public Pieces.</p></div></div>`}
 async function authSubmit(form){const data=new FormData(form), email=String(data.get('email')).trim(), password=String(data.get('password'));
  await safe(async()=>{if(state.loginMode==='signup'){const handle=String(data.get('handle')).trim().toLowerCase(),display_name=String(data.get('display_name')).trim();if(!/^[a-z0-9_]{3,20}$/.test(handle))throw Error('Username needs 3–20 letters, numbers or underscores.');const r=await db.auth.signUp({email,password,options:{data:{handle,display_name},emailRedirectTo:location.origin+location.pathname}});assert(r);toast(r.data.session?'Welcome to Tender!':'Check your inbox to confirm your email, then sign in.');if(!r.data.session){state.loginMode='login';renderAuth()}}
  else{assert(await db.auth.signInWithPassword({email,password}));toast('Welcome back! 🍗')}})}
-async function initialize(){ROOT.innerHTML='<div class="loading-screen"><img src="buffalo.webp" alt="Buffalo"><h1>tender<span>.</span></h1><p>Loading your messages...</p></div>';try{await refreshData();applyTheme();render();subscribe();if(extendedReady)renderNavBadges();
+async function initialize(){ROOT.innerHTML='<div class="loading-screen"><img src="buffalo.webp" alt="Buffalo"><h1>tender<span>.</span></h1><p>Loading your messages...</p></div>';try{await refreshData();applyTheme();render();subscribe();startPresence().catch(console.warn);if(extendedReady)renderNavBadges();
   const params=new URLSearchParams(window.location.search);
    const targetChat=params.get('chat');
    if(targetChat&&conversations.some(c=>c.id===targetChat))await goTo('chats',targetChat);
    const invitation=params.get('piece');
   if(invitation&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invitation)&&pieces.some(p=>p.id===invitation))await goTo('pieces',invitation);
  }catch(e){toast(e.message||'Unable to load the app',true);ROOT.innerHTML=empty('Something went wrong','Could not load Tender. Try refreshing.') }}
-async function refreshData(){if(!user)return;const [a,b,c,d,e]=await Promise.all([q('profiles').select('*').order('created_at',{ascending:false}).limit(300),q('friendships').select('*'),q('conversations').select('*,conversation_members(user_id)').order('created_at',{ascending:false}),q('pieces').select('*').order('created_at',{ascending:false}).limit(100),q('piece_members').select('*')]);profiles=assert(a)||[];my=profiles.find(x=>x.id===user.id)||{id:user.id,handle:'member',display_name:user.email||'Account'};friendships=assert(b)||[];conversations=assert(c)||[];pieces=assert(d)||[];memberships=assert(e)||[];await refreshExtras();}
+async function refreshData(){if(!user)return;const [a,b,c,d,e]=await Promise.all([q('profiles').select('*').order('created_at',{ascending:false}).limit(300),q('friendships').select('*'),q('conversations').select('*,conversation_members(user_id)').order('created_at',{ascending:false}),q('pieces').select('*').order('created_at',{ascending:false}).limit(100),q('piece_members').select('*')]);profiles=assert(a)||[];my=profiles.find(x=>x.id===user.id)||{id:user.id,handle:'member',display_name:user.email||'Account'};friendships=assert(b)||[];conversations=assert(c)||[];pieces=assert(d)||[];memberships=assert(e)||[];await refreshExtras();await loadChannelData();}
 function unsub(){unsubTyping();if(reconcileTimer)clearTimeout(reconcileTimer);if(realtimeChannel&&db)db.removeChannel(realtimeChannel);realtimeChannel=null;if(realtimeRefreshTimer)clearTimeout(realtimeRefreshTimer)}
 function subscribe(){
  unsub();if(!user)return;
  realtimeChannel=db.channel('tender-live-'+user.id)
  .on('postgres_changes',{event:'*',schema:'public',table:'messages'},e=>scheduleReconcile(true,'messages',e))
- .on('postgres_changes',{event:'*',schema:'public',table:'piece_messages'},e=>scheduleReconcile(true,'piece_messages',e))
+ .on('postgres_changes',{event:'*',schema:'public',table:'piece_messages'},e=>{scheduleReconcile(true,'piece_messages',e);scheduleChannelUnreadRefresh();})
  .on('postgres_changes',{event:'*',schema:'public',table:'piece_posts'},e=>scheduleReconcile(true))
  .on('postgres_changes',{event:'*',schema:'public',table:'piece_gallery'},e=>scheduleReconcile(true))
  .on('postgres_changes',{event:'*',schema:'public',table:'friendships'},e=>scheduleReconcile(true))
@@ -468,12 +699,13 @@ function subscribe(){
  .on('postgres_changes',{event:'*',schema:'public',table:'poll_votes'},e=>scheduleReconcile(true,'poll_votes',e))
  .on('postgres_changes',{event:'*',schema:'public',table:'conversation_reads'},e=>scheduleReconcile(true,'conversation_reads',e))
  .on('postgres_changes',{event:'*',schema:'public',table:'piece_events'},e=>scheduleReconcile(true))
+ .on('postgres_changes',{event:'*',schema:'public',table:'piece_channels'},e=>scheduleReconcile(false))
  .on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:'user_id=eq.'+user.id},e=>{if(e.new){if(!notifications.some(n=>n.id===e.new.id))notifications.unshift(e.new);showBrowserNotification(e.new).catch(console.warn);if(e.new.conversation_id===state.selected&&state.area==='chats'&&document.visibilityState==='visible'){markRead(state.selected).catch(console.warn)}renderNavBadges();renderSidebar()}setTimeout(()=>scheduleReconcile(false),220)})
  .subscribe();
  subscribeTyping().catch(console.warn);
 }
 function navItem(area,name,label){return `<button data-action="area" data-area="${area}" class="rail-btn ${state.area===area?'active':''}" title="${label}" aria-label="${label}">${ico(name)}<span class="rail-label">${label}</span>${area==='chats'?renderBadge(notifications.filter(n=>!n.is_read&&n.kind==='message').length):area==='friends'?renderBadge(unreadFriends()):''}</button>`}
-function render(){if(!user)return renderAuth();ROOT.innerHTML=`<div class="screen ${state.mobileDetail?'in-detail':''}" id="app-screen"><nav class="rail"><div class="rail-brand" title="Tender"><img src="buffalo.webp" alt="Buffalo"></div>${navItem('chats','chat','Chats')}${navItem('friends','users','Friends')}${navItem('pieces','pieces','Pieces')}${navItem('discover','compass','Discover')}<div class="rail-bottom"><button class="rail-btn" data-action="open-alerts" title="Activity inbox">${ico('bell')}${renderBadge(unreadAll())}</button><button type="button" class="rail-btn rail-toggle" title="Expand or collapse sidebar" data-action="toggle-rail">${ico('pieces')}<span class="rail-label">Expand rail</span></button><button type="button" class="rail-btn" title="Show or hide member panel" data-action="toggle-info">${ico('users')}<span class="rail-label">Members</span></button></div><button class="rail-btn mobile-only ${state.area==='settings'?'active':''}" data-action="area" data-area="settings" aria-label="Settings">${ico('settings')}<span class="rail-label">Settings</span></button></nav><aside class="sidebar" id="sidebar"></aside><div class="splitter splitter-sidebar" data-split="sidebar" role="separator" aria-label="Resize conversation list" aria-orientation="vertical" aria-valuemin="210" aria-valuemax="420" tabindex="0"></div><main class="main" id="main"></main><div class="splitter splitter-info" data-split="info" role="separator" aria-label="Resize member list" aria-orientation="vertical" aria-valuemin="190" aria-valuemax="430" tabindex="0"></div><aside class="info-panel" id="info-panel" aria-label="Conversation details"></aside></div>`;
+function render(){if(!user)return renderAuth();ROOT.innerHTML=`<div class="screen ${state.mobileDetail?'in-detail':''}" id="app-screen"><nav class="rail"><div class="rail-brand" title="Tender"><img src="buffalo.webp" alt="Buffalo"></div>${navItem('chats','chat','Chats')}${navItem('friends','users','Friends')}${navItem('pieces','pieces','Pieces')}${navItem('discover','compass','Discover')}<div class="rail-piece-zone">${railPieceHTML()}</div><div class="rail-bottom"><button class="rail-btn" data-action="open-alerts" title="Activity inbox">${ico('bell')}${renderBadge(unreadAll())}</button><button type="button" class="rail-btn rail-toggle" title="Expand or collapse sidebar" data-action="toggle-rail">${ico('pieces')}<span class="rail-label">Expand rail</span></button><button type="button" class="rail-btn" title="Show or hide member panel" data-action="toggle-info">${ico('users')}<span class="rail-label">Members</span></button></div><button class="rail-btn mobile-only ${state.area==='settings'?'active':''}" data-action="area" data-area="settings" aria-label="Settings">${ico('settings')}<span class="rail-label">Settings</span></button></nav><aside class="sidebar" id="sidebar"></aside><div class="splitter splitter-sidebar" data-split="sidebar" role="separator" aria-label="Resize conversation list" aria-orientation="vertical" aria-valuemin="210" aria-valuemax="420" tabindex="0"></div><main class="main" id="main"></main><div class="splitter splitter-info" data-split="info" role="separator" aria-label="Resize member list" aria-orientation="vertical" aria-valuemin="190" aria-valuemax="430" tabindex="0"></div><aside class="info-panel" id="info-panel" aria-label="Conversation details"></aside></div>`;
  const screen=document.getElementById('app-screen');
  screen.classList.toggle('rail-expanded',localStorage.getItem('tender-rail-expanded')==='1');
  screen.style.setProperty('--tender-sidebar-width',readSplitWidth('sidebar')+'px');
@@ -585,14 +817,25 @@ function renderSidebar(){
   body=conversations.filter(c=>!state.search||namesFor(c).toLowerCase().includes(state.search.toLowerCase())).map(c=>{
    const otherId=c.kind!=='group'?(c.conversation_members||[]).find(m=>m.user_id!==user.id)?.user_id:null;
    const other=otherId?pby(otherId):null;
-   return `<div class="side-row ${state.selected===c.id?'selected':''}" data-action="open-chat" data-id="${esc(c.id)}">${other?profileFace(other):avatarFor(c)}<div class="grow">${other?profileName(other):`<strong>${esc(namesFor(c))}</strong>`}<p>${c.kind==='group'?'Group conversation':'Direct message'}</p></div>${renderBadge(unreadCount(c.id))}</div>`;
+   const live=other?activePresence(other.id):onlineForGroup(c).status;
+   const marker=other?`data-presence-id="${esc(other.id)}"`:`data-group-presence="${esc(c.id)}"`;
+   const count=c.kind==='group'?onlineForGroup(c):null;
+   return `<div class="side-row dm-row ${state.selected===c.id?'selected':''} ${unreadCount(c.id)?'has-unread':''}" data-action="open-chat" data-id="${esc(c.id)}"><span class="dm-presence-avatar">${other?profileFace(other):avatarFor(c)}<span class="tender-presence-dot ${esc(live)}" ${marker} title="${count?count.online+' online · '+count.offline+' offline':esc(live)}"></span></span><div class="grow">${other?profileName(other):`<strong>${esc(namesFor(c))}</strong>`}<p>${c.kind==='group'?(count.online+' online · '+count.offline+' offline'):(live==='offline'?'Offline':live==='dnd'?'Do Not Disturb':live==='idle'?'Idle':'Online')}</p></div>${unreadCount(c.id)?`<span class="dm-unread-dot"></span>`:''}${renderBadge(unreadCount(c.id))}</div>`;
   }).join('')||'<p class="hint" style="padding:18px">No conversations yet. Find a friend to start chatting.</p>';
  }else if(state.area==='friends'){
   const ids=myFriendIds();
   body=`<div class="side-section">Friends <span>${ids.length}</span></div>${ids.map(id=>`<div class="side-row ${state.selected===id?'selected':''}" data-action="open-friend" data-id="${esc(id)}">${profileFace(pby(id))}<div class="grow">${profileName(pby(id))}<p>@${esc(pby(id).handle)}</p></div></div>`).join('')||'<p class="hint" style="padding:18px">Friends will show up here.</p>'}`;
+ }else if((state.area==='pieces'||state.area==='discover')&&state.selected&&selectedPiece()&&inPiece(state.selected)){
+  const piece=selectedPiece(),channels=channelsFor(piece.id);
+  const filtered=channels.filter(c=>!state.search||c.name.toLowerCase().includes(state.search.toLowerCase())||c.category.toLowerCase().includes(state.search.toLowerCase()));
+  const groups=[...new Set(filtered.map(c=>c.category||'TEXT CHANNELS'))];
+  body=`<button type="button" class="piece-sidebar-home ${state.pieceTab!=='chat'?'active':''}" data-action="piece-home"><span>🏠</span><div><strong>${esc(piece.name)}</strong><small>Community home · Forum · Gallery</small></div></button>
+    <div class="piece-sidebar-header"><span>CHANNELS</span>${(ownPiece(piece.id)||memberships.some(m=>m.piece_id===piece.id&&m.user_id===user.id&&m.role==='moderator'))&&channelReady?`<button class="plus-btn" type="button" title="Create channel" aria-label="Create channel" data-action="new-channel">${ico('plus','icon-sm')}</button>`:''}</div>
+    ${groups.map(category=>`<section class="piece-channel-category"><div class="piece-category-label">${ico('back','icon-sm')} ${esc(category)}</div>
+    ${filtered.filter(c=>(c.category||'TEXT CHANNELS')===category).map(c=>`<button type="button" class="piece-channel-row ${state.pieceTab==='chat'&&selectedChannel()?.id===c.id?'selected':''} ${channelUnreadCount(c.id)?'unread':''}" data-action="select-channel" data-id="${esc(c.id)}" aria-current="${state.pieceTab==='chat'&&selectedChannel()?.id===c.id?'page':'false'}"><span class="piece-channel-hash">${c.kind==='announcements'?'📣':'#'}</span><span class="channel-title">${esc(c.name)}</span>${channelUnreadCount(c.id)?`<span class="channel-unread-count">${Math.min(99,channelUnreadCount(c.id))}</span>`:''}${c.is_default?'':ownPiece(piece.id)?`<span class="channel-settings-btn" data-action="edit-channel" data-id="${esc(c.id)}" title="Edit channel">⚙</span>`:''}</button>`).join('')}</section>`).join('')||'<p class="hint">No channels match your search.</p>'}`;
  }else if(state.area==='pieces'||state.area==='discover'){
   const showing=pieces.filter(p=>(state.area==='discover'?p.is_public:inPiece(p.id))&&(!state.search||p.name.toLowerCase().includes(state.search.toLowerCase())));
-  body=showing.map(p=>`<div class="side-row ${state.selected===p.id?'selected':''}" data-action="open-piece" data-id="${esc(p.id)}">${pieceAvatar(p)}<div class="grow"><strong>${esc(p.name)}</strong><p>${esc((p.description||'A Tender Piece').slice(0,58))}</p></div></div>`).join('')||'<p class="hint" style="padding:18px">No Pieces here yet.</p>';
+  body=showing.map(p=>`<div class="side-row ${state.selected===p.id?'selected':''}" data-action="open-piece" data-id="${esc(p.id)}">${pieceAvatar(p)}<div class="grow"><strong>${esc(p.name)}</strong><p>${esc((p.description||'A Tender Piece').slice(0,58))}</p></div>${pieceUnreadCount(p.id)?`<span class="piece-sidebar-dot"></span>`:''}</div>`).join('')||'<p class="hint" style="padding:18px">No Pieces here yet.</p>';
  }else{
   body=`<button type="button" class="side-row account-side-shortcut" data-action="settings-profile">${avatars(my)}<span class="grow"><strong>${esc(my.display_name)}</strong><p>@${esc(my.handle)}</p></span></button>`;
  }
@@ -674,7 +917,7 @@ function cacheUpdatedProfile(saved){
 function renderMain(){const m=document.getElementById('main');if(!m)return;
  const settingsSnapshot=captureSettingsView(m);
  const oldDraft=m.querySelector('#message-box')?.value||'';
- const oldKey=m.dataset.threadKey, newKey=[state.area,state.selected||'',state.pieceTab].join(':');
+ const oldKey=m.dataset.threadKey, newKey=[state.area,state.selected||'',state.pieceTab,(['pieces','discover'].includes(state.area)&&state.pieceTab==='chat')?selectedChannel()?.id||'':''].join(':');
  if(oldKey&&oldKey!==newKey&&oldDraft&&user)localStorage.setItem('tender-draft:'+user.id+':'+oldKey,oldDraft);
  const oldScroll=m.querySelector('.chat-scroll');
  const pos=oldScroll?{top:oldScroll.scrollTop,near:oldScroll.scrollHeight-oldScroll.scrollTop-oldScroll.clientHeight<96}:null;
@@ -685,7 +928,7 @@ function renderMain(){const m=document.getElementById('main');if(!m)return;
  else view=renderSettings();m.innerHTML=view;
  m.dataset.settingsTab=state.area==='settings'?state.settingsTab:'';
  restoreSettingsView(m,settingsSnapshot);
- const newDraft=m.querySelector('#message-box');if(newDraft)newDraft.value=oldKey===newKey&&oldDraft?oldDraft:(localStorage.getItem('tender-draft:'+user.id+':'+newKey)||'');
+ const newDraft=m.querySelector('#message-box');if(newDraft)newDraft.value=oldKey===newKey&&oldDraft?oldDraft:(localStorage.getItem(tenderDraftKey())||'');
  renderNavBadges();m.dataset.threadKey=newKey;
  const chatScroll=m.querySelector('.chat-scroll');
  if(chatScroll)chatScroll.scrollTop=pos&&oldKey===newKey&&!pos.near?pos.top:chatScroll.scrollHeight;
@@ -722,6 +965,11 @@ function jumpToReply(id){
  node.scrollIntoView({behavior:'smooth',block:'center'});node.classList.add('reply-target-highlight');
  setTimeout(()=>node.classList.remove('reply-target-highlight'),1700);
 }
+function tenderDraftKey(area=state.area,selected=state.selected,tab=state.pieceTab,channelId=state.channelId){
+ const parts=[area,selected||'',tab];
+ if(['pieces','discover'].includes(area)&&tab==='chat')parts.push(channelId||'general');
+ return 'tender-draft:'+user.id+':'+parts.join(':');
+}
 function composer(kind,placeholder,extra=''){const disabled=kind==='piece'&&!inPiece(state.selected);return `<form class="composer-wrap" id="composer-form" data-kind="${kind}">${replyTo?`<div class="composer-reply"><span class="composer-reply-bar"></span><div class="composer-reply-content"><strong>Replying to ${esc(pby(replyTo.author_id).display_name)}</strong><span>${esc((replyTo.body||'Attachment').slice(0,110))}</span></div><button type="button" class="round-btn" data-action="cancel-reply" aria-label="Cancel reply" title="Cancel reply">${ico('x','icon-sm')}</button></div>`:''}<div id="composer-assist" class="composer-assist" hidden></div><div class="composer">${kind==='chat'?`<button type="button" class="round-btn" data-action="attach" title="Attach file">${ico('clip')}</button>`:''}<button type="button" class="round-btn" data-action="emoji-picker" title="Emojis">${ico('smile')}</button>${kind==='chat'?`<button type="button" class="round-btn composer-extra" data-action="gif-picker" title="GIF">GIF</button><button type="button" class="round-btn composer-extra" data-action="new-poll" title="Poll">📊</button><button type="button" class="round-btn composer-extra" data-action="record-voice" title="Voice message">🎙️</button>`:''}<textarea id="message-box" name="body" maxlength="4000" rows="1" ${disabled?'disabled':''} placeholder="${disabled?'Join this Piece to chat':esc(placeholder)}"></textarea><button class="send-btn" type="submit" ${disabled?'disabled':''} aria-label="Send">${ico('send')}</button></div><div class="composer-footer"><span id="typing-line"></span><span id="file-status" role="status" aria-live="polite"></span><span>${extra||'Enter to send · Shift+Enter for a new line'}</span></div><input type="file" id="message-file" hidden accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,audio/webm,audio/ogg,audio/mp4,audio/mpeg"></form>`}
 function renderFriends(){let pending=friendships.filter(f=>f.status==='pending');const incoming=pending.filter(f=>f.recipient===user.id),outgoing=pending.filter(f=>f.requester===user.id),accepted=myFriendIds();return header('Friends','Keep the people who matter close',`<button class="btn sm" data-action="find-friends">${ico('plus')} Add friends</button>`)+`<div class="main-body"><div class="content-pad"><h1 class="page-title">Your circle 🧡</h1><p class="page-subtitle">Your friends, friend requests, and the next great conversation.</p>${incoming.length?`<div class="section-row top-spacer"><h2 class="section-heading">Friend requests</h2></div><div class="card">${incoming.map(f=>friendItem(pby(f.requester),'incoming',f.id)).join('')}</div>`:''}${outgoing.length?`<div class="section-row top-spacer"><h2 class="section-heading">Sent requests</h2></div><div class="card">${outgoing.map(f=>friendItem(pby(f.recipient),'outgoing',f.id)).join('')}</div>`:''}<div class="section-row top-spacer"><h2 class="section-heading">Friends (${accepted.length})</h2></div><div class="card">${accepted.map(id=>friendItem(pby(id),'friend')).join('')||'<div class="notice-inline">No friends yet. Search for people by username and send them a request.</div>'}</div></div></div>`}
 function friendItem(p,kind,fid=''){return `<div class="friend-row">${profileFace(p)}<div class="friend-data">${profileName(p)}<p>@${esc(p.handle)}</p></div>${kind==='incoming'?`<button class="btn sm" data-action="accept-friend" data-id="${fid}">Accept</button>`:kind==='outgoing'?`<span class="tag neutral">Pending</span>`:`<button class="btn sm secondary" data-action="start-dm" data-id="${p.id}">Message</button>`}</div>`}
@@ -755,7 +1003,7 @@ function renderPiece(piece){let joined=inPiece(piece.id),own=ownPiece(piece.id);
  if(state.pieceTab==='forum') content=`<div class="section-row"><h2 class="section-heading">Discussions</h2>${joined?`<button class="btn sm" data-action="new-post">${ico('plus')} New post</button>`:''}</div><div class="grid">${activePosts.map(post=>`<article class="post-card" role="button" tabindex="0" data-action="open-post" data-id="${post.id}"><div class="post-meta">${profileName(pby(post.author_id))} · ${relative(post.created_at)}</div><h3>${post.pinned?'📌 ':''}${esc(post.title)}</h3>${post.tags?.length?`<div class="tagline">${post.tags.map(t=>`<span class="tag">#${esc(t)}</span>`).join('')}</div>`:''}<p class="post-body">${esc(post.body.slice(0,240))}${post.body.length>240?'...':''}</p><div class="post-footer">${ico('chat','icon-sm')} ${post.locked?'🔒 Locked':'Read discussion'} ${(own||memberships.some(m=>m.piece_id===post.piece_id&&m.user_id===user.id&&m.role==='moderator'))&&extendedReady?`<button class="emoji-inline" data-action="pin-post" data-id="${post.id}" title="Pin">📌</button><button class="emoji-inline" data-action="lock-post" data-id="${post.id}" title="Lock">🔒</button>`:''}${post.author_id===user.id||own?`<button class="emoji-inline" data-action="delete-post" data-id="${post.id}" title="Delete post">${ico('trash','icon-sm')}</button>`:''}</div></article>`).join('')||'<div class="notice-inline">No discussions yet. Be the first to post.</div>'}</div>`;
  if(state.pieceTab==='gallery')content=`<div class="section-row"><h2 class="section-heading">Gallery</h2>${joined&&piece.is_public?`<button class="btn sm" data-action="new-gallery">${ico('plus')} Upload picture</button>`:''}</div><div class="gallery-grid">${activeGallery.map(photo=>`<article class="gallery-card"><img src="${esc(galleryUrl(photo.image_path))}" alt="${esc(photo.caption||'Community image')}" data-action="enlarge" data-src="${esc(galleryUrl(photo.image_path))}"><div class="gallery-info"><p>${esc(photo.caption)}</p><div class="post-meta">${profileName(pby(photo.author_id))} · ${relative(photo.created_at)}</div><div class="bubble-actions"><button class="emoji-inline" data-action="reaction-menu" data-type="gallery" data-id="${photo.id}">${ico('smile')}</button>${own||photo.author_id===user.id?`<button class="emoji-inline" data-action="delete-gallery" data-id="${photo.id}" data-path="${esc(photo.image_path)}">${ico('trash')}</button>`:''}</div></div></article>`).join('')||'<div class="notice-inline">The gallery is waiting for its first photo.</div>'}</div>`;
   if(state.pieceTab==='events')content=`<div class="section-row"><h2 class="section-heading">Events</h2>${(own||memberships.some(m=>m.piece_id===piece.id&&m.user_id===user.id&&m.role==='moderator'))?`<button class="btn sm" data-action="new-event">+ Create event</button>`:''}</div><div class="grid">${pieceEvents.filter(e=>e.piece_id===piece.id).map(e=>`<article class="post-card"><div class="post-meta">${new Date(e.starts_at).toLocaleString()}</div><h3>📅 ${esc(e.title)}</h3><p>${esc(e.description)}</p></article>`).join('')||'<p class="notice-inline">No upcoming events yet.</p>'}</div>`;
-  return header(piece.name,piece.is_public?'Public Piece · Chat / Forum / Gallery':'Private Piece',buttons)+`<div class="main-body piece-body"><div class="piece-top-scroll"><div class="content-pad"><section class="piece-hero layout-${esc(piece.layout_style||'classic')}"><div class="piece-banner" style="background:${piece.banner_url?`linear-gradient(135deg,#0009,#0004),url(${esc(validUrl(piece.banner_url))}) center/cover`:`linear-gradient(135deg,${esc(piece.color)},#35211a)`}">${own?`<button type="button" class="piece-hero-edit" data-action="edit-piece" title="Change Piece profile picture" aria-label="Change Piece picture">${pieceAvatar(piece,'piece-icon-hero')}<span class="piece-hero-pencil">✎</span></button>`:pieceAvatar(piece,'piece-icon-hero')}</div><div class="piece-info"><div><h2>${esc(piece.name)}</h2><p>${esc(piece.description||'Welcome to this Tender Piece!')}</p>${piece.welcome_text?`<p class="hint">✨ ${esc(piece.welcome_text)}</p>`:''}</div><span class="tag">${piece.is_public?'🌎 Public':'🔒 Private'}</span></div></section><nav class="tabs" aria-label="Piece sections">${[['chat','Chat'],['forum','Forum'],['gallery','Gallery'],['events','Events']].map(([id,label])=>`<button class="${state.pieceTab===id?'active':''}" data-action="piece-tab" data-tab="${id}">${ico(id==='gallery'?'image':id==='forum'?'forum':id==='events'?'bell':'chat','icon-sm')} ${label}</button>`).join('')}</nav>${state.pieceTab!=='chat'?content:''}</div></div>${state.pieceTab==='chat'?content:''}</div>`;
+  return header(state.pieceTab==='chat'?'# '+(selectedChannel(piece.id)?.name||'general'):piece.name,state.pieceTab==='chat'?(selectedChannel(piece.id)?.topic||'Piece text channel'):(piece.is_public?'Public Piece · Chat / Forum / Gallery':'Private Piece'),buttons)+`<div class="main-body piece-body"><div class="piece-top-scroll"><div class="content-pad"><section class="piece-hero layout-${esc(piece.layout_style||'classic')}"><div class="piece-banner" style="background:${piece.banner_url?`linear-gradient(135deg,#0009,#0004),url(&quot;${esc(validUrl(piece.banner_url))}&quot;) center/cover`:`linear-gradient(135deg,${esc(tenderSafeColor(piece.color))},${esc(tenderSafeColor(piece.color_secondary,'#293758'))})`}">${own?`<button type="button" class="piece-hero-edit" data-action="edit-piece" title="Change Piece profile picture" aria-label="Change Piece picture">${pieceAvatar(piece,'piece-icon-hero')}<span class="piece-hero-pencil">✎</span></button>`:pieceAvatar(piece,'piece-icon-hero')}</div><div class="piece-info theme-${esc(piece.theme_style||'classic')}"><div><h2 class="name-font-${nameStyles.includes(piece.name_style)?piece.name_style:'classic'}">${esc(piece.name)}</h2><p>${esc(piece.description||'Welcome to this Tender Piece!')}</p>${piece.welcome_text?`<p class="hint">✨ ${esc(piece.welcome_text)}</p>`:''}</div><span class="tag">${piece.is_public?'🌎 Public':'🔒 Private'}</span></div></section><nav class="tabs" aria-label="Piece sections">${[['chat','Chat'],['forum','Forum'],['gallery','Gallery'],['events','Events']].map(([id,label])=>`<button class="${state.pieceTab===id?'active':''}" data-action="piece-tab" data-tab="${id}">${ico(id==='gallery'?'image':id==='forum'?'forum':id==='events'?'bell':'chat','icon-sm')} ${label}</button>`).join('')}</nav>${state.pieceTab!=='chat'?content:''}</div></div>${state.pieceTab==='chat'?content:''}</div>`;
 }
 function renderSettings(){
  const sections=[['profile','user','My Profile'],['account','settings','My Account'],['appearance','palette','Appearance'],['notifications','bell','Notifications'],['privacy','shield','Privacy & Safety'],['accessibility','accessibility','Accessibility']];
@@ -773,8 +1021,19 @@ function renderSettings(){
   <div class="settings-two-fields"><div class="field"><label>Custom text status</label><input class="input" name="game_status" maxlength="90" value="${esc(my.game_status||'')}" placeholder="What's on your mind?"></div>
   ${extendedReady?`<div class="field"><label>Status emoji</label><input class="input" name="status_emoji" maxlength="12" value="${esc(my.status_emoji||'🍗')}"></div>`:''}</div>
   <div class="settings-actions"><button class="btn" type="submit">Save profile</button></div></form></div>
-  <div class="settings-card"><h3>Avatar & banner</h3><p class="hint">Your pictures are visible to other Tender members.</p>
-  <div class="settings-two-fields"><div class="field"><label>Upload avatar (2 MB)</label><input type="file" class="input" id="avatar-file" accept="image/png,image/jpeg,image/webp"></div>
+  ${visualReady?`<div class="settings-card free-nitro-studio"><h3>✨ Free profile studio</h3><p>Gradients, name fonts and effects — free for every Tender member!</p>
+ <form id="profile-style-form" class="settings-fields">
+ <div class="settings-two-fields">
+ <div class="field"><label>Profile gradient: start</label><input class="input" type="color" name="profile_gradient_start" value="${esc(tenderSafeColor(my.profile_gradient_start,'#21385d'))}"></div>
+ <div class="field"><label>Profile gradient: end</label><input class="input" type="color" name="profile_gradient_end" value="${esc(tenderSafeColor(my.profile_gradient_end,'#563561'))}"></div>
+ <div class="field"><label>Display name font</label><select class="input" name="name_style">${nameStyles.map(style=>`<option value="${style}" ${my.name_style===style?'selected':''}>${style[0].toUpperCase()+style.slice(1)}</option>`).join('')}</select></div>
+ <div class="field"><label>Display name effect</label><select class="input" name="name_effect">${nameEffects.map(effect=>`<option value="${effect}" ${my.name_effect===effect?'selected':''}>${effect[0].toUpperCase()+effect.slice(1)}</option>`).join('')}</select></div>
+ <div class="field"><label>Solid / neon text color</label><input class="input" type="color" name="name_color" value="${esc(tenderSafeColor(my.name_color,'#ffffff'))}"></div>
+ </div>
+ <div class="profile-name-preview">${styledName(my)}</div><button type="submit" class="btn">Apply free profile style</button>
+ </form></div>`:'<div class="settings-card"><h3>Free profile gradients & fonts</h3><p>These features activate automatically when Tender 0.4 database setup finishes.</p></div>'}
+<div class="settings-card"><h3>Avatar & banner</h3><p class="hint">Your pictures are visible to other Tender members.</p>
+  <div class="settings-two-fields"><div class="field"><label>Upload avatar (2 MB — PNG, WEBP, GIF)</label><input type="file" class="input" id="avatar-file" accept="image/png,image/jpeg,image/webp,image/gif"></div>
   <div class="field"><label>Upload banner (3 MB)</label><input class="input" id="banner-file" type="file" accept="image/png,image/jpeg,image/webp"></div></div></div>`;
  if(tab==='account')content=`<div class="settings-section-head"><span class="eyebrow">ACCOUNT</span><h1>My Account</h1><p>See your account details, current user identity and personal profile.</p></div>
   <div class="settings-card"><div class="account-identity">${avatars(my)}<div><h3>${esc(my.display_name)}</h3><p>@${esc(my.handle)}</p></div><button class="btn sm secondary" data-action="settings-tab" data-tab="profile">Edit profile</button></div><div class="settings-readonly"><span>Account email</span><strong>${esc(user.email||'Available in your sign-in provider')}</strong></div><div class="settings-readonly"><span>User ID</span><code>${esc(user.id)}</code></div><p class="hint">Password and email updates are managed securely by your sign-in provider. Never share your password.</p></div>
@@ -801,26 +1060,30 @@ function renderSettings(){
 let activeLoadVersion=0;
 async function loadActive(){
  if(!db||!state.selected)return;
- const seq=++activeLoadVersion,selected=state.selected,area=state.area,tab=state.pieceTab;
- const pending=activeMessages.filter(m=>m.pending&&(area==='chats'?m.conversation_id===selected:m.piece_id===selected));
+ const seq=++activeLoadVersion,selected=state.selected,area=state.area,tab=state.pieceTab,chosenChannel=state.channelId;
+ const pending=activeMessages.filter(m=>m.pending&&(area==='chats'?m.conversation_id===selected:(m.piece_id===selected&&(!channelReady||m.channel_id===state.channelId))));
  let fresh=[],reactions=[],posts=[],gallery=[];
  if(area==='chats'){
   fresh=assert(await q('messages').select('*').eq('conversation_id',selected).order('created_at',{ascending:true}).limit(150))||[];
   if(fresh.length)reactions=assert(await q('reactions').select('*').eq('target_type','message').in('target_id',fresh.map(x=>x.id)))||[];
  }else if(area==='pieces'||area==='discover'){
   if(tab==='chat'){
-   fresh=assert(await q('piece_messages').select('*').eq('piece_id',selected).order('created_at',{ascending:true}).limit(150))||[];
+   const activeChannel=selectedChannel(selected);
+    let query=q('piece_messages').select('*').eq('piece_id',selected);
+    if(channelReady&&activeChannel&&!activeChannel.id.startsWith('legacy-'))
+      query=activeChannel.is_default?query.or('channel_id.eq.'+activeChannel.id+',channel_id.is.null'):query.eq('channel_id',activeChannel.id);
+    fresh=assert(await query.order('created_at',{ascending:true}).limit(150))||[];
    if(fresh.length)reactions=assert(await q('reactions').select('*').eq('target_type','piece_message').in('target_id',fresh.map(x=>x.id)))||[];
   }
   if(tab==='forum')posts=assert(await q('piece_posts').select('*').eq('piece_id',selected).order('created_at',{ascending:false}).limit(100))||[];
   if(tab==='gallery')gallery=assert(await q('piece_gallery').select('*').eq('piece_id',selected).order('created_at',{ascending:false}).limit(100))||[];
  }
- if(seq!==activeLoadVersion||selected!==state.selected||area!==state.area||tab!==state.pieceTab)return;
+ if(seq!==activeLoadVersion||selected!==state.selected||area!==state.area||tab!==state.pieceTab||chosenChannel!==state.channelId)return;
  const ids=new Set(fresh.map(x=>x.id));for(const row of pending)if(!ids.has(row.id))fresh.push(row);
  activeMessages=fresh;activeReactions=reactions;activePosts=posts;activeGallery=gallery;
  await Promise.all([prepareAttachmentUrls(),loadPolls()]);
 }
-async function goTo(area,id=null){state.area=area;state.selected=id;state.search='';state.mobileDetail=!!id||['discover','settings'].includes(area);if(area==='friends'&&!id)state.mobileDetail=true;if(area==='pieces'||area==='discover')state.pieceTab='chat';replyTo=null;if(id&&['chats','pieces','discover'].includes(area))await loadActive();if(state.area!==area||state.selected!==id)return;applyLocalAppearance();render();if(area==='chats'&&id){markRead(id);subscribeTyping().catch(console.warn)}else if(['pieces','discover'].includes(area)&&id&&state.pieceTab==='chat'){subscribeTyping().catch(console.warn)}else{unsubTyping()}if(area==='friends')markRead(null,true);}
+async function goTo(area,id=null){state.area=area;state.selected=id;state.search='';state.mobileDetail=!!id||['discover','settings'].includes(area);if(area==='friends'&&!id)state.mobileDetail=true;if(area==='pieces'||area==='discover')state.pieceTab='chat';state.channelId=id&&['pieces','discover'].includes(area)?channelsFor(id).find(c=>c.is_default)?.id||channelsFor(id)[0]?.id||null:null;replyTo=null;if(id&&['chats','pieces','discover'].includes(area))await loadActive();if(state.area!==area||state.selected!==id)return;applyLocalAppearance();render();if(area==='chats'&&id){markRead(id);subscribeTyping().catch(console.warn)}else if(['pieces','discover'].includes(area)&&id&&state.pieceTab==='chat'){markChannelRead().catch(console.warn);subscribeTyping().catch(console.warn)}else{unsubTyping()}if(area==='friends')markRead(null,true);}
 let confirmationResolve=null;
 function tenderConfirm(title,description,action='Confirm',danger=true){
  if(confirmationResolve){confirmationResolve(false);confirmationResolve=null}
@@ -850,7 +1113,7 @@ function newPieceModal(p=null){
      <p class="hint">Upload a PNG, JPG or WEBP (max 3 MB), or keep an emoji icon.</p></div>
    </div>
    <div class="field"><label for="piece-pfp-file">Piece profile picture (optional)</label>
-     <input class="input" id="piece-pfp-file" name="piece_pfp" type="file" accept="image/png,image/jpeg,image/webp">
+     <input class="input" id="piece-pfp-file" name="piece_pfp" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
      <div class="piece-image-preview" id="piece-pfp-preview" hidden><img id="piece-pfp-preview-img" alt="Selected Piece picture preview"></div>
    </div>
    <div class="field"><label for="piece-icon-mode">Picture or emoji</label>
@@ -865,6 +1128,12 @@ function newPieceModal(p=null){
    <div class="field"><label>Piece name</label><input class="input" name="name" minlength="2" maxlength="70" required value="${esc(p?.name||'')}" placeholder="My First Piece"></div>
    <div class="field"><label>Description</label><textarea class="input textarea" name="description" maxlength="500" placeholder="What is this Piece all about?">${esc(p?.description||'')}</textarea></div>
    <div class="field"><label>Accent color</label><input class="input" name="color" type="color" value="${esc(p?.color||'#f47735')}"></div>
+ ${visualReady?`<div class="piece-custom-grid">
+ <div class="field"><label>Secondary gradient color</label><input class="input" type="color" name="color_secondary" value="${esc(tenderSafeColor(p?.color_secondary,'#293758'))}"></div>
+ <div class="field"><label>Icon shape</label><select class="input" name="icon_shape">${['rounded','round','square','squircle'].map(v=>`<option value="${v}" ${p?.icon_shape===v?'selected':''}>${v}</option>`).join('')}</select></div>
+ <div class="field"><label>Community theme</label><select class="input" name="theme_style">${['classic','aurora','sunset','midnight','neon'].map(v=>`<option value="${v}" ${p?.theme_style===v?'selected':''}>${v}</option>`).join('')}</select></div>
+ <div class="field"><label>Piece name font</label><select class="input" name="name_style">${nameStyles.map(v=>`<option value="${v}" ${p?.name_style===v?'selected':''}>${v}</option>`).join('')}</select></div></div>
+ <div class="field"><label>Welcome message for new members</label><textarea name="channel_welcome" class="input textarea" maxlength="300" rows="2" placeholder="Welcome to our community!">${esc(p?.channel_welcome||'')}</textarea></div>`:''}
    <div class="field"><label>Visibility</label><select class="input" name="visibility">
      <option value="public" ${!p||p.is_public?'selected':''}>Public · Discoverable</option>
      <option value="private" ${p&&!p.is_public?'selected':''}>Private · Members only</option>
@@ -876,10 +1145,26 @@ function newPieceModal(p=null){
    <button class="btn full top-spacer" type="submit">${editing?'Save Piece changes':'Create Piece'} 🍗</button>
  </form>`);
 }
+function channelEditorModal(channel=null){
+ const piece=selectedPiece();
+ if(!piece||!channelReady)return toast('Channels will be available when Tender 0.4 migration completes.',true);
+ if(!memberships.some(m=>m.piece_id===piece.id&&m.user_id===user.id&&['owner','moderator'].includes(m.role)))return toast('Only Piece staff can manage channels.',true);
+ modal(channel?'Edit #'+channel.name:'Create channel', 'Give this Piece a place for a specific topic.',`
+ <form id="channel-form" class="channel-form">
+ <input type="hidden" name="id" value="${esc(channel?.id||'')}">
+ <div class="field"><label>Channel name</label><input name="name" class="input" required maxlength="40" pattern="[a-z0-9][a-z0-9_-]*" value="${esc(channel?.name||'')}" placeholder="general-chat"></div>
+ <div class="field"><label>Channel type</label><select class="input" name="kind"><option value="text" ${channel?.kind!=='announcements'?'selected':''}># Text chat</option><option value="announcements" ${channel?.kind==='announcements'?'selected':''}>📣 Announcements</option></select></div>
+ <div class="field"><label>Category</label><input name="category" class="input" maxlength="35" required value="${esc(channel?.category||'TEXT CHANNELS')}" placeholder="TEXT CHANNELS"></div>
+ <div class="field"><label>Topic</label><textarea name="topic" class="input textarea" maxlength="280" rows="2" placeholder="What is this channel about?">${esc(channel?.topic||'')}</textarea></div>
+ <div class="field"><label>Sort order</label><input type="number" name="position" class="input" min="0" max="999" value="${Number(channel?.position||0)}"></div>
+ <button class="btn full" type="submit">${channel?'Save channel':'Create channel'}</button>
+ ${channel&&!channel.is_default?`<button class="btn danger full" type="button" data-action="delete-channel" data-id="${esc(channel.id)}">Delete channel</button>`:''}
+ </form>`);
+}
 function newPostModal(){modal('New discussion','Start a topic in '+selectedPiece().name,`<form id="post-form"><div class="field"><label>Title</label><input class="input" name="title" maxlength="130" minlength="3" required placeholder="What should we discuss?"></div><div class="field"><label>Post</label><textarea class="input textarea" name="body" maxlength="8000" required placeholder="Write something interesting..."></textarea></div><div class="field"><label>Tags (comma-separated, optional)</label><input class="input" name="tags" maxlength="100" placeholder="art, help, questions"></div><button class="btn full" type="submit">Publish discussion</button></form>`)}
 function galleryModal(){modal('Add to gallery','Share something with the Piece.',`<form id="gallery-form"><div class="field"><label>Image (maximum 5 MB)</label><input class="input" name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" required></div><div class="field"><label>Caption</label><textarea class="input textarea" name="caption" maxlength="500" placeholder="What did you make?"></textarea></div><button class="btn full" type="submit">Upload image</button></form>`)}
 async function postModal(id){const post=activePosts.find(p=>p.id===id);if(!post)return;selectedPost=post;let comments=assert(await q('piece_comments').select('*').eq('post_id',id).order('created_at',{ascending:true}).limit(100))||[];modal(post.title,`Posted by ${pby(post.author_id).display_name} · ${relative(post.created_at)}`,`<div class="post-detail-body">${esc(post.body)}</div><div class="divider"></div><h3>${comments.length} replies</h3><div>${comments.map(c=>`<div class="reply-item"><div class="post-meta">${profileName(pby(c.author_id))} · ${relative(c.created_at)}</div><p>${esc(c.body)}</p></div>`).join('')||'<p class="hint top-spacer">No replies yet.</p>'}</div>${inPiece(state.selected)&&!post.locked?`<form id="reply-form" class="top-spacer"><div class="field"><label>Write a reply</label><textarea name="body" maxlength="3000" required class="input textarea" placeholder="Add to the conversation..."></textarea></div><button class="btn" type="submit">Post reply</button></form>`:'<p class="notice-inline">Join this Piece to reply.</p>'}`)}
-function reactionModal(type,id){const choices=['🍗','❤️','😂','🔥','👍','⭐','🎉','😮','🤝','😭','💀','🤩','😍','🥳','😎','😡','🤔','😴','🥹','💯','👏','🙌','👀','💜','✨','🧡','💙','✅','❌','🌈','👑','🎨'];modal('React to this','Pick an emoji! Reactions update instantly.',`<div class="emoji-grid">${choices.map(emoji=>`<button class="emoji-option" data-action="react" data-type="${type}" data-id="${id}" data-emoji="${emoji}">${emoji}</button>`).join('')}</div>`)}
+function reactionModal(type,id){emojiPicker('reaction',type,id)}
 function chatInfo(){let c=getConversation(state.selected);modal('Conversation details',c?.kind==='group'?'This is your group chat.':'Private messaging between two friends.',`<h3 class="section-heading">Members</h3><div>${(c?.conversation_members||[]).map(m=>friendItem(pby(m.user_id),'info')).join('')}</div><p class="hint top-spacer">Only conversation members can read messages and attachments.</p>`)}
 // Tender 0.3 commands are explicit opt-in shortcuts. Private utilities NEVER write chat messages.
 const tenderCommands=[
@@ -943,17 +1228,18 @@ function applySlashCommand(body,kind){
  }
 }
 async function sendMessage(form){let text=String(new FormData(form).get('body')||'').trim();const command=text.startsWith('/')?applySlashCommand(text,form.dataset.kind):null;if(command?.error){toast(command.error,true);return}if(command?.handled){const field=form.querySelector('#message-box');if(field)field.value='';return}if(command?.text)text=command.text;let file=document.getElementById('message-file')?.files?.[0]||recordedVoice||null;if(!text&&!file)return;
- if(state.busy)return;const kind=form.dataset.kind,table=kind==='chat'?'messages':'piece_messages',target=state.selected,area=state.area;
- const original=text,replyId=replyTo?.id||null;const tmp=crypto.randomUUID();const pending={id:tmp,created_at:new Date().toISOString(),author_id:user.id,body:text,pending:true,conversation_id:kind==='chat'?target:null,piece_id:kind==='piece'?target:null,attachment_path:file?file.name:null,pendingFile:file?URL.createObjectURL(file):null,reply_to:replyId};
- const field=form.querySelector('#message-box');if(field)field.value='';localStorage.removeItem('tender-draft:'+user.id+':'+[area,target,kind==='piece'?'chat':state.pieceTab].join(':'));if(form.querySelector('#message-file'))form.querySelector('#message-file').value='';recordedVoice=null;replyTo=null;updateComposerReply();
+ if(state.busy)return;const kind=form.dataset.kind,table=kind==='chat'?'messages':'piece_messages',target=state.selected,area=state.area,channelAtSend=kind==='piece'?state.channelId:null;
+ const original=text,replyId=replyTo?.id||null;const tmp=crypto.randomUUID();const pending={id:tmp,created_at:new Date().toISOString(),author_id:user.id,body:text,pending:true,conversation_id:kind==='chat'?target:null,piece_id:kind==='piece'?target:null,channel_id:kind==='piece'?channelAtSend:null,attachment_path:file?file.name:null,pendingFile:file?URL.createObjectURL(file):null,reply_to:replyId};
+ const field=form.querySelector('#message-box');if(field)field.value='';localStorage.removeItem(tenderDraftKey(area,target,kind==='piece'?'chat':state.pieceTab,channelAtSend));if(form.querySelector('#message-file'))form.querySelector('#message-file').value='';recordedVoice=null;replyTo=null;updateComposerReply();
  activeMessages.push(pending);syncActiveStream(true);document.getElementById('message-box')?.focus();
  await safe(async()=>{let attachment_path=null;try{
  if(file){const status=document.getElementById('file-status');if(status)status.textContent='Uploading attachment…';if(kind!=='chat')throw Error('Upload attachments in DMs/groups, or use the Gallery in Pieces.');if(file.size>5*1024*1024)throw Error('Maximum attachment size is 5 MB.');if(!['image/png','image/jpeg','image/webp','image/gif','application/pdf','audio/webm','audio/ogg','audio/mp4','audio/mpeg'].includes(file.type))throw Error('Unsupported file type.');attachment_path=`${target}/${user.id}/${crypto.randomUUID()}-${file.name.replace(/[^a-z0-9_.-]/gi,'_')}`;assert(await db.storage.from('tender-chat').upload(attachment_path,file,{contentType:file.type,upsert:false}));}
- const record=kind==='chat'?{id:tmp,conversation_id:target,author_id:user.id,body:text,attachment_path}:{id:tmp,piece_id:target,author_id:user.id,body:text};
+ const chosenChannel=kind==='piece'&&channelReady?pieceChannels.find(c=>c.id===channelAtSend&&c.piece_id===target)||channelsFor(target).find(c=>c.is_default):null;
+  const record=kind==='chat'?{id:tmp,conversation_id:target,author_id:user.id,body:text,attachment_path}:{id:tmp,piece_id:target,author_id:user.id,body:text,...(chosenChannel&&!chosenChannel.id.startsWith('legacy-')?{channel_id:chosenChannel.id}:{})};
  if(replyId&&((kind==='chat'&&extendedReady)||(kind==='piece'&&pieceRepliesReady)))record.reply_to=replyId;
- const status=document.getElementById('file-status');if(status)status.textContent='Sending…';const result=assert(await q(table).insert(record).select('*').single());let pos=activeMessages.findIndex(m=>m.id===tmp);if(pos>=0)activeMessages[pos]=result;else if(state.selected===target&&state.area===area&&!activeMessages.some(m=>m.id===result.id))activeMessages.push(result);
- if(pending.pendingFile){URL.revokeObjectURL(pending.pendingFile)}if(status)status.textContent='Sent ✓';if(attachment_path)await prepareAttachmentUrls();if(state.selected===target&&state.area===area){syncActiveStream();document.getElementById('message-box')?.focus()}else scheduleReconcile(false);
- }catch(e){activeMessages=activeMessages.filter(m=>m.id!==tmp);if(pending.pendingFile)URL.revokeObjectURL(pending.pendingFile);if(state.selected===target&&state.area===area){replyTo=replyId?activeMessages.find(m=>m.id===replyId)||null:null;updateComposerReply();syncActiveStream();const field=document.getElementById('message-box');if(field)field.value=original;}throw e;}});
+ const status=document.getElementById('file-status');if(status)status.textContent='Sending…';const result=assert(await q(table).insert(record).select('*').single());let pos=activeMessages.findIndex(m=>m.id===tmp);if(pos>=0)activeMessages[pos]=result;else if(state.selected===target&&state.area===area&&(kind==='chat'||state.channelId===channelAtSend)&&!activeMessages.some(m=>m.id===result.id))activeMessages.push(result);
+ if(pending.pendingFile){URL.revokeObjectURL(pending.pendingFile)}if(status)status.textContent='Sent ✓';if(attachment_path)await prepareAttachmentUrls();if(state.selected===target&&state.area===area&&(kind==='chat'||state.channelId===channelAtSend)){syncActiveStream();document.getElementById('message-box')?.focus()}else scheduleReconcile(false);
+ }catch(e){activeMessages=activeMessages.filter(m=>m.id!==tmp);if(pending.pendingFile)URL.revokeObjectURL(pending.pendingFile);if(state.selected===target&&state.area===area&&(kind==='chat'||state.channelId===channelAtSend)){replyTo=replyId?activeMessages.find(m=>m.id===replyId)||null:null;updateComposerReply();syncActiveStream();const field=document.getElementById('message-box');if(field)field.value=original;}throw e;}});
 }
 const galleryUrl=path=>db.storage.from('tender-gallery').getPublicUrl(path).data.publicUrl;
 async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=el.dataset.tab;try{
@@ -983,7 +1269,8 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
   await safe(async()=>{
    assert(await q('profiles').update({presence_mode:value}).eq('id',user.id));
    cacheUpdatedProfile({presence_mode:value});
-   renderAccountDock(true);
+   publishPresence().catch(console.warn);
+   renderAccountDock(true);updatePresenceMarkers();
    toast('Status set to '+availability.find(x=>x[0]===value)[1]+'.');
   });
   return;
@@ -1032,7 +1319,9 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
   if(a==='toggle-info'){const visible=localStorage.getItem('tender-info-hidden')==='1';localStorage.setItem('tender-info-hidden',visible?'0':'1');renderInfoPanel();return}
   if(a==='toggle-rail'){const expanded=localStorage.getItem('tender-rail-expanded')==='1';localStorage.setItem('tender-rail-expanded',expanded?'0':'1');document.getElementById('app-screen')?.classList.toggle('rail-expanded',!expanded);return}
   if(a==='open-profile-piece'){closeModal();await goTo('pieces',id);return}
-   if(a==='open-profile'){await showProfile(id);return}
+   if(a==='mini-profile'){await showMiniProfile(id,el);return}
+ if(a==='open-full-profile'){closeMiniProfile();await showProfile(id);return}
+ if(a==='open-profile'){closeMiniProfile();await showProfile(id);return}
   if(a==='open-alerts'){alertsModal();return}
  if(a==='open-alert'){closeModal();if(el.dataset.cid)await goTo('chats',el.dataset.cid);else await goTo('friends');return}
  if(a==='confirm-yes'){settleConfirm(true);return}
@@ -1050,7 +1339,22 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
    toast(ok?'Test notification sent! Check your system notifications.':'Could not display a notification. Check HTTPS and browser permissions.',!ok);return;
  }
  if(a==='emoji-picker'){emojiPicker();return}
- if(a==='emoji-insert'){const val=el.dataset.emoji;closeModal();const area=document.getElementById('message-box');if(area){area.value+=val;area.focus()}return}
+ if(a==='emoji-category'){emojiCategory=String(el.dataset.category||'All');renderEmojiResults();return}
+ if(a==='emoji-more'){renderEmojiResults(false);return}
+ if(a==='emoji-insert'){
+  const val=String(el.dataset.emoji||'');if(!val)return;
+  const reaction=emojiPickerMode==='reaction'?emojiReactionTarget:null;
+  storeEmojiHistory(val);closeModal();
+  if(reaction){emojiReactionTarget=null;await handleAction({dataset:{action:'react',id:reaction.id,type:reaction.type,emoji:val}});return}
+  const field=document.getElementById('message-box');
+  if(field){
+   const start=emojiComposerRange&&Number.isInteger(emojiComposerRange.start)?Math.min(field.value.length,emojiComposerRange.start):field.value.length;
+   const end=emojiComposerRange&&Number.isInteger(emojiComposerRange.end)?Math.min(field.value.length,emojiComposerRange.end):start;
+   if(typeof field.setRangeText==='function')field.setRangeText(val,start,end,'end');else field.value+=val;
+   field.focus();field.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+  emojiComposerRange=null;return;
+ }
  if(a==='custom-emoji'){customEmojiModal();return}
  if(a==='gif-picker'){gifModal();return}
  if(a==='new-poll'){if(!extendedReady)return toast('Run the 0.2 SQL migration first.',true);pollModal();return}
@@ -1074,12 +1378,37 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='goto-piece-message'){closeModal();await goTo('pieces',el.dataset.cid);document.querySelector('[data-message-id="'+CSS.escape(id)+'"]')?.scrollIntoView({behavior:'smooth',block:'center'});return}
   if(a==='goto-message'){closeModal();await goTo('chats',el.dataset.cid);document.querySelector(`[data-message-id="${CSS.escape(id)}"]`)?.scrollIntoView({behavior:'smooth',block:'center'});return}
  if(a==='auth-tab'){state.loginMode=tab;renderAuth();return}
- if(a==='area'){await goTo(el.dataset.area);return}
- if(a==='go-back'){state.mobileDetail=false;state.selected=null;render();return}
+ if(a==='area'){closeMiniProfile();await goTo(el.dataset.area);return}
+ if(a==='go-back'){closeMiniProfile();state.mobileDetail=false;state.selected=null;render();return}
  if(a==='open-chat'){await goTo('chats',id);return}
  if(a==='open-friend'){await goTo('friends',id);return}
+ if(a==='rail-piece'){await goTo('pieces',id);return}
+ if(a==='select-channel'){
+  if(!channelReady&&id===selectedChannel()?.id)return;
+  const selected=pieceChannels.find(c=>c.id===id&&c.piece_id===state.selected);
+  if(!selected||!inPiece(selected.piece_id))return toast('Channel unavailable.',true);
+  if(state.channelId===id&&state.pieceTab==='chat')return;
+  state.channelId=id;state.pieceTab='chat';replyTo=null;
+  await loadActive();renderSidebar();renderMain();markChannelRead().catch(console.warn);subscribeTyping().catch(console.warn);return;
+ }
+ if(a==='piece-home'){state.pieceTab='forum';await loadActive();renderSidebar();renderMain();unsubTyping();return}
+ if(a==='new-channel'){channelEditorModal();return}
+ if(a==='edit-channel'){
+  const selected=pieceChannels.find(c=>c.id===id&&c.piece_id===state.selected);
+  if(selected)channelEditorModal(selected);return;
+ }
+ if(a==='delete-channel'){
+  const selected=pieceChannels.find(c=>c.id===id&&c.piece_id===state.selected&&!c.is_default);
+  if(!selected||!ownPiece(selected.piece_id))return toast('Only the owner can remove this channel.',true);
+  if(!await tenderConfirm('Delete #'+selected.name+'?','Its messages will remain in the Piece and move back to #general.','Delete channel'))return;
+  await safe(async()=>{
+   assert(await q('piece_channels').delete().eq('id',selected.id).eq('piece_id',state.selected));
+   closeModal();await loadChannelData();state.channelId=channelsFor(state.selected).find(c=>c.is_default)?.id||null;
+   state.pieceTab='chat';await loadActive();render();toast('Channel deleted. Messages moved to #general.');
+  });return;
+ }
  if(a==='open-piece'){await goTo(state.area==='discover'?'discover':'pieces',id);return}
- if(a==='piece-tab'){state.pieceTab=tab;await loadActive();renderMain();if(tab==='chat')subscribeTyping().catch(console.warn);else unsubTyping();return}
+ if(a==='piece-tab'){state.pieceTab=tab;await loadActive();renderSidebar();renderMain();if(tab==='chat'){markChannelRead().catch(console.warn);subscribeTyping().catch(console.warn)}else unsubTyping();return}
  if(a==='new-chat'){newChatModal();return}
  if(a==='new-piece'){newPieceModal();return}
  if(a==='edit-piece'){newPieceModal(selectedPiece());return}
@@ -1122,6 +1451,27 @@ async function submitForm(form){switch(form.id){
  case'composer-form':return sendMessage(form);
  case'friend-search-form':return safe(async()=>{let h=String(new FormData(form).get('handle')).trim().toLowerCase();let target=assert(await q('profiles').select('id,handle,display_name,avatar_url').eq('handle',h).maybeSingle());let res=document.getElementById('friend-search-results');if(!res)return;if(!target){res.innerHTML='<p class="notice-inline">No user with that username. Double-check their spelling.</p>';return}if(target.id===user.id){res.innerHTML='<p class="notice-inline">That\'s you, Buffalo! 🍗</p>';return}let f=friendships.find(f=>[f.requester,f.recipient].includes(user.id)&&[f.requester,f.recipient].includes(target.id));res.innerHTML=`<div class="friend-row">${profileFace(target)}<div class="friend-data">${profileName(target)}<p>@${esc(target.handle)}</p></div>${f?`<span class="tag">${esc(f.status)}</span>`:`<button class="btn sm" data-action="request-friend" data-id="${target.id}">Add friend</button>`}</div>`;return});
  case'group-form':return safe(async()=>{let data=new FormData(form),name=String(data.get('group_name')).trim(),members=data.getAll('member');let cid=assert(await db.rpc('start_group',{group_name:name,member_ids:members}));closeModal();await refreshData();await goTo('chats',cid);toast('Group created!')});
+ case'channel-form':return safe(async()=>{
+  if(!channelReady)throw Error('Channel backend is not ready.');
+  const d=new FormData(form),piece=selectedPiece(),staff=memberships.some(m=>m.piece_id===piece?.id&&m.user_id===user.id&&['owner','moderator'].includes(m.role));
+  if(!piece||!staff)throw Error('Only Piece staff can manage channels.');
+  const name=String(d.get('name')||'').trim().toLowerCase().replace(/\s+/g,'-');
+  if(!/^[a-z0-9][a-z0-9_-]{0,39}$/.test(name))throw Error('Use 1–40 lowercase letters, numbers, _ or - in a channel name.');
+  const data={piece_id:piece.id,name,kind:d.get('kind')==='announcements'?'announcements':'text',topic:String(d.get('topic')||'').trim().slice(0,280),
+   category:String(d.get('category')||'TEXT CHANNELS').trim().slice(0,35)||'TEXT CHANNELS',
+   position:Math.min(999,Math.max(0,Number(d.get('position'))||0))};
+  const id=String(d.get('id')||'');
+  if(id){
+   const existing=pieceChannels.find(c=>c.id===id&&c.piece_id===piece.id);
+   if(!existing)throw Error('Channel no longer exists.');
+   assert(await q('piece_channels').update(data).eq('id',id).eq('piece_id',piece.id));
+  }else{
+   const added=assert(await q('piece_channels').insert(data).select('id').single());
+   state.channelId=added.id;
+  }
+  await loadChannelData();closeModal();state.pieceTab='chat';await loadActive();render();
+  markChannelRead().catch(console.warn);toast(id?'Channel saved!':'New channel created! 🍗');
+ });
  case'piece-form':return safe(async()=>{
   const d=new FormData(form),name=String(d.get('name')||'').trim(),description=String(d.get('description')||'').trim();
   const color=String(d.get('color')||'#f47735'),is_public=d.get('visibility')==='public';
@@ -1129,12 +1479,19 @@ async function submitForm(form){switch(form.id){
   const old=pieceId?pieces.find(p=>p.id===pieceId):null;
   if(pieceId&&(!old||old.owner_id!==user.id))throw Error('Only the Piece owner can edit this Piece.');
   const image=d.get('piece_pfp'),banner=d.get('banner');
-  const mime=['image/png','image/jpeg','image/webp'];
+  const mime=['image/png','image/jpeg','image/webp','image/gif'];
   if(image?.size&&(image.size>3145728||!mime.includes(image.type)))throw Error('Choose a PNG, JPG or WEBP Piece picture under 3 MB.');
   if(banner?.size&&(banner.size>3145728||!mime.includes(banner.type)))throw Error('Choose a PNG, JPG or WEBP banner under 3 MB.');
   const emoji=String(d.get('icon_emoji')||'🍗').trim().slice(0,12)||'🍗';
   const mode=d.get('icon_mode');
   const updated={name,description,color,is_public};
+  if(visualReady){
+   const shape=String(d.get('icon_shape')||'rounded'),theme=String(d.get('theme_style')||'classic'),font=String(d.get('name_style')||'classic');
+   Object.assign(updated,{color_secondary:tenderSafeColor(d.get('color_secondary'),'#293758'),
+    icon_shape:['rounded','round','square','squircle'].includes(shape)?shape:'rounded',
+    theme_style:['classic','aurora','sunset','midnight','neon'].includes(theme)?theme:'classic',
+    name_style:nameStyles.includes(font)?font:'classic',channel_welcome:String(d.get('channel_welcome')||'').slice(0,300)});
+  }
   if(old){
     if(image?.size)updated.icon=(await uploadPublicAsset(image,'tender-banners',3145728,mime,'piece-avatar-'+old.id)).url;
     else if(mode==='emoji')updated.icon=emoji;
@@ -1147,20 +1504,33 @@ async function submitForm(form){switch(form.id){
     toast('Piece updated! 🍗');
   }else{
     const id=assert(await db.rpc('create_piece',{piece_name:name,piece_description:description,piece_color:color,piece_public:is_public}));
-    state.selected=id;state.area='pieces';state.pieceTab='chat';
-    if(image?.size||mode==='emoji'||emoji!=='🍗'){
+    state.selected=id;state.area='pieces';state.pieceTab='chat';state.channelId=null;
+    if(image?.size||mode==='emoji'||emoji!=='🍗'||visualReady){
       try{
         const icon=image?.size?(await uploadPublicAsset(image,'tender-banners',3145728,mime,'piece-avatar-'+id)).url:emoji;
-        assert(await q('pieces').update({icon}).eq('id',id).eq('owner_id',user.id));
+        const details=visualReady?{...updated,icon}:{icon};
+        if(extendedReady&&banner?.size)details.banner_url=(await uploadPublicAsset(banner,'tender-banners',3145728,mime,'piece-banner-'+id)).url;
+        assert(await q('pieces').update(details).eq('id',id).eq('owner_id',user.id));
       }catch(e){console.warn('Piece picture could not be set:',e);toast('Piece created, but the picture was not saved. You can retry in Edit Piece.',true)}
     }
     toast('Piece created! 🍗');
   }
-  closeModal();await refreshData();await loadActive();render();
+  closeModal();await refreshData();state.channelId=channelsFor(state.selected).find(c=>c.is_default)?.id||null;await loadActive();render();
 });
  case'post-form':return safe(async()=>{let d=new FormData(form);assert(await q('piece_posts').insert({piece_id:state.selected,author_id:user.id,title:String(d.get('title')).trim(),body:String(d.get('body')).trim(),...(extendedReady?{tags:String(d.get('tags')||'').split(',').map(x=>x.trim().replace(/[^a-z0-9_-]/gi,'').slice(0,24)).filter(Boolean).slice(0,5)}:{})}));closeModal();await loadActive();renderMain();toast('Discussion published!')});
  case'reply-form':return safe(async()=>{assert(await q('piece_comments').insert({post_id:selectedPost.id,author_id:user.id,body:String(new FormData(form).get('body')).trim()}));await postModal(selectedPost.id);toast('Reply posted!')});
  case'gallery-form':return safe(async()=>{let d=new FormData(form),file=d.get('file');if(!file?.size||file.size>5*1024*1024||!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type))throw Error('Choose a PNG/JPG/WEBP/GIF under 5 MB.');let path=`${state.selected}/${user.id}/${crypto.randomUUID()}.${file.name.split('.').pop().toLowerCase()}`;assert(await db.storage.from('tender-gallery').upload(path,file,{contentType:file.type}));try{assert(await q('piece_gallery').insert({piece_id:state.selected,author_id:user.id,image_path:path,caption:String(d.get('caption')).trim()}))}catch(e){await db.storage.from('tender-gallery').remove([path]);throw e}closeModal();await loadActive();renderMain();toast('Image uploaded!')});
+ case'profile-style-form':return safe(async()=>{
+  if(!visualReady)throw Error('Wait for the Tender 0.4 profile update.');
+  const d=new FormData(form),style=String(d.get('name_style')),effect=String(d.get('name_effect'));
+  const updates={profile_gradient_start:tenderSafeColor(d.get('profile_gradient_start'),'#21385d'),
+   profile_gradient_end:tenderSafeColor(d.get('profile_gradient_end'),'#563561'),
+   name_style:nameStyles.includes(style)?style:'classic',
+   name_effect:nameEffects.includes(effect)?effect:'solid',
+   name_color:tenderSafeColor(d.get('name_color'),'#ffffff')};
+  assert(await q('profiles').update(updates).eq('id',user.id));cacheUpdatedProfile(updates);renderMain();renderSidebar();
+  toast('Profile style saved for everyone to see — FREE! ✨');
+ });
  case'profile-form':return safe(async()=>{
   const d=new FormData(form),upd={
     display_name:String(d.get('display_name')||'').trim().slice(0,40),
@@ -1276,7 +1646,7 @@ document.addEventListener('dblclick',event=>{
 });
 document.addEventListener('submit',event=>{if(event.target.matches('form')){event.preventDefault();submitForm(event.target).catch(e=>{console.error(e);toast(e.message||'Error',true)})}});
 document.addEventListener('click',event=>{if(!event.target.closest?.('.sidebar-account-dock'))closeAccountMenu();let t=event.target.closest('[data-action]');if(!t)return;if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
-document.addEventListener('input',e=>{if(e.target.id==='message-box'&&user&&state.selected){const key='tender-draft:'+user.id+':'+[state.area,state.selected,state.pieceTab].join(':');if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
+document.addEventListener('input',e=>{if(e.target.id==='tender-emoji-search'){renderEmojiResults();return}if(e.target.id==='message-box'&&user&&state.selected){const key=tenderDraftKey();if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
 // Type-to-chat works like a desktop messenger: printable keystrokes land
 // in the current composer, never in settings or behind an open modal.
 document.addEventListener('keydown',event=>{
@@ -1306,7 +1676,7 @@ document.addEventListener('keydown',e=>{
    const value=e.key==='Home'?spec.initial:readSplitWidth(which)+dir*(e.key==='ArrowRight'?16:-16);
    updateSplitWidth(which,value,true);return;
  }
- if(e.key==='Escape'){closeAccountMenu();closeModal()}if(e.key==='Enter'&&!e.shiftKey&&e.target.id==='message-box'){e.preventDefault();e.target.closest('form')?.requestSubmit()}if(e.key==='Enter'&&e.target.getAttribute('role')==='button')e.target.click()});
+ if(e.key==='Escape'){closeMiniProfile();closeAccountMenu();closeModal()}if(e.key==='Enter'&&!e.shiftKey&&e.target.id==='message-box'){e.preventDefault();e.target.closest('form')?.requestSubmit()}if(e.key==='Enter'&&e.target.getAttribute('role')==='button')e.target.click()});
 document.addEventListener('change',e=>{
   if(e.target.id==='tender-theme-import'){
     const file=e.target.files?.[0];if(!file)return;
@@ -1335,7 +1705,7 @@ document.addEventListener('change',e=>{
    return;
  }
  if(e.target.id==='avatar-file'||e.target.id==='banner-file'){
- const file=e.target.files[0];if(!file)return;safe(async()=>{const isAvatar=e.target.id==='avatar-file';const asset=await uploadPublicAsset(file,isAvatar?'tender-avatars':'tender-banners',isAvatar?2097152:3145728,['image/png','image/jpeg','image/webp'],isAvatar?'avatar':'banner');assert(await q('profiles').update(isAvatar?{avatar_url:asset.url}:{banner_url:asset.url}).eq('id',user.id));await refreshData();render();toast(isAvatar?'Profile picture updated!':'Banner updated!')});}
+ const file=e.target.files[0];if(!file)return;safe(async()=>{const isAvatar=e.target.id==='avatar-file';const asset=await uploadPublicAsset(file,isAvatar?'tender-avatars':'tender-banners',isAvatar?2097152:3145728,isAvatar?['image/png','image/jpeg','image/webp','image/gif']:['image/png','image/jpeg','image/webp'],isAvatar?'avatar':'banner');assert(await q('profiles').update(isAvatar?{avatar_url:asset.url}:{banner_url:asset.url}).eq('id',user.id));await refreshData();render();toast(isAvatar?'Profile picture updated!':'Banner updated!')});}
  if(e.target.id==='message-file'){const label=document.getElementById('file-status');if(label)label.textContent=e.target.files?.[0]?`📎 ${e.target.files[0].name}`:''}
  if(e.target.matches('.core-role-change')&&e.target.value){const uid=e.target.dataset.person,role=e.target.value;safe(async()=>{assert(await db.rpc('set_piece_member_role',{pid:state.selected,uid,new_role:role}));await refreshData();toast('Member role updated!')})}
  if(e.target.matches('.role-assign')&&e.target.value){const role=e.target.dataset.role;const userId=e.target.value;safe(async()=>{assert(await q('piece_role_assignments').insert({role_id:role,user_id:userId}));toast('Role assigned!')})}
