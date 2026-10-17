@@ -63,7 +63,7 @@ function ownPiece(pid){return pieces.some(p=>p.id===pid&&p.owner_id===user.id)}
 const selectedPiece=()=>pieces.find(x=>x.id===state.selected);
 function empty(title,description,action='',label=''){return `<div class="empty-content"><img src="buffalo.webp" alt="Buffalo"><h2>${esc(title)}</h2><p>${esc(description)}</p>${action?`<button class="btn" data-action="${esc(action)}">${esc(label)}</button>`:''}</div>`}
 // Tender 0.2 helpers. Shared DB features are gated behind migration_0_2.sql.
-let extendedReady=false, pronounsReady=false, notifications=[], customEmojis=[], reads=[], bookmarks=[], blockedUsers=[], pieceEvents=[], pieceRoles=[], roleAssignments=[], activePolls=[], activePollVotes=[];
+let extendedReady=false, pronounsReady=false, pieceRepliesReady=false, notifications=[], customEmojis=[], reads=[], bookmarks=[], blockedUsers=[], pieceEvents=[], pieceRoles=[], roleAssignments=[], activePolls=[], activePollVotes=[];
 let attachmentUrls=new Map(), replyTo=null, recordedVoice=null, voiceRecorder=null, voiceChunks=[], typingChannel=null, typingTimeout=null, typingLast=0, reconcileTimer=null, notificationReady=false;
 const chosenTheme=()=>my?.chat_theme||localStorage.getItem('tender-theme')||'dark';
 function applyTheme(){const theme=chosenTheme();document.documentElement.dataset.tenderTheme=theme;document.documentElement.style.setProperty('--personal-accent',my?.accent_color||'#f47735');applyLocalAppearance()}
@@ -104,8 +104,69 @@ function badgeText(n){return n>99?'99+':String(n)}
 function unreadCount(id){return notifications.filter(n=>!n.is_read&&n.kind==='message'&&n.conversation_id===id).length}
 function unreadFriends(){return notifications.filter(n=>!n.is_read&&n.kind==='friend').length}
 function unreadAll(){return notifications.filter(n=>!n.is_read).length}
+// Piece invitations are verified against an actual public Piece in Tender's data.
+// A typed URL alone is NOT sufficient to create a trusted-looking invite card.
+function pieceInviteURL(piece){
+ if(!piece?.is_public)return null;
+ const secure=location.protocol==='https:'?new URL(location.href):new URL('https://fyrix341.github.io/Tender/');
+ secure.search='';secure.hash='';secure.searchParams.set('piece',piece.id);
+ return secure.href;
+}
+function extractPublicPieceInvite(text){
+ const urls=String(text||'').match(/https?:\/\/[^\s<>"']+/gi)||[];
+ for(const raw of urls){
+  let link;try{link=new URL(raw.replace(/[.,!?;:)\]]+$/,''))}catch{continue}
+  if(!['https:','http:'].includes(link.protocol))continue;
+  const hostname=link.hostname.toLowerCase();
+  const trusted=hostname==='fyrix341.github.io'||hostname==='tender.oops.wtf'||hostname===location.hostname.toLowerCase();
+  if(!trusted||link.username||link.password||link.port&&!['80','443'].includes(link.port))continue;
+  const path=link.pathname.replace(/\/+$/,'');
+  if(hostname==='fyrix341.github.io'&&path.toLowerCase()!=='/tender')continue;
+  if(hostname!=='fyrix341.github.io'&&path!==''&&path.toLowerCase()!=='/tender')continue;
+  const id=link.searchParams.get('piece');
+  if(!id||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))continue;
+  const piece=pieces.find(p=>p.id.toLowerCase()===id.toLowerCase()&&p.is_public);
+  if(piece)return piece;
+ }
+ return null;
+}
+function pieceInviteCardHTML(piece,preview=false){
+ if(!piece?.is_public)return '';
+ const count=memberships.filter(m=>m.piece_id===piece.id).length;
+ const color=/^#[0-9a-f]{6}$/i.test(piece.color||'')?piece.color:'#f47735';
+ const banner=piece.banner_url&&/^https:\/\//i.test(piece.banner_url)&&validUrl(piece.banner_url)!=='#'
+    ?`<img class="invite-card-banner" src="${esc(validUrl(piece.banner_url))}" alt="" loading="lazy">`
+    :`<div class="invite-card-gradient" style="--invite-color:${esc(color)}"></div>`;
+ const joined=inPiece(piece.id);
+ return `<article class="tender-piece-invite ${preview?'invite-preview':''}">
+  ${banner}
+  <div class="invite-card-body"><div class="invite-card-heading">🍗 TENDER PIECE INVITE <span class="invite-card-tag">PUBLIC</span></div>
+   <div class="invite-card-community">${pieceAvatar(piece,'invite-card-icon')}
+   <div class="invite-card-details"><strong>${esc(piece.name)}</strong><span>${esc((piece.description||'Find your people and stay crispy.').slice(0,145))}</span></div></div>
+   <div class="invite-card-bottom"><span class="invite-member-count">${ico('users','icon-sm')} ${count} ${count===1?'member':'members'}</span>
+    <button type="button" class="btn sm invite-join" data-action="open-piece-invite" data-id="${esc(piece.id)}">${joined?'Open Piece':'View & Join'} ${ico('external','icon-sm')}</button></div>
+  </div>
+ </article>`;
+}
+function invitePieceModal(piece){
+ if(!piece?.is_public){toast('Only public Pieces have shareable invitation cards.',true);return}
+ const link=pieceInviteURL(piece);
+ modal('Invite to '+piece.name,'Send this link in a DM to display a preview card.',`
+  <div class="invite-share-modal">${pieceInviteCardHTML(piece,true)}
+   <label class="field"><span class="invite-field-label">Invitation link</span>
+   <input class="input" id="invite-link" value="${esc(link)}" readonly aria-label="Piece invitation link"></label>
+   <div class="button-group"><button type="button" class="btn" data-action="copy-piece-invite" data-url="${esc(link)}">${ico('clip','icon-sm')} Copy invitation link</button></div>
+   <p class="hint">Public Pieces only. The recipient must sign in and choose to join; the link doesn't bypass membership permissions.</p>
+  </div>`);
+}
+function invitePickerModal(){
+ const available=pieces.filter(p=>p.is_public&&inPiece(p.id));
+ modal('Share a Piece invite','Pick a public Piece to include as a preview in this conversation.',`
+   <div class="invite-picker-list">${available.map(piece=>`<button type="button" class="invite-picker-item" data-action="insert-piece-invite" data-id="${esc(piece.id)}">${pieceAvatar(piece)}<span><strong>${esc(piece.name)}</strong><small>Insert invitation link</small></span>${ico('plus','icon-sm')}</button>`).join('')||'<p class="hint">Join a public Piece first to share its invitation.</p>'}</div>`);
+}
 function messageText(text){if(String(text||'').startsWith('[TENDER_EMBED]'))return richEmbedHTML(text);let result=esc(text||'').replace(/(https:\/\/[^\s<]+)/g,m=>{const u=validUrl(m.replace(/&amp;/g,'&'));return u==='#'?m:`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer" class="message-link">${m}</a>`});
- result=result.replace(/:([a-z0-9_]{2,24}):/g,(whole,code)=>{const e=customEmojis.find(x=>x.shortcode===code&&(x.piece_id===null||x.piece_id===state.selected));return e?`<img class="inline-custom-emoji" src="${esc(db.storage.from('tender-emoji').getPublicUrl(e.image_path).data.publicUrl)}" alt=":${esc(code)}:" title=":${esc(code)}:">`:whole});if(/^:[a-z0-9_]{2,24}:$/.test(String(text||'').trim()))result=result.replace('class="inline-custom-emoji"','class="inline-custom-emoji sticker-emoji"');return result.replace(/\n/g,'<br>')}
+ result=result.replace(/:([a-z0-9_]{2,24}):/g,(whole,code)=>{const e=customEmojis.find(x=>x.shortcode===code&&(x.piece_id===null||x.piece_id===state.selected));return e?`<img class="inline-custom-emoji" src="${esc(db.storage.from('tender-emoji').getPublicUrl(e.image_path).data.publicUrl)}" alt=":${esc(code)}:" title=":${esc(code)}:">`:whole});if(/^:[a-z0-9_]{2,24}:$/.test(String(text||'').trim()))result=result.replace('class="inline-custom-emoji"','class="inline-custom-emoji sticker-emoji"');const invite=extractPublicPieceInvite(text);
+ return result.replace(/\n/g,'<br>')+(invite?pieceInviteCardHTML(invite):'')}
 // Rich announcement embeds are stored as ordinary message text (no new tables needed).
 function richEmbedHTML(text){
  let p;try{p=JSON.parse(String(text).slice('[TENDER_EMBED]'.length))}catch{return esc(text)}
@@ -138,6 +199,7 @@ async function refreshExtras(){
  const [a,b,c,d,e,f,g,h]=await Promise.all(reqs);if(!a.error)notifications=a.data||[];if(!b.error)customEmojis=b.data||[];if(!c.error)reads=c.data||[];if(!d.error)bookmarks=d.data||[];if(!e.error)pieceEvents=e.data||[];if(!f.error)pieceRoles=f.data||[];if(!g.error)roleAssignments=g.data||[];if(h&&!h.error)blockedUsers=h.data||[];
  }catch(e){console.warn('0.2 optional features unavailable',e)}
  try{const probe=await q('profiles').select('pronouns').limit(1);pronounsReady=!probe.error}catch{pronounsReady=false}
+ try{const probe=await q('piece_messages').select('reply_to').limit(1);pieceRepliesReady=!probe.error}catch{pieceRepliesReady=false}
  applyTheme();
 }
 async function loadPolls(){activePolls=[];activePollVotes=[];if(!extendedReady||state.area!=='chats'||!state.selected)return;const ids=activeMessages.map(m=>m.poll_id).filter(Boolean);if(!ids.length)return;const [p,v]=await Promise.all([q('polls').select('*').in('id',ids),q('poll_votes').select('*').in('poll_id',ids)]);if(!p.error)activePolls=p.data||[];if(!v.error)activePollVotes=v.data||[]}
@@ -258,36 +320,71 @@ function eventModal(){modal('Create Piece event','Events belong to this Piece.',
 function roleModal(){const members=memberships.filter(m=>m.piece_id===state.selected);const roles=pieceRoles.filter(r=>r.piece_id===state.selected);modal('Piece roles','Custom labels are decorative. Moderator permissions remain separate for safety.',`<form id="role-form"><div class="field"><label>New role name</label><input class="input" name="name" maxlength="32" required placeholder="Contributor"></div><div class="field"><label>Color</label><input class="input" name="color" type="color" value="#f47735"></div><button class="btn full" type="submit">Create role</button></form><h3 class="section-heading top-spacer">Moderator permissions</h3>${members.filter(m=>m.role!=='owner').map(m=>`<div class="role-entry">${esc(pby(m.user_id).display_name)} <select class="input core-role-change" data-person="${m.user_id}"><option value="member" ${m.role==='member'?'selected':''}>Member</option><option value="moderator" ${m.role==='moderator'?'selected':''}>Moderator</option></select></div>`).join('')}<h3 class="section-heading top-spacer">Custom role labels</h3>${roles.map(r=>`<div class="role-entry"><span style="color:${esc(r.color)}">●</span> ${esc(r.name)} <select class="input role-assign" data-role="${r.id}"><option value="">Assign to member...</option>${members.map(m=>`<option value="${m.user_id}">${esc(pby(m.user_id).display_name)}</option>`).join('')}</select></div>`).join('')}`)}
 function pinnedHTML(){const list=activeMessages.filter(x=>x.is_pinned);return list.length?`<div class="pinned-strip">📌 ${list.length} pinned · ${esc(list[list.length-1].body.slice(0,85)||'Attachment')}</div>`:''}
 function readReceiptHTML(row){if(!extendedReady||row.author_id!==user?.id||!row.id||row.pending)return '';const c=getConversation(state.selected);const ids=(c?.conversation_members||[]).map(m=>m.user_id).filter(id=>id!==user.id);if(!ids.length)return '';const seen=ids.filter(id=>reads.some(r=>r.conversation_id===state.selected&&r.user_id===id&&new Date(r.last_read_at)>=new Date(row.created_at))).length;return `<span class="receipt">${seen===ids.length?'✓✓ Seen':seen?'✓✓ '+seen+' seen':'✓ Sent'}</span>`}
+// Only show community overlap supported by the current membership data.
+function sharedPublicPieces(otherId){
+ if(!user||!otherId)return [];
+ const mine=new Set(memberships.filter(m=>m.user_id===user.id).map(m=>m.piece_id));
+ const theirs=new Set(memberships.filter(m=>m.user_id===otherId).map(m=>m.piece_id));
+ return pieces.filter(p=>p.is_public&&mine.has(p.id)&&theirs.has(p.id));
+}
+function profileStatus(p){
+ if(!p)return '';
+ const presence=String(p.presence_mode||'online');
+ if(presence==='invisible')return '';
+ return `<span class="profile-presence ${['online','idle','dnd'].includes(presence)?presence:'online'}">${presence==='dnd'?'Do not disturb':presence==='idle'?'Idle':'Online'}</span>`;
+}
+function profileActions(person,compact=false){
+ const isSelf=person.id===user?.id;
+ if(isSelf)return `<button type="button" class="btn ${compact?'sm':''}" data-action="settings-profile">${ico('edit','icon-sm')} Edit profile</button>`;
+ const relationship=friendships.find(f=>(f.requester===user.id&&f.recipient===person.id)||(f.recipient===user.id&&f.requester===person.id));
+ const dm=`<button type="button" class="btn ${compact?'sm':''}" data-action="start-dm" data-id="${esc(person.id)}">${ico('chat','icon-sm')} Message</button>`;
+ const secondary=relationship?.status==='accepted'
+   ? `<span class="tag neutral">✓ Friends</span>`
+   :relationship?.status==='pending'
+     ? `<span class="tag neutral">${relationship.recipient===user.id?'Friend request received':'Request pending'}</span>`
+     :`<button type="button" class="btn secondary ${compact?'sm':''}" data-action="request-friend" data-id="${esc(person.id)}">${ico('plus','icon-sm')} Add friend</button>`;
+ return dm+secondary;
+}
+function publicProfileDetails(person){
+ const joined=person.created_at?new Date(person.created_at):null;
+ return `<div class="profile-detail-section"><h3>ABOUT ME</h3><div class="profile-detail-about">${esc(person.bio||'No bio yet. Stay crispy! 🍗').replace(/\n/g,'<br>')}</div></div>
+  ${person.game_status?`<div class="profile-detail-section"><h3>STATUS</h3><p>${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</p></div>`:''}
+  ${joined&&!Number.isNaN(joined.getTime())?`<div class="profile-detail-section"><h3>MEMBER SINCE</h3><p>${esc(joined.toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'}))}</p></div>`:''}`;
+}
+function sharedPiecesHTML(otherId,mini=false){
+ const shared=sharedPublicPieces(otherId);
+ return `<div class="profile-detail-section"><h3>SHARED PIECES <span class="profile-detail-count">${shared.length}</span></h3>
+  ${shared.length?`<div class="profile-shared-pieces">${shared.slice(0,mini?3:8).map(piece=>`<button type="button" class="profile-piece-row" data-action="open-profile-piece" data-id="${esc(piece.id)}">${pieceAvatar(piece)}<span><strong>${esc(piece.name)}</strong><small>Public community</small></span>${ico('external','icon-sm')}</button>`).join('')}</div>`:'<p class="profile-detail-empty">No shared public Pieces yet.</p>'}</div>`;
+}
+function profileCardHTML(person){
+ const isSelf=person.id===user?.id;
+ return `<div class="tender-profile-dialog">
+  <section class="profile-dialog-identity">
+   <div class="profile-dialog-banner" ${person.banner_url?`style="background-image:linear-gradient(#07091440,#07091499),url(&quot;${esc(validUrl(person.banner_url))}&quot;)"`:''}></div>
+   <div class="profile-dialog-id">
+    <div class="profile-dialog-avatar effect-${esc(person.profile_effect||'none')}">${avatars(person)}</div>
+    <div class="profile-dialog-name-row"><div><h2>${esc(person.display_name||'Tender member')}</h2><p>@${esc(person.handle||'member')}${person.pronouns?' · '+esc(person.pronouns):''}</p></div>${profileStatus(person)}</div>
+    ${person.game_status?`<div class="profile-dialog-status">${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</div>`:''}
+    <div class="profile-dialog-buttons">${profileActions(person)}</div>
+    <div class="profile-dialog-meta"><span>🍗 Tender member</span><span>${isSelf?'Your profile':'Public profile'}</span></div>
+   </div>
+  </section>
+  <section class="profile-dialog-content">
+    <div class="profile-dialog-tabs"><span class="active">Overview</span><span>${sharedPublicPieces(person.id).length} shared Pieces</span></div>
+    <div class="profile-dialog-scroll">${publicProfileDetails(person)}${sharedPiecesHTML(person.id)}
+    <div class="profile-detail-section"><h3>ABOUT TENDER PROFILES</h3><p class="hint">Only information this person chose to share is shown here.</p></div></div>
+  </section>
+ </div>`;
+}
 async function showProfile(id){
  if(!id||!user)return;
  let person=profiles.find(p=>p.id===id);
  if(!person){
-   const result=await q('profiles').select('*').eq('id',id).maybeSingle();
-   if(result.error)throw result.error;
-   person=result.data;
+  const result=await q('profiles').select('*').eq('id',id).maybeSingle();
+  if(result.error)throw result.error;person=result.data;
  }
- if(!person){toast('Profile unavailable.',true);return}
- const isSelf=id===user.id;
- const relationship=friendships.find(f=>(f.requester===user.id&&f.recipient===id)||(f.recipient===user.id&&f.requester===id));
- const actions=isSelf?
-   '<button type="button" class="btn" data-action="settings-profile">Edit my profile</button>':
-   relationship?.status==='accepted'?
-     `<button type="button" class="btn" data-action="start-dm" data-id="${esc(id)}">${ico('chat','icon-sm')} Message</button>`:
-   relationship?.status==='pending'?
-     `<span class="tag neutral">${relationship.recipient===user.id?'Friend request received':'Friend request pending'}</span>`:
-     `<button type="button" class="btn" data-action="request-friend" data-id="${esc(id)}">${ico('plus','icon-sm')} Add friend</button>`;
- modal(person.display_name||'Member profile','Tender member',`<div class="profile-popout">
-   ${profileBanner(person)}
-   <div class="profile-popout-body">
-     <div class="profile-popout-head"><div><h2>${esc(person.display_name||'Tender member')}</h2><p>@${esc(person.handle||'member')}</p></div>
-       ${person.presence_mode&&person.presence_mode!=='invisible'? `<span class="tag neutral">${esc(person.presence_mode)}</span>`:''}</div>
-     ${person.pronouns?`<div class="profile-pronouns">${esc(person.pronouns)}</div>`:''}
-      ${person.game_status?`<div class="profile-status">${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</div>`:''}
-     <h3>About me</h3>
-     <p class="profile-about">${esc(person.bio||'No bio yet. Stay crispy! 🍗')}</p>
-     <div class="profile-popout-actions">${actions}</div>
-   </div>
- </div>`);
+ if(!person)return toast('Profile unavailable.',true);
+ modal(person.display_name||'Member profile','Tender profile',profileCardHTML(person));
 }
 function profileBanner(p){const isSelf=p.id===user?.id;return `<div class="profile-banner crispy-profile effect-${esc(p.profile_effect||'none')}" ${p.banner_url?`style="background-image:linear-gradient(0deg,#17191d7a,transparent),url('${esc(validUrl(p.banner_url))}')"`:''}>${avatars(p)}${isSelf?'<span class="banner-hint">Your Tender profile</span>':''}</div>`}
 async function uploadPublicAsset(file,bucket,limit,mimes,prefix){if(!file||file.size>limit||!mimes.includes(file.type))throw Error('This file type or size is not supported.');const extension=({"image/png":"png","image/jpeg":"jpg","image/webp":"webp","image/gif":"gif"})[file.type];const path=`${user.id}/${prefix}-${crypto.randomUUID()}.${extension}`;assert(await db.storage.from(bucket).upload(path,file,{contentType:file.type,upsert:false}));return {url:db.storage.from(bucket).getPublicUrl(path).data.publicUrl,path}}
@@ -355,13 +452,42 @@ function render(){if(!user)return renderAuth();ROOT.innerHTML=`<div class="scree
  screen.style.setProperty('--tender-sidebar-width',readSplitWidth('sidebar')+'px');
  screen.style.setProperty('--tender-info-width',readSplitWidth('info')+'px');
  applyLocalAppearance();renderSidebar();renderMain()}
+function dmProfilePanelHTML(person){
+ const shared=sharedPublicPieces(person.id);
+ return `<div class="info-head"><span class="info-heading">USER PROFILE</span><button type="button" class="round-btn" data-action="toggle-info" aria-label="Hide profile panel" title="Hide profile panel">${ico('x','icon-sm')}</button></div>
+ <div class="dm-profile-panel">
+  <button type="button" class="dm-profile-cover" data-action="open-profile" data-id="${esc(person.id)}" aria-label="Open full profile of ${esc(person.display_name||'member')}">
+    <div class="dm-profile-banner" ${person.banner_url?`style="background-image:linear-gradient(#0c0f2055,#0c0f206a),url(&quot;${esc(validUrl(person.banner_url))}&quot;)"`:''}></div>
+    <span class="dm-profile-avatar">${avatars(person)}</span>
+  </button>
+  <div class="dm-profile-body">
+   <button type="button" class="dm-profile-name" data-action="open-profile" data-id="${esc(person.id)}">${esc(person.display_name||'Tender member')} ${ico('external','icon-sm')}</button>
+   <div class="dm-profile-handle">@${esc(person.handle||'member')}${person.pronouns?' · '+esc(person.pronouns):''}</div>
+   ${profileStatus(person)}
+   ${person.game_status?`<div class="dm-profile-status">${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</div>`:''}
+   <div class="dm-profile-actions">${profileActions(person,true)}</div>
+   <div class="dm-profile-about"><h3>ABOUT ME</h3><p>${esc(person.bio||'No bio yet. 🍗').replace(/\n/g,'<br>')}</p></div>
+   <div class="dm-profile-about"><h3>SHARED PUBLIC PIECES <span class="profile-detail-count">${shared.length}</span></h3>
+    ${shared.length?`<div class="profile-shared-pieces">${shared.slice(0,3).map(piece=>`<button type="button" class="profile-piece-row" data-action="open-profile-piece" data-id="${esc(piece.id)}">${pieceAvatar(piece)}<span><strong>${esc(piece.name)}</strong><small>Shared community</small></span>${ico('external','icon-sm')}</button>`).join('')}</div>`:'<p class="hint">No shared public Pieces yet.</p>'}</div>
+   <button type="button" class="btn secondary dm-view-full" data-action="open-profile" data-id="${esc(person.id)}">View full profile ${ico('external','icon-sm')}</button>
+  </div>
+ </div>`;
+}
 function renderInfoPanel(){
- const box=document.getElementById('info-panel'),screen=document.getElementById('app-screen');if(!box||!screen)return;
+ const box=document.getElementById('info-panel'),screen=document.getElementById('app-screen');
+ if(!box||!screen)return;
  const visible=!!state.selected&&(state.area==='chats'||state.area==='pieces'||state.area==='discover');
  screen.classList.toggle('has-info',visible);
  screen.classList.toggle('info-hidden',localStorage.getItem('tender-info-hidden')==='1');
  screen.style.setProperty('--tender-info-width',readSplitWidth('info')+'px');
  if(!visible){box.replaceChildren();return}
+ if(state.area==='chats'){
+   const c=getConversation(state.selected);if(!c){box.replaceChildren();return}
+   if(c.kind!=='group'){
+     const other=(c.conversation_members||[]).find(m=>m.user_id!==user.id);
+     if(other){box.innerHTML=dmProfilePanelHTML(pby(other.user_id));return}
+   }
+ }
  let members=[],name='',description='';
  if(state.area==='chats'){
    const c=getConversation(state.selected);if(!c)return;
@@ -415,15 +541,58 @@ function messageHTML(row,target_type='message'){
   const grouped=!!(previous&&previous.author_id===row.author_id&&Math.abs(new Date(row.created_at)-new Date(previous.created_at))<300000&&!row.reply_to&&!previous.reply_to);
  const reacts=activeReactions.filter(r=>r.target_type===target_type&&r.target_id===row.id);const emojiMap={};reacts.forEach(r=>(emojiMap[r.emoji] ||= []).push(r));
  const reply=row.reply_to?activeMessages.find(x=>x.id===row.reply_to):null;
+ const replyHTML=row.reply_to?`<button type="button" class="reply-quote reply-ref" data-action="jump-reply" data-id="${esc(row.reply_to)}" title="Jump to replied message">↳ ${reply?`<strong>${esc(pby(reply.author_id).display_name)}</strong> ${esc((reply.body||'Attachment').slice(0,130))}`:'Original message is outside the loaded history'}</button>`:'';
  const gif=giftGif(row.body);
- return `<div data-message-id="${esc(row.id)}" role="group" tabindex="0" class="chat-bubble-wrap ${mine?'mine':''} ${grouped?'message-grouped':''} ${row.pending?'bubble-pending':''}">${profileFace(p)}<div class="bubble-content">${!grouped?`<div class="bubble-name">${profileName(p)}</div>`:''}${reply?`<div class="reply-quote" data-action="jump-reply" data-id="${reply.id}">↳ ${esc(pby(reply.author_id).display_name)}: ${esc(reply.body.slice(0,110))}</div>`:''}<div class="bubble">${messageText(row.body||'')}${gif}${attachmentHTML(row)}${row.poll_id?pollHTML(row.poll_id):''}</div><div class="bubble-meta">${fmt(row.created_at)} ${row.edited_at?'· edited':''} ${row.pending?'· Sending…':''} ${readReceiptHTML(row)}</div>${Object.keys(emojiMap).length?`<div class="bubble-reactions">${Object.entries(emojiMap).map(([emoji,recs])=>`<button class="react-chip ${recs.some(r=>r.author_id===user.id)?'mine-react':''}" data-action="react" data-type="${target_type}" data-id="${row.id}" data-emoji="${esc(emoji)}">${esc(emoji)} ${recs.length}</button>`).join('')}</div>`:''}<div class="bubble-actions" aria-label="Message actions"><button class="emoji-inline" data-action="reaction-menu" data-type="${target_type}" data-id="${row.id}" title="React">${ico('smile','icon-sm')}</button>${target_type==='message'&&!row.pending?`<button class="emoji-inline" data-action="reply-message" data-id="${row.id}" title="Reply">${ico('chat','icon-sm')}</button><button class="emoji-inline" data-action="bookmark-message" data-id="${row.id}" title="Bookmark">${bookmarks.some(b=>b.message_id===row.id)?'★':'☆'}</button><button class="emoji-inline" data-action="forward-message" data-id="${row.id}" title="Forward text">↗</button>`:''}${mine&&!row.pending?`<button class="emoji-inline" data-action="edit-message" data-id="${row.id}" title="Edit">${ico('edit','icon-sm')}</button><button class="emoji-inline" data-action="pin-message" data-id="${row.id}" title="Pin">${row.is_pinned?'📌':'📍'}</button><button class="emoji-inline" data-action="delete-message" data-id="${row.id}" data-type="${target_type}" title="Delete">${ico('trash','icon-sm')}</button>`:''}</div></div></div>`}
-function composer(kind,placeholder,extra=''){const disabled=kind==='piece'&&!inPiece(state.selected);return `<form class="composer-wrap" id="composer-form" data-kind="${kind}">${replyTo&&kind==='chat'?`<div class="composer-reply">↳ Replying to ${esc(pby(replyTo.author_id).display_name)}: ${esc(replyTo.body.slice(0,90))}<button type="button" data-action="cancel-reply">×</button></div>`:''}<div id="composer-assist" class="composer-assist" hidden></div><div class="composer">${kind==='chat'?`<button type="button" class="round-btn" data-action="attach" title="Attach file">${ico('clip')}</button>`:''}<button type="button" class="round-btn" data-action="emoji-picker" title="Emojis">${ico('smile')}</button>${kind==='chat'?`<button type="button" class="round-btn composer-extra" data-action="gif-picker" title="GIF">GIF</button><button type="button" class="round-btn composer-extra" data-action="new-poll" title="Poll">📊</button><button type="button" class="round-btn composer-extra" data-action="record-voice" title="Voice message">🎙️</button>`:''}<textarea id="message-box" name="body" maxlength="4000" rows="1" ${disabled?'disabled':''} placeholder="${disabled?'Join this Piece to chat':esc(placeholder)}"></textarea><button class="send-btn" type="submit" ${disabled?'disabled':''} aria-label="Send">${ico('send')}</button></div><div class="composer-footer"><span id="typing-line"></span><span id="file-status" role="status" aria-live="polite"></span><span>${extra||'Enter to send · Shift+Enter for a new line'}</span></div><input type="file" id="message-file" hidden accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,audio/webm,audio/ogg,audio/mp4,audio/mpeg"></form>`}
+ return `<div data-message-id="${esc(row.id)}" role="group" tabindex="0" class="chat-bubble-wrap ${mine?'mine':''} ${grouped?'message-grouped':''} ${row.pending?'bubble-pending':''}">${profileFace(p)}<div class="bubble-content">${!grouped?`<div class="bubble-name">${profileName(p)}</div>`:''}${replyHTML}<div class="bubble">${messageText(row.body||'')}${gif}${attachmentHTML(row)}${row.poll_id?pollHTML(row.poll_id):''}</div><div class="bubble-meta">${fmt(row.created_at)} ${row.edited_at?'· edited':''} ${row.pending?'· Sending…':''} ${readReceiptHTML(row)}</div>${Object.keys(emojiMap).length?`<div class="bubble-reactions">${Object.entries(emojiMap).map(([emoji,recs])=>`<button class="react-chip ${recs.some(r=>r.author_id===user.id)?'mine-react':''}" data-action="react" data-type="${target_type}" data-id="${row.id}" data-emoji="${esc(emoji)}">${esc(emoji)} ${recs.length}</button>`).join('')}</div>`:''}<div class="bubble-actions" aria-label="Message actions">${!row.pending&&(target_type==='message'||pieceRepliesReady)?`<button type="button" class="emoji-inline reply-quick-action" data-action="reply-message" data-id="${esc(row.id)}" title="Reply to message" aria-label="Reply to ${esc(p.display_name||'member')}">${ico('chat','icon-sm')}<span>Reply</span></button>`:''}<button class="emoji-inline" data-action="reaction-menu" data-type="${target_type}" data-id="${row.id}" title="React">${ico('smile','icon-sm')}</button>${target_type==='message'&&!row.pending?`<button class="emoji-inline" data-action="bookmark-message" data-id="${row.id}" title="Bookmark">${bookmarks.some(b=>b.message_id===row.id)?'★':'☆'}</button><button class="emoji-inline" data-action="forward-message" data-id="${row.id}" title="Forward text">↗</button>`:''}${mine&&!row.pending?`<button class="emoji-inline" data-action="edit-message" data-id="${row.id}" title="Edit">${ico('edit','icon-sm')}</button><button class="emoji-inline" data-action="pin-message" data-id="${row.id}" title="Pin">${row.is_pinned?'📌':'📍'}</button><button class="emoji-inline" data-action="delete-message" data-id="${row.id}" data-type="${target_type}" title="Delete">${ico('trash','icon-sm')}</button>`:''}</div></div></div>`}
+function updateComposerReply(){
+ const form=document.getElementById('composer-form');if(!form?.querySelector||!form.insertAdjacentHTML)return;
+ form.querySelector('.composer-reply')?.remove();
+ if(!replyTo)return;
+ const name=esc(pby(replyTo.author_id).display_name),preview=esc((replyTo.body||'Attachment').slice(0,110));
+ form.insertAdjacentHTML('afterbegin',`<div class="composer-reply"><span class="composer-reply-bar"></span><div class="composer-reply-content"><strong>Replying to ${name}</strong><span>${preview}</span></div><button type="button" class="round-btn" data-action="cancel-reply" aria-label="Cancel reply" title="Cancel reply">${ico('x','icon-sm')}</button></div>`);
+}
+function selectReply(messageId){
+ const found=activeMessages.find(m=>m.id===messageId&&!m.pending);
+ if(!found)return toast('This message is no longer available.',true);
+ if(state.area!=='chats'&&!pieceRepliesReady)return toast('Piece replies are not available until the database migration completes.',true);
+ replyTo=found;updateComposerReply();
+ const field=document.getElementById('message-box');if(field){field.focus();field.scrollIntoView({block:'nearest'})}
+}
+function jumpToReply(id){
+ const node=[...document.querySelectorAll('#main .chat-scroll [data-message-id]')].find(el=>el.dataset.messageId===id);
+ if(!node){toast('The original message is outside the latest 150 messages.',true);return}
+ node.scrollIntoView({behavior:'smooth',block:'center'});node.classList.add('reply-target-highlight');
+ setTimeout(()=>node.classList.remove('reply-target-highlight'),1700);
+}
+function composer(kind,placeholder,extra=''){const disabled=kind==='piece'&&!inPiece(state.selected);return `<form class="composer-wrap" id="composer-form" data-kind="${kind}">${replyTo?`<div class="composer-reply"><span class="composer-reply-bar"></span><div class="composer-reply-content"><strong>Replying to ${esc(pby(replyTo.author_id).display_name)}</strong><span>${esc((replyTo.body||'Attachment').slice(0,110))}</span></div><button type="button" class="round-btn" data-action="cancel-reply" aria-label="Cancel reply" title="Cancel reply">${ico('x','icon-sm')}</button></div>`:''}<div id="composer-assist" class="composer-assist" hidden></div><div class="composer">${kind==='chat'?`<button type="button" class="round-btn" data-action="attach" title="Attach file">${ico('clip')}</button>`:''}<button type="button" class="round-btn" data-action="emoji-picker" title="Emojis">${ico('smile')}</button>${kind==='chat'?`<button type="button" class="round-btn composer-extra" data-action="gif-picker" title="GIF">GIF</button><button type="button" class="round-btn composer-extra" data-action="new-poll" title="Poll">📊</button><button type="button" class="round-btn composer-extra" data-action="record-voice" title="Voice message">🎙️</button>`:''}<textarea id="message-box" name="body" maxlength="4000" rows="1" ${disabled?'disabled':''} placeholder="${disabled?'Join this Piece to chat':esc(placeholder)}"></textarea><button class="send-btn" type="submit" ${disabled?'disabled':''} aria-label="Send">${ico('send')}</button></div><div class="composer-footer"><span id="typing-line"></span><span id="file-status" role="status" aria-live="polite"></span><span>${extra||'Enter to send · Shift+Enter for a new line'}</span></div><input type="file" id="message-file" hidden accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,audio/webm,audio/ogg,audio/mp4,audio/mpeg"></form>`}
 function renderFriends(){let pending=friendships.filter(f=>f.status==='pending');const incoming=pending.filter(f=>f.recipient===user.id),outgoing=pending.filter(f=>f.requester===user.id),accepted=myFriendIds();return header('Friends','Keep the people who matter close',`<button class="btn sm" data-action="find-friends">${ico('plus')} Add friends</button>`)+`<div class="main-body"><div class="content-pad"><h1 class="page-title">Your circle 🧡</h1><p class="page-subtitle">Your friends, friend requests, and the next great conversation.</p>${incoming.length?`<div class="section-row top-spacer"><h2 class="section-heading">Friend requests</h2></div><div class="card">${incoming.map(f=>friendItem(pby(f.requester),'incoming',f.id)).join('')}</div>`:''}${outgoing.length?`<div class="section-row top-spacer"><h2 class="section-heading">Sent requests</h2></div><div class="card">${outgoing.map(f=>friendItem(pby(f.recipient),'outgoing',f.id)).join('')}</div>`:''}<div class="section-row top-spacer"><h2 class="section-heading">Friends (${accepted.length})</h2></div><div class="card">${accepted.map(id=>friendItem(pby(id),'friend')).join('')||'<div class="notice-inline">No friends yet. Search for people by username and send them a request.</div>'}</div></div></div>`}
 function friendItem(p,kind,fid=''){return `<div class="friend-row">${profileFace(p)}<div class="friend-data">${profileName(p)}<p>@${esc(p.handle)}</p></div>${kind==='incoming'?`<button class="btn sm" data-action="accept-friend" data-id="${fid}">Accept</button>`:kind==='outgoing'?`<span class="tag neutral">Pending</span>`:`<button class="btn sm secondary" data-action="start-dm" data-id="${p.id}">Message</button>`}</div>`}
-function renderFriend(p){return header(p.display_name,`@${p.handle}`)+`<div class="main-body"><div class="content-pad">${profileBanner(p)}<div class="profile-head"><h2>${esc(p.display_name)}</h2><p>@${esc(p.handle)}</p></div><div class="card"><h3>About me</h3><p class="page-subtitle">${esc(p.bio||'This person is keeping things mysterious. 🍗')}</p>${p.game_status?`<p class="hint top-spacer">${esc(p.status_emoji||'🍗')} ${esc(p.game_status)}</p>`:''}<div class="button-group top-spacer"><button class="btn" data-action="start-dm" data-id="${p.id}">${ico('chat')} Message</button><button class="btn secondary" data-action="remove-friend" data-id="${p.id}">${ico('x')} Remove friend</button>${extendedReady?`<button class="btn danger" data-action="toggle-block" data-id="${p.id}">${blockedUsers.some(b=>b.blocked_id===p.id)?'Unblock':'Block'}</button>`:''}</div></div></div></div>`}
+function renderFriend(p){
+ const isFriend=myFriendIds().includes(p.id);
+ return header(p.display_name,`@${p.handle}`)+`<div class="main-body"><div class="friend-profile-page">
+   <section class="friend-profile-primary">
+    <div class="friend-profile-cover" ${p.banner_url?`style="background-image:linear-gradient(#0c102555,#0c102599),url(&quot;${esc(validUrl(p.banner_url))}&quot;)"`:''}></div>
+    <div class="friend-profile-identity">
+     <button type="button" class="friend-profile-avatar" data-action="open-profile" data-id="${esc(p.id)}" aria-label="Open full profile">${avatars(p)}</button>
+     <h1>${esc(p.display_name)}</h1><p>@${esc(p.handle||'member')}${p.pronouns?' · '+esc(p.pronouns):''}</p>
+     ${profileStatus(p)}
+     ${p.game_status?`<div class="profile-dialog-status">${esc(p.status_emoji||'🍗')} ${esc(p.game_status)}</div>`:''}
+     <div class="friend-profile-cta">${profileActions(p)}
+       ${isFriend?`<button class="btn secondary" data-action="remove-friend" data-id="${esc(p.id)}">Remove friend</button>`:''}
+       ${extendedReady?`<button class="btn secondary" data-action="toggle-block" data-id="${esc(p.id)}">${blockedUsers.some(b=>b.blocked_id===p.id)?'Unblock':'Block'}</button>`:''}
+     </div>
+    </div>
+   </section>
+   <section class="friend-profile-secondary">
+    <div class="friend-profile-section-title">PROFILE DETAILS</div>
+    ${publicProfileDetails(p)}${sharedPiecesHTML(p.id)}
+    <button type="button" class="btn secondary friend-full-profile" data-action="open-profile" data-id="${esc(p.id)}">View full profile ${ico('external','icon-sm')}</button>
+   </section>
+  </div></div>`;
+}
 function renderPieceList(discover){const list=pieces.filter(p=>discover?p.is_public:inPiece(p.id));return header(discover?'Discover Pieces':'Your Pieces',discover?'Explore communities made by people':'All your favorite corners of Tender',`<button class="btn sm" data-action="new-piece">${ico('plus')} New Piece</button>`)+`<div class="main-body"><div class="content-pad"><div class="section-row"><div><h1 class="page-title">${discover?'Find your people 🔥':'Your Pieces 🧩'}</h1><p class="page-subtitle">Each Piece has a chat, forum, and gallery. No servers. Just shared interests.</p></div></div><div class="grid grid-3">${list.map(p=>`<article class="card piece-grid-card" tabindex="0" role="button" data-action="open-piece" data-id="${p.id}"><div class="piece-card-banner" style="background:${esc(p.color)}33">${pieceAvatar(p,'piece-icon-card')}</div><div class="piece-card-inner"><h3>${esc(p.name)}</h3><p>${esc(p.description||'A Tender community')}</p><div class="compact-stats"><span class="tag">${p.is_public?'Public':'Private'}</span></div></div></article>`).join('')}</div>${list.length?'':`<div class="notice-inline top-spacer">${discover?'No public Pieces yet. Create the first one!':'You have not joined any Pieces yet. Head to Discover to browse.'}</div>`}</div></div>`}
 function renderPiece(piece){let joined=inPiece(piece.id),own=ownPiece(piece.id);let buttons=`${joined?`<button class="btn sm secondary" data-action="leave-piece" ${own?'disabled title="Owner cannot leave"':''}>${own?'Owner':'Leave'}</button>`:`${piece.is_public?`<button class="btn sm" data-action="join-piece">Join Piece</button>`:''}`}${own?`<button class="round-btn" title="Edit Piece" data-action="edit-piece">${ico('settings')}</button><button class="round-btn" title="Custom roles" data-action="piece-roles">👑</button>`:''}`;
- buttons+=`${piece.is_public?'<button class="round-btn" data-action="copy-piece-link" title="Copy Piece invitation link">🔗</button>':''}<button class="round-btn" data-action="toggle-info" title="Members">👥</button><button class="round-btn" data-action="room-appearance" title="Customize this Piece">🎨</button>`;
+ buttons+=`${piece.is_public?'<button class="round-btn" data-action="copy-piece-link" title="Share Piece invitation card" aria-label="Share Piece invitation card">🔗</button>':''}<button class="round-btn" data-action="toggle-info" title="Members">👥</button><button class="round-btn" data-action="room-appearance" title="Customize this Piece">🎨</button>`;
   let content='';if(state.pieceTab==='chat') content=`<div class="chat-history piece-chat-history"><div class="chat-scroll">${activeMessages.length?activeMessages.map(m=>messageHTML(m,'piece_message')).join(''):`<div class="chat-empty"><img src="buffalo.webp" alt="Buffalo"><h3>${joined?'No messages yet':'Join this Piece to chat'}</h3><p>${joined?'Say hello to your Piece! 🍗':'Become a member to participate in community chat.'}</p>${!joined&&piece.is_public?'<button type="button" class="btn" data-action="join-piece">Join Piece</button>':''}</div>`}</div><button type="button" class="chat-jump-new" id="chat-jump-new" data-action="jump-latest" hidden>↓ New messages · Jump to latest</button>${composer('piece','Message this Piece')}</div>`;
  if(state.pieceTab==='forum') content=`<div class="section-row"><h2 class="section-heading">Discussions</h2>${joined?`<button class="btn sm" data-action="new-post">${ico('plus')} New post</button>`:''}</div><div class="grid">${activePosts.map(post=>`<article class="post-card" role="button" tabindex="0" data-action="open-post" data-id="${post.id}"><div class="post-meta">${profileName(pby(post.author_id))} · ${relative(post.created_at)}</div><h3>${post.pinned?'📌 ':''}${esc(post.title)}</h3>${post.tags?.length?`<div class="tagline">${post.tags.map(t=>`<span class="tag">#${esc(t)}</span>`).join('')}</div>`:''}<p class="post-body">${esc(post.body.slice(0,240))}${post.body.length>240?'...':''}</p><div class="post-footer">${ico('chat','icon-sm')} ${post.locked?'🔒 Locked':'Read discussion'} ${(own||memberships.some(m=>m.piece_id===post.piece_id&&m.user_id===user.id&&m.role==='moderator'))&&extendedReady?`<button class="emoji-inline" data-action="pin-post" data-id="${post.id}" title="Pin">📌</button><button class="emoji-inline" data-action="lock-post" data-id="${post.id}" title="Lock">🔒</button>`:''}${post.author_id===user.id||own?`<button class="emoji-inline" data-action="delete-post" data-id="${post.id}" title="Delete post">${ico('trash','icon-sm')}</button>`:''}</div></article>`).join('')||'<div class="notice-inline">No discussions yet. Be the first to post.</div>'}</div>`;
  if(state.pieceTab==='gallery')content=`<div class="section-row"><h2 class="section-heading">Gallery</h2>${joined&&piece.is_public?`<button class="btn sm" data-action="new-gallery">${ico('plus')} Upload picture</button>`:''}</div><div class="gallery-grid">${activeGallery.map(photo=>`<article class="gallery-card"><img src="${esc(galleryUrl(photo.image_path))}" alt="${esc(photo.caption||'Community image')}" data-action="enlarge" data-src="${esc(galleryUrl(photo.image_path))}"><div class="gallery-info"><p>${esc(photo.caption)}</p><div class="post-meta">${profileName(pby(photo.author_id))} · ${relative(photo.created_at)}</div><div class="bubble-actions"><button class="emoji-inline" data-action="reaction-menu" data-type="gallery" data-id="${photo.id}">${ico('smile')}</button>${own||photo.author_id===user.id?`<button class="emoji-inline" data-action="delete-gallery" data-id="${photo.id}" data-path="${esc(photo.image_path)}">${ico('trash')}</button>`:''}</div></div></article>`).join('')||'<div class="notice-inline">The gallery is waiting for its first photo.</div>'}</div>`;
@@ -568,7 +737,8 @@ const tenderCommands=[
  {name:'theme',detail:'Change current chat wallpaper',usage:'/theme'},
  {name:'who',detail:'Show conversation members',usage:'/who'},
  {name:'trivia',detail:'Play a private trivia round',usage:'/trivia'},
- {name:'embed',detail:'Build a rich announcement card',usage:'/embed'}
+ {name:'embed',detail:'Build a rich announcement card',usage:'/embed'},
+ {name:'invite',detail:'Share a public Piece with an invitation card',usage:'/invite'}
 ];
 function updateComposerAssist(field){
  let box=document.getElementById('composer-assist');if(!box||!field)return;
@@ -601,6 +771,7 @@ function applySlashCommand(body,kind){
   case'who':if(kind==='chat')chatInfo();else{const p=selectedPiece();modal('Piece members',p?.name||'Members',`<div>${memberships.filter(x=>x.piece_id===state.selected).slice(0,50).map(x=>friendItem(pby(x.user_id),'info')).join('')}</div>`)}return {handled:true};
   case'trivia':triviaModal();return {handled:true};
   case'embed':embedModal();return {handled:true};
+  case'invite':if(kind!=='chat')return {error:'Use /invite in a DM or group chat.'};invitePickerModal();return {handled:true};
   case'poll':if(kind!=='chat')return {error:'Piece polls require backend support; use a DM or group for now.'};pollModal();return {handled:true};
   case'gif':gifModal();return {handled:true};
   case'search':searchModal();return {handled:true};
@@ -615,26 +786,49 @@ function applySlashCommand(body,kind){
 }
 async function sendMessage(form){let text=String(new FormData(form).get('body')||'').trim();const command=text.startsWith('/')?applySlashCommand(text,form.dataset.kind):null;if(command?.error){toast(command.error,true);return}if(command?.handled){const field=form.querySelector('#message-box');if(field)field.value='';return}if(command?.text)text=command.text;let file=document.getElementById('message-file')?.files?.[0]||recordedVoice||null;if(!text&&!file)return;
  if(state.busy)return;const kind=form.dataset.kind,table=kind==='chat'?'messages':'piece_messages',target=state.selected,area=state.area;
- const original=text,replyId=replyTo?.id||null;const tmp=crypto.randomUUID();const pending={id:tmp,created_at:new Date().toISOString(),author_id:user.id,body:text,pending:true,conversation_id:kind==='chat'?target:null,piece_id:kind==='piece'?target:null,attachment_path:file?file.name:null,pendingFile:file?URL.createObjectURL(file):null,reply_to:kind==='chat'?replyId:null};
- const field=form.querySelector('#message-box');if(field)field.value='';localStorage.removeItem('tender-draft:'+user.id+':'+[area,target,kind==='piece'?'chat':state.pieceTab].join(':'));if(form.querySelector('#message-file'))form.querySelector('#message-file').value='';recordedVoice=null;replyTo=null;
+ const original=text,replyId=replyTo?.id||null;const tmp=crypto.randomUUID();const pending={id:tmp,created_at:new Date().toISOString(),author_id:user.id,body:text,pending:true,conversation_id:kind==='chat'?target:null,piece_id:kind==='piece'?target:null,attachment_path:file?file.name:null,pendingFile:file?URL.createObjectURL(file):null,reply_to:replyId};
+ const field=form.querySelector('#message-box');if(field)field.value='';localStorage.removeItem('tender-draft:'+user.id+':'+[area,target,kind==='piece'?'chat':state.pieceTab].join(':'));if(form.querySelector('#message-file'))form.querySelector('#message-file').value='';recordedVoice=null;replyTo=null;updateComposerReply();
  activeMessages.push(pending);syncActiveStream(true);document.getElementById('message-box')?.focus();
  await safe(async()=>{let attachment_path=null;try{
  if(file){const status=document.getElementById('file-status');if(status)status.textContent='Uploading attachment…';if(kind!=='chat')throw Error('Upload attachments in DMs/groups, or use the Gallery in Pieces.');if(file.size>5*1024*1024)throw Error('Maximum attachment size is 5 MB.');if(!['image/png','image/jpeg','image/webp','image/gif','application/pdf','audio/webm','audio/ogg','audio/mp4','audio/mpeg'].includes(file.type))throw Error('Unsupported file type.');attachment_path=`${target}/${user.id}/${crypto.randomUUID()}-${file.name.replace(/[^a-z0-9_.-]/gi,'_')}`;assert(await db.storage.from('tender-chat').upload(attachment_path,file,{contentType:file.type,upsert:false}));}
- const record=kind==='chat'?{id:tmp,conversation_id:target,author_id:user.id,body:text,attachment_path}:{id:tmp,piece_id:target,author_id:user.id,body:text};if(extendedReady&&kind==='chat')record.reply_to=replyId;
+ const record=kind==='chat'?{id:tmp,conversation_id:target,author_id:user.id,body:text,attachment_path}:{id:tmp,piece_id:target,author_id:user.id,body:text};
+ if(replyId&&((kind==='chat'&&extendedReady)||(kind==='piece'&&pieceRepliesReady)))record.reply_to=replyId;
  const status=document.getElementById('file-status');if(status)status.textContent='Sending…';const result=assert(await q(table).insert(record).select('*').single());let pos=activeMessages.findIndex(m=>m.id===tmp);if(pos>=0)activeMessages[pos]=result;else if(state.selected===target&&state.area===area&&!activeMessages.some(m=>m.id===result.id))activeMessages.push(result);
  if(pending.pendingFile){URL.revokeObjectURL(pending.pendingFile)}if(status)status.textContent='Sent ✓';if(attachment_path)await prepareAttachmentUrls();if(state.selected===target&&state.area===area){syncActiveStream();document.getElementById('message-box')?.focus()}else scheduleReconcile(false);
- }catch(e){activeMessages=activeMessages.filter(m=>m.id!==tmp);if(pending.pendingFile)URL.revokeObjectURL(pending.pendingFile);if(state.selected===target&&state.area===area){syncActiveStream();const area=document.getElementById('message-box');if(area)area.value=original;}throw e;}});
+ }catch(e){activeMessages=activeMessages.filter(m=>m.id!==tmp);if(pending.pendingFile)URL.revokeObjectURL(pending.pendingFile);if(state.selected===target&&state.area===area){replyTo=replyId?activeMessages.find(m=>m.id===replyId)||null:null;updateComposerReply();syncActiveStream();const field=document.getElementById('message-box');if(field)field.value=original;}throw e;}});
 }
 const galleryUrl=path=>db.storage.from('tender-gallery').getPublicUrl(path).data.publicUrl;
 async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=el.dataset.tab;try{
  if(a==='trivia-answer'){const box=document.getElementById('trivia-result');if(box){box.textContent=el.dataset.correct==='1'?'✅ Nice! Buffalo approves. 🍗':'Not quite! Try another round.';box.style.color=el.dataset.correct==='1'?'#70ddb6':'#ffad80';document.querySelectorAll('.trivia-answer').forEach(b=>b.disabled=true)}return}
   if(a==='insert-slash'||a==='insert-mention'){const field=document.getElementById('message-box');if(!field)return;if(a==='insert-slash')field.value='/'+el.dataset.command+' ';else field.value=field.value.replace(/@[a-z0-9_]*$/i,'@'+el.dataset.handle+' ');field.focus();updateComposerAssist(field);field.dispatchEvent(new Event('input',{bubbles:true}));return}
-  if(a==='copy-piece-link'){const p=selectedPiece();if(!p?.is_public)return toast('Private Piece invitations need additional server-side permissions.',true);const url=new URL(window.location.pathname,window.location.origin);url.searchParams.set('piece',p.id);try{await navigator.clipboard.writeText(url.href);toast('Piece invitation link copied!')}catch{modal('Invite link','Copy this public Piece link.',`<input class="input" readonly value="${esc(url.href)}">`)}return}
+  if(a==='copy-piece-link'){invitePieceModal(selectedPiece());return}
+  if(a==='copy-piece-invite'){
+    const url=String(el.dataset.url||'');
+    if(!url.startsWith('https://'))return toast('Secure HTTPS invitation links are required.',true);
+    try{await navigator.clipboard.writeText(url);toast('Invitation copied! Send it to your friends. 🍗')}
+    catch{const field=document.getElementById('invite-link');field?.focus();field?.select();toast('Select and copy the invitation link above.')}
+    return;
+  }
+  if(a==='open-piece-invite'){
+    const piece=pieces.find(p=>p.id===id&&p.is_public);
+    if(!piece)return toast('This Piece invite is no longer available.',true);
+    closeModal();await goTo(inPiece(piece.id)?'pieces':'discover',piece.id);return;
+  }
+  if(a==='insert-piece-invite'){
+    const piece=pieces.find(p=>p.id===id&&p.is_public);
+    if(!piece)return toast('This Piece invite is no longer available.',true);
+    const url=pieceInviteURL(piece);closeModal();
+    const field=document.getElementById('message-box');if(!field)return;
+    field.value=(field.value.trim()?field.value.trim()+'\n':'')+url;
+    field.focus();field.dispatchEvent(new Event('input',{bubbles:true}));
+    toast('Invite inserted into your message.');return;
+  }
   if(a==='room-appearance'){roomAppearanceModal();return}
   if(a==='export-theme'){const p=JSON.stringify({name:'Tender 0.3 theme',appearance:localPrefs()},null,2);const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([p],{type:'application/json'}));link.download='tender-theme.json';link.click();setTimeout(()=>URL.revokeObjectURL(link.href),2500);toast('Theme saved locally!');return}
   if(a==='toggle-info'){const visible=localStorage.getItem('tender-info-hidden')==='1';localStorage.setItem('tender-info-hidden',visible?'0':'1');renderInfoPanel();return}
   if(a==='toggle-rail'){const expanded=localStorage.getItem('tender-rail-expanded')==='1';localStorage.setItem('tender-rail-expanded',expanded?'0':'1');document.getElementById('app-screen')?.classList.toggle('rail-expanded',!expanded);return}
-  if(a==='open-profile'){await showProfile(id);return}
+  if(a==='open-profile-piece'){closeModal();await goTo('pieces',id);return}
+   if(a==='open-profile'){await showProfile(id);return}
   if(a==='open-alerts'){alertsModal();return}
  if(a==='open-alert'){closeModal();if(el.dataset.cid)await goTo('chats',el.dataset.cid);else await goTo('friends');return}
  if(a==='confirm-yes'){settleConfirm(true);return}
@@ -663,10 +857,10 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='new-event'){eventModal();return}
  if(a==='pin-post'||a==='lock-post'){if(!extendedReady)return;await safe(async()=>{const post=activePosts.find(p=>p.id===id);if(!post)return;const key=a==='pin-post'?'pinned':'locked';assert(await q('piece_posts').update({[key]:!post[key]}).eq('id',id));post[key]=!post[key];renderMain();toast('Discussion updated!')});return}
  if(a==='piece-roles'){roleModal();return}
- if(a==='cancel-reply'){replyTo=null;renderMain();return}
- if(a==='reply-message'){replyTo=activeMessages.find(m=>m.id===id);renderMain();document.getElementById('message-box')?.focus();return}
+ if(a==='cancel-reply'){replyTo=null;updateComposerReply();document.getElementById('message-box')?.focus();return}
+ if(a==='reply-message'){selectReply(id);return}
  if(a==='jump-latest'){const sc=document.querySelector('#main .chat-scroll');sc?.scrollTo({top:sc.scrollHeight,behavior:'smooth'});el.hidden=true;return}
-  if(a==='jump-reply'){document.querySelector(`[data-message-id="${CSS.escape(id)}"]`)?.scrollIntoView({behavior:'smooth',block:'center'});return}
+  if(a==='jump-reply'){jumpToReply(id);return}
  if(a==='edit-message'){let m=activeMessages.find(x=>x.id===id);if(!m)return;modal('Edit message','Update your message.',`<form id="edit-message-form"><input name="id" type="hidden" value="${id}"><textarea name="body" class="input textarea" maxlength="4000" required>${esc(m.body)}</textarea><button class="btn full" type="submit">Save changes</button></form>`);return}
  if(a==='pin-message'){if(!extendedReady)return toast('Run the 0.2 SQL migration first.',true);await safe(async()=>{const m=activeMessages.find(x=>x.id===id);assert(await q('messages').update({is_pinned:!m.is_pinned}).eq('id',id));m.is_pinned=!m.is_pinned;renderMain()});return}
  if(a==='bookmark-message'){if(!extendedReady)return toast('Run the 0.2 SQL migration first.',true);await safe(async()=>{const b=bookmarks.find(x=>x.message_id===id);if(b){assert(await q('bookmarks').delete().eq('message_id',id).eq('user_id',user.id));bookmarks=bookmarks.filter(x=>x!==b)}else{assert(await q('bookmarks').insert({message_id:id,user_id:user.id}));bookmarks.push({message_id:id,user_id:user.id})}renderMain()});return}

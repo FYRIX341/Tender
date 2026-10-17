@@ -6,9 +6,9 @@ Tender is a responsive social messaging app with **Buffalo** the mascot. Chat wi
 
 **[🍗 Open Tender securely](https://fyrix341.github.io/Tender/)** · [Source code](https://github.com/FYRIX341/Tender)
 
-## ✨ Tender 0.3.2 — Night Shift, Refined
+## ✨ Tender 0.3.3 — Profiles, Replies & Pieces
 
-**Night Shift, Refined is live!** Tender's chat is more compact and the old empty gaps under messages are fixed. Settings are now organized like a real messenger, and profile editing includes a custom text status, bio, and synced pronouns (once the automatic additive migration succeeds). Browser notifications, type-anywhere chat, draggable panel borders and Tender-styled confirmations make messaging smoother.
+**Tender 0.3.3 makes conversations more personal.** You can open a detailed full profile from someone’s avatar or name; the right-hand panel in direct messages now shows the other person's profile, not a two-member list. Reply to specific DM and Piece messages, and share public Pieces as colorful, interactive invitation cards.
 
 Piece owners can change their picture in **Edit Piece** or by clicking the Piece picture. You can switch back to an emoji whenever you like. These features reuse the existing Supabase setup, with no new SQL migration.
 
@@ -16,13 +16,13 @@ Piece owners can change their picture in **Edit Piece** or by clicking the Piece
 
 - **Your profile:** Sign up, sign in, customize your display name, bio, avatar, banner and status. Click a person's picture or name to open their profile.
 - **Find your people:** Discover users, send friend requests, and connect with friends.
-- **Chat:** Send private messages, create group chats, and see messages update in real time.
+- **Chat:** Send private messages, create group chats, reply to messages, and see messages update in real time. Replies have previews and jump-to-original.
 - **Express yourself:** React with emojis and share supported attachments.
-- **Explore Pieces:** Join or create public and private communities with live chat, discussions, replies, and image galleries. Piece owners can upload a custom Piece icon.
+- **Explore Pieces:** Join or create communities with live chat, threaded-style message replies, discussions and galleries. Owners can upload custom icons. Public Pieces have invitation cards that can be shared in DMs.
 - **Make it yours:** Choose colors, gradients, fonts, appearance presets, and chat wallpapers in a responsive desktop/mobile design.
 - **Stay in the loop:** See in-app notifications while using Tender.
 
-For details, see the [0.3.2 release notes](RELEASE_0_3_2.md) and [0.3.1 release notes](RELEASE_0_3_1.md) and the [0.2 changelog](RELEASE_0_2.md).
+For details, see the [0.3.3 release notes](RELEASE_0_3_3.md), [0.3.2 changelog](RELEASE_0_3_2.md), and [0.3.1 changelog](RELEASE_0_3_1.md).
 
 ## 📱 Made for desktop and mobile
 
