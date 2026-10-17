@@ -37,7 +37,7 @@ A big free customization and community upgrade, built directly on the existing T
 
 ## 😀 Every emoji, not thirty
 
-- Bundled **3,944 fully-qualified Unicode 17.0 emoji sequences** (including flags, skin tones and ZWJ variants) from Unicode's official emoji test data. No external API key.
+- Bundled **3,963 fully-qualified Unicode 18.0 emoji sequences** (including flags, skin tones and ZWJ variants) from Unicode's official emoji test data. No external API key.
 - Search, categories, Recent, custom emoji and sticker tab, plus paging in groups of 150 for smooth performance.
 - The same complete emoji picker is available for **reactions** and the message composer.
 - Exact glyph appearance depends on the user's OS/browser emoji font; newer glyphs may display as missing on old devices.
