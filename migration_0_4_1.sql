@@ -91,6 +91,10 @@ BEGIN
     OR (SELECT COUNT(*) FROM public.conversation_members WHERE conversation_id=cid)<>2 THEN
    RAISE EXCEPTION 'Tender 0.4.1 supports one-to-one DMs only';
  END IF;
+ IF EXISTS(SELECT 1 FROM public.user_blocks WHERE (blocker_id=caller AND blocked_id=peer)
+ OR (blocker_id=peer AND blocked_id=caller)) THEN
+  RAISE EXCEPTION 'Calling is unavailable for this conversation';
+ END IF;
  -- End abandoned sessions before creating another, without touching active calls.
  UPDATE public.tender_call_sessions
  SET status='ended',ended_at=now()
