@@ -10,7 +10,7 @@ Tender is a responsive social messaging app with **Buffalo** the mascot. Chat wi
 
 **Tender 0.4 gives Pieces real channels and makes customization free.** Your joined Pieces appear as icons in the left rail, with unread badges; channels can have their own conversations, categories, topics and unread history. Every old Piece chat remains in **#general**. DM and group icons now show live connection-aware status markers.
 
-Click an avatar or name for a **mini profile**, with a button to view the full page. Express yourself with **free gradients, six name-font presets, four text effects and animated GIF avatars**. Piece owners can style their community icon, color gradient, name, welcome message and theme. The redesigned emoji picker contains **3,944 Unicode 17.0 sequences**, including all supported fully-qualified combinations, rather than a short list.
+Click an avatar or name for a **mini profile**, with a button to view the full page. Express yourself with **free gradients, six name-font presets, four text effects and animated GIF avatars**. Piece owners can style their community icon, color gradient, name, welcome message and theme. The redesigned emoji picker contains **3,963 Unicode 18.0 sequences**, including all supported fully-qualified combinations, rather than a short list.
 
 Tender 0.4 includes an **automatic additive Supabase migration** for channels, read positions, customization fields and animated-avatar upload support. It does not wipe existing accounts, chats or Pieces.
 
@@ -19,7 +19,7 @@ Tender 0.4 includes an **automatic additive Supabase migration** for channels, r
 - **Your profile:** Customize your bio, presence, gradient, name font/effects, regular or animated GIF avatar and banner. Click someone's avatar for a quick profile card.
 - **Find your people:** Discover users, send friend requests, and connect with friends.
 - **Chat:** Send private messages, create group chats, reply to messages, and see messages update in real time. Replies have previews and jump-to-original. Clickable blue @mentions highlight only the usernames.
-- **Express yourself:** Search and react with the entire bundled Unicode 17 emoji catalog, use recent picks, custom stickers, GIF links and supported attachments.
+- **Express yourself:** Search and react with the entire bundled Unicode 18 emoji catalog, use recent picks, custom stickers, GIF links and supported attachments.
 - **Explore Pieces:** Join communities shown in an icon rail; browse text and announcement channels, category lists, real unread badges, forums, galleries and events. Piece owners can create channels and customize GIF/emoji icons and themes. Public Pieces have shareable invitation cards.
 - **Make it yours:** Choose themes, gradients, fonts and chat wallpapers. A bottom account dock lets you edit your profile, switch between availability modes, mute Tender voice-note recording and deafen Tender audio.
 - **Stay in the loop:** See in-app notifications while using Tender.
