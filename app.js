@@ -24,6 +24,10 @@ const ICONS = {
  external:'<path d="M15 3h6v6m0-6L10 14"/><path d="M21 13v8H3V3h8"/>',
  lock:'<rect x="4" y="10" width="16" height="12" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3"/>',
  globe:'<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/>',
+ user:'<circle cx="12" cy="7" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',
+ palette:'<circle cx="12" cy="12" r="9"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="8" r="1"/><path d="M16.4 14.1a2.4 2.4 0 0 0 0 4.8"/>',
+ shield:'<path d="m12 22 1.5-.7C19 18.7 21 14 21 8V4l-9-3-9 3v4c0 6 2 10.7 7.5 13.3z"/><path d="m9 12 2 2 4-4"/>',
+ accessibility:'<circle cx="12" cy="3.5" r="1.5"/><path d="M3 8h18M12 8v5m0 0-5 8m5-8 5 8"/>',
  edit:'<path d="m16 3 5 5-12 12H4v-5zM14 5l5 5"/>', bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>'
 };
 const ico=(name,extra='')=>`<span class="ico ${extra}" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||ICONS.info}</svg></span>`;
@@ -43,7 +47,7 @@ const profileFace=p=>`<button type="button" class="profile-click profile-face" d
 const profileName=p=>`<button type="button" class="profile-click profile-name" data-action="open-profile" data-id="${esc(p.id||'')}" title="View ${esc(p.display_name||'member')}'s profile">${esc(p.display_name||'Tender member')}</button>`;
 const config = window.TENDER_CONFIG || {};
 let db, session, user, my, profiles=[], friendships=[], conversations=[], pieces=[], memberships=[], activeMessages=[], activePosts=[], activeGallery=[], activeComments=[], activeReactions=[], activeMembers=[], selectedPost=null, channel=null;
-let state={area:'chats', selected:null, pieceTab:'chat', search:'', loginMode:'login', mobileDetail:false, setup:false, busy:false, authReady:false};
+let state={area:'chats', selected:null, pieceTab:'chat', settingsTab:'profile', search:'', loginMode:'login', mobileDetail:false, setup:false, busy:false, authReady:false};
 let realtimeChannel=null, realtimeRefreshTimer=null;
 function toast(message,bad=false){const div=document.createElement('div');div.className='toast';div.textContent=message;div.style.borderColor=bad?'#bb4b5f':'';TOASTER.append(div);setTimeout(()=>div.remove(),5000);}
 async function safe(work){if(state.busy)return;state.busy=true;try{await work()}catch(e){console.error('Tender:',e);toast(e.message||'Something went wrong.',true)}finally{state.busy=false}}
@@ -59,7 +63,7 @@ function ownPiece(pid){return pieces.some(p=>p.id===pid&&p.owner_id===user.id)}
 const selectedPiece=()=>pieces.find(x=>x.id===state.selected);
 function empty(title,description,action='',label=''){return `<div class="empty-content"><img src="buffalo.webp" alt="Buffalo"><h2>${esc(title)}</h2><p>${esc(description)}</p>${action?`<button class="btn" data-action="${esc(action)}">${esc(label)}</button>`:''}</div>`}
 // Tender 0.2 helpers. Shared DB features are gated behind migration_0_2.sql.
-let extendedReady=false, notifications=[], customEmojis=[], reads=[], bookmarks=[], blockedUsers=[], pieceEvents=[], pieceRoles=[], roleAssignments=[], activePolls=[], activePollVotes=[];
+let extendedReady=false, pronounsReady=false, notifications=[], customEmojis=[], reads=[], bookmarks=[], blockedUsers=[], pieceEvents=[], pieceRoles=[], roleAssignments=[], activePolls=[], activePollVotes=[];
 let attachmentUrls=new Map(), replyTo=null, recordedVoice=null, voiceRecorder=null, voiceChunks=[], typingChannel=null, typingTimeout=null, typingLast=0, reconcileTimer=null, notificationReady=false;
 const chosenTheme=()=>my?.chat_theme||localStorage.getItem('tender-theme')||'dark';
 function applyTheme(){const theme=chosenTheme();document.documentElement.dataset.tenderTheme=theme;document.documentElement.style.setProperty('--personal-accent',my?.accent_color||'#f47735');applyLocalAppearance()}
@@ -133,6 +137,7 @@ async function refreshExtras(){
  const reqs=[q('notifications').select('*').order('created_at',{ascending:false}).limit(250),q('custom_emojis').select('*').order('created_at',{ascending:false}).limit(200),q('conversation_reads').select('*').limit(300),q('bookmarks').select('*').limit(100),q('piece_events').select('*').order('starts_at').limit(70),q('piece_roles').select('*').limit(150),q('piece_role_assignments').select('*').limit(200),q('user_blocks').select('*').limit(200)];
  const [a,b,c,d,e,f,g,h]=await Promise.all(reqs);if(!a.error)notifications=a.data||[];if(!b.error)customEmojis=b.data||[];if(!c.error)reads=c.data||[];if(!d.error)bookmarks=d.data||[];if(!e.error)pieceEvents=e.data||[];if(!f.error)pieceRoles=f.data||[];if(!g.error)roleAssignments=g.data||[];if(h&&!h.error)blockedUsers=h.data||[];
  }catch(e){console.warn('0.2 optional features unavailable',e)}
+ try{const probe=await q('profiles').select('pronouns').limit(1);pronounsReady=!probe.error}catch{pronounsReady=false}
  applyTheme();
 }
 async function loadPolls(){activePolls=[];activePollVotes=[];if(!extendedReady||state.area!=='chats'||!state.selected)return;const ids=activeMessages.map(m=>m.poll_id).filter(Boolean);if(!ids.length)return;const [p,v]=await Promise.all([q('polls').select('*').in('id',ids),q('poll_votes').select('*').in('poll_id',ids)]);if(!p.error)activePolls=p.data||[];if(!v.error)activePollVotes=v.data||[]}
@@ -144,8 +149,47 @@ async function markRead(cid=null,friend=false){if(!extendedReady||!user)return;t
  }catch(e){console.warn('Read receipts:',e)}}
 function renderNavBadges(){const chatButton=document.querySelector('.rail-btn[data-area="chats"]'),friendButton=document.querySelector('.rail-btn[data-area="friends"]');for(const [el,n] of [[chatButton,notifications.filter(x=>x.kind==='message'&&!x.is_read).length],[friendButton,unreadFriends()]]){if(!el)continue;el.querySelector('.unread-badge')?.remove();if(n)el.insertAdjacentHTML('beforeend',renderBadge(n))}document.title=unreadAll()?`(${unreadAll()}) Tender 🍗`:'Tender 🍗'}
 function soundPing(){if(!my?.notification_sound||my?.presence_mode==='dnd')return;try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return;const c=new C(),o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.setValueAtTime(my.notification_tone==='soft'?480:my.notification_tone==='chime'?900:680,c.currentTime);o.frequency.exponentialRampToValueAtTime(my.notification_tone==='soft'?550:my.notification_tone==='chime'?1150:920,c.currentTime+.08);g.gain.setValueAtTime(.001,c.currentTime);g.gain.exponentialRampToValueAtTime(.04,c.currentTime+.02);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.17);o.connect(g).connect(c.destination);o.start();o.stop(c.currentTime+.2);o.onended=()=>c.close();}catch{}}
-function showBrowserNotification(n){if(n.user_id!==user?.id)return;const mode=my?.notification_mode||'all';if(mode==='none'||my?.presence_mode==='dnd'||my?.presence_mode==='invisible')return;if(mode==='mentions'&&!n.body?.toLowerCase().includes('@'+my.handle.toLowerCase())&&n.kind!=='friend')return;
- soundPing();if(document.visibilityState!=='hidden'||Notification.permission!=='granted')return;const actor=pby(n.actor_id);const title=n.kind==='friend'?'New friend request':`Message from ${actor.display_name}`;try{const pop=new Notification(title,{body:n.body?.slice(0,100)||'Open Tender',icon:'buffalo.webp',tag:'tender-'+n.id});pop.onclick=()=>{window.focus();if(n.conversation_id)goTo('chats',n.conversation_id);pop.close()}}catch(e){console.warn('Notification:',e)}}
+// Notifications require HTTPS and an explicit permission grant. The service worker
+// enables notifications on mobile while the Tender page is open; it is NOT a push server.
+let notificationWorkerPromise=null;
+const notifiedEventIds=new Set();
+function ensureNotificationWorker(){
+ if(notificationWorkerPromise)return notificationWorkerPromise;
+ if(!window.isSecureContext||!('serviceWorker' in navigator))return Promise.resolve(null);
+ notificationWorkerPromise=navigator.serviceWorker.register('./tender-sw.js',{scope:'./'})
+   .then(reg=>reg).catch(error=>{console.warn('Tender notification worker unavailable',error);return null});
+ return notificationWorkerPromise;
+}
+async function emitSystemNotification(title,body,tag='tender-test',conversationId=null){
+ if(!window.isSecureContext||typeof Notification==='undefined'||Notification.permission!=='granted')return false;
+ const opts={body,icon:new URL('buffalo.webp',location.href).href,badge:new URL('buffalo.webp',location.href).href,tag,renotify:false,data:{conversationId}};
+ // A page-owned service-worker registration can show notifications in mobile browsers.
+ let worker=null;try{worker=await ensureNotificationWorker()}catch{}
+ if(worker?.showNotification){
+   await worker.showNotification(title,opts);return true;
+ }
+ // Desktop-only fallback: the constructor isn't supported in most mobile browsers.
+ try{
+  const toastNotification=new Notification(title,opts);
+  toastNotification.onclick=()=>{window.focus();if(conversationId)goTo('chats',conversationId).catch(console.warn);toastNotification.close()};
+  return true;
+ }catch(error){console.warn('Browser notification not shown',error);return false}
+}
+async function showBrowserNotification(n){
+ if(!n||!user||n.user_id!==user.id||n.actor_id===user.id)return;
+ if(my?.notification_mode==='none'||['dnd','invisible'].includes(my?.presence_mode))return;
+ const text=String(n.body||'').toLowerCase(),handle=String(my?.handle||'').toLowerCase();
+ if(my?.notification_mode==='mentions'&&n.kind!=='friend'&&!text.includes('@'+handle))return;
+ if(notifiedEventIds.has(n.id))return;
+ notifiedEventIds.add(n.id);
+ if(notifiedEventIds.size>250)notifiedEventIds.delete(notifiedEventIds.values().next().value);
+ soundPing();
+ const actor=pby(n.actor_id);
+ const title=n.kind==='friend'?'👋 New friend request':'💬 '+(actor.display_name||'New Tender message');
+ const body=String(n.body||'Open Tender to see the activity.').slice(0,130);
+ try{await emitSystemNotification(title,body,'tender-'+n.id,n.conversation_id||null)}
+ catch(error){console.warn('Tender notification error',error)}
+}
 // 0.3: reconcile only the visible stream on realtime message events.
 let reconciling=false, reconcileAgain=false;
 function scheduleReconcile(active=true,kind='',event=null){
@@ -237,7 +281,8 @@ async function showProfile(id){
    <div class="profile-popout-body">
      <div class="profile-popout-head"><div><h2>${esc(person.display_name||'Tender member')}</h2><p>@${esc(person.handle||'member')}</p></div>
        ${person.presence_mode&&person.presence_mode!=='invisible'? `<span class="tag neutral">${esc(person.presence_mode)}</span>`:''}</div>
-     ${person.game_status?`<div class="profile-status">${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</div>`:''}
+     ${person.pronouns?`<div class="profile-pronouns">${esc(person.pronouns)}</div>`:''}
+      ${person.game_status?`<div class="profile-status">${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</div>`:''}
      <h3>About me</h3>
      <p class="profile-about">${esc(person.bio||'No bio yet. Stay crispy! 🍗')}</p>
      <div class="profile-popout-actions">${actions}</div>
@@ -246,7 +291,19 @@ async function showProfile(id){
 }
 function profileBanner(p){const isSelf=p.id===user?.id;return `<div class="profile-banner crispy-profile effect-${esc(p.profile_effect||'none')}" ${p.banner_url?`style="background-image:linear-gradient(0deg,#17191d7a,transparent),url('${esc(validUrl(p.banner_url))}')"`:''}>${avatars(p)}${isSelf?'<span class="banner-hint">Your Tender profile</span>':''}</div>`}
 async function uploadPublicAsset(file,bucket,limit,mimes,prefix){if(!file||file.size>limit||!mimes.includes(file.type))throw Error('This file type or size is not supported.');const extension=({"image/png":"png","image/jpeg":"jpg","image/webp":"webp","image/gif":"gif"})[file.type];const path=`${user.id}/${prefix}-${crypto.randomUUID()}.${extension}`;assert(await db.storage.from(bucket).upload(path,file,{contentType:file.type,upsert:false}));return {url:db.storage.from(bucket).getPublicUrl(path).data.publicUrl,path}}
-function deviceNotificationsPanel(){const enabled=typeof Notification!=='undefined';return `<div class="card top-spacer"><h2 class="section-heading">Notifications</h2><p class="hint">Unread alerts show in Tender instantly. Browser notifications work while the site is open, including in background tabs. Closed-browser push requires a future secure push service.</p><div class="button-group"><button class="btn secondary" data-action="notification-permission" ${!enabled?'disabled':''}>${ico('bell')} ${enabled?(Notification.permission==='granted'?'Notifications allowed':'Allow browser notifications'):'Unavailable in this browser'}</button><button class="btn secondary" data-action="open-alerts">${ico('bell')} Inbox ${renderBadge(unreadAll())}</button></div></div>`}
+function deviceNotificationsPanel(){
+ const secure=window.isSecureContext===true,enabled=secure&&typeof Notification!=='undefined';
+ const status=!secure?'🔒 HTTPS is required for browser notifications. Open Tender on the secure GitHub Pages URL until your custom domain has HTTPS.':
+ !enabled?'This browser does not support native notifications.':
+ Notification.permission==='granted'?'✅ Browser notifications allowed. Tender can notify you while this tab is open, including when you are using another window.':
+ Notification.permission==='denied'?'Notifications are blocked by your browser. Open your browser’s site permissions to allow Tender.':
+ 'Tap Enable notifications and allow Tender to show system alerts.';
+ return `<div class="settings-card notification-settings"><div class="settings-card-title"><h3>Desktop & mobile alerts</h3><p>${esc(status)}</p></div>
+ <div class="button-group"><button type="button" class="btn" data-action="notification-permission" ${!enabled||Notification.permission==='denied'?'disabled':''}>${ico('bell','icon-sm')} ${enabled&&Notification.permission==='granted'?'Notifications enabled':'Enable notifications'}</button>
+ <button type="button" class="btn secondary" data-action="notification-test" ${!enabled||Notification.permission!=='granted'?'disabled':''}>🔔 Send test notification</button>
+ <button type="button" class="btn secondary" data-action="open-alerts">Open inbox ${renderBadge(unreadAll())}</button></div>
+ <p class="hint">Browser notifications require permission and HTTPS. Alerts work while Tender is open; closed-browser push requires a separate push backend. Each website domain needs its own permission.</p></div>`;
+}
 function alertsModal(){modal('Activity inbox','New messages and friend requests.',`<div class="notification-feed">${notifications.slice(0,70).map(n=>`<button class="activity-row ${n.is_read?'':'fresh'}" data-action="open-alert" data-id="${n.id}" data-cid="${esc(n.conversation_id||'')}"><span>${n.kind==='friend'?'👋':'💬'}</span><span><strong>${esc(pby(n.actor_id).display_name)}</strong><small>${esc(n.body?.slice(0,110)||'New activity')} · ${relative(n.created_at)}</small></span>${!n.is_read?renderBadge(1):''}</button>`).join('')||'<p class="hint">All caught up! Buffalo approves. 🍗</p>'}</div>`)}
 
 async function boot(){
@@ -256,7 +313,8 @@ async function boot(){
  try{db=window.supabase.createClient(url,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
   const got=await db.auth.getSession();if(got.error)throw got.error;session=got.data.session;user=session?.user||null;
   db.auth.onAuthStateChange((ev,newSession)=>{session=newSession;let previous=user?.id;user=newSession?.user||null;if(previous!==user?.id){if(!user){unsub();reset();renderAuth()}else setTimeout(()=>initialize(),0)}});
-  if(user)await initialize();else renderAuth();
+  if(window.isSecureContext)ensureNotificationWorker().catch(console.warn);
+   if(user)await initialize();else renderAuth();
  }catch(e){ROOT.innerHTML=empty('Could not reach Tender','Check the public Supabase URL and key in config.js.');toast(e.message||'Could not connect.',true)}
 }
 function reset(){notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];state.selected=null;state.area='chats';state.mobileDetail=false}
@@ -266,7 +324,10 @@ async function authSubmit(form){const data=new FormData(form), email=String(data
  await safe(async()=>{if(state.loginMode==='signup'){const handle=String(data.get('handle')).trim().toLowerCase(),display_name=String(data.get('display_name')).trim();if(!/^[a-z0-9_]{3,20}$/.test(handle))throw Error('Username needs 3–20 letters, numbers or underscores.');const r=await db.auth.signUp({email,password,options:{data:{handle,display_name},emailRedirectTo:location.origin+location.pathname}});assert(r);toast(r.data.session?'Welcome to Tender!':'Check your inbox to confirm your email, then sign in.');if(!r.data.session){state.loginMode='login';renderAuth()}}
  else{assert(await db.auth.signInWithPassword({email,password}));toast('Welcome back! 🍗')}})}
 async function initialize(){ROOT.innerHTML='<div class="loading-screen"><img src="buffalo.webp" alt="Buffalo"><h1>tender<span>.</span></h1><p>Loading your messages...</p></div>';try{await refreshData();applyTheme();render();subscribe();if(extendedReady)renderNavBadges();
-  const invitation=new URLSearchParams(window.location.search).get('piece');
+  const params=new URLSearchParams(window.location.search);
+   const targetChat=params.get('chat');
+   if(targetChat&&conversations.some(c=>c.id===targetChat))await goTo('chats',targetChat);
+   const invitation=params.get('piece');
   if(invitation&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invitation)&&pieces.some(p=>p.id===invitation))await goTo('pieces',invitation);
  }catch(e){toast(e.message||'Unable to load the app',true);ROOT.innerHTML=empty('Something went wrong','Could not load Tender. Try refreshing.') }}
 async function refreshData(){if(!user)return;const [a,b,c,d,e]=await Promise.all([q('profiles').select('*').order('created_at',{ascending:false}).limit(300),q('friendships').select('*'),q('conversations').select('*,conversation_members(user_id)').order('created_at',{ascending:false}),q('pieces').select('*').order('created_at',{ascending:false}).limit(100),q('piece_members').select('*')]);profiles=assert(a)||[];my=profiles.find(x=>x.id===user.id)||{id:user.id,handle:'member',display_name:user.email||'Account'};friendships=assert(b)||[];conversations=assert(c)||[];pieces=assert(d)||[];memberships=assert(e)||[];await refreshExtras();}
@@ -283,21 +344,23 @@ function subscribe(){
  .on('postgres_changes',{event:'*',schema:'public',table:'poll_votes'},e=>scheduleReconcile(true,'poll_votes',e))
  .on('postgres_changes',{event:'*',schema:'public',table:'conversation_reads'},e=>scheduleReconcile(true,'conversation_reads',e))
  .on('postgres_changes',{event:'*',schema:'public',table:'piece_events'},e=>scheduleReconcile(true))
- .on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:'user_id=eq.'+user.id},e=>{if(e.new){if(!notifications.some(n=>n.id===e.new.id))notifications.unshift(e.new);if(e.new.conversation_id===state.selected&&state.area==='chats'&&document.visibilityState==='visible'){markRead(state.selected).catch(console.warn)}else showBrowserNotification(e.new);renderNavBadges();renderSidebar()}setTimeout(()=>scheduleReconcile(false),220)})
+ .on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:'user_id=eq.'+user.id},e=>{if(e.new){if(!notifications.some(n=>n.id===e.new.id))notifications.unshift(e.new);showBrowserNotification(e.new).catch(console.warn);if(e.new.conversation_id===state.selected&&state.area==='chats'&&document.visibilityState==='visible'){markRead(state.selected).catch(console.warn)}renderNavBadges();renderSidebar()}setTimeout(()=>scheduleReconcile(false),220)})
  .subscribe();
  subscribeTyping().catch(console.warn);
 }
 function navItem(area,name,label){return `<button data-action="area" data-area="${area}" class="rail-btn ${state.area===area?'active':''}" title="${label}" aria-label="${label}">${ico(name)}<span class="rail-label">${label}</span>${area==='chats'?renderBadge(notifications.filter(n=>!n.is_read&&n.kind==='message').length):area==='friends'?renderBadge(unreadFriends()):''}</button>`}
-function render(){if(!user)return renderAuth();ROOT.innerHTML=`<div class="screen ${state.mobileDetail?'in-detail':''}" id="app-screen"><nav class="rail"><div class="rail-brand" title="Tender"><img src="buffalo.webp" alt="Buffalo"></div>${navItem('chats','chat','Chats')}${navItem('friends','users','Friends')}${navItem('pieces','pieces','Pieces')}${navItem('discover','compass','Discover')}<div class="rail-bottom"><button class="rail-btn" data-action="open-alerts" title="Activity inbox">${ico('bell')}${renderBadge(unreadAll())}</button>${navItem('settings','settings','Settings')}<button type="button" class="rail-btn rail-toggle" title="Expand or collapse sidebar" data-action="toggle-rail">${ico('pieces')}<span class="rail-label">Expand rail</span></button><button type="button" class="rail-btn" title="Show or hide member panel" data-action="toggle-info">${ico('users')}<span class="rail-label">Members</span></button></div><button class="rail-btn mobile-only ${state.area==='settings'?'active':''}" data-action="area" data-area="settings" aria-label="Settings">${ico('settings')}<span class="rail-label">Settings</span></button></nav><aside class="sidebar" id="sidebar"></aside><main class="main" id="main"></main><aside class="info-panel" id="info-panel" aria-label="Conversation details"></aside></div>`;
+function render(){if(!user)return renderAuth();ROOT.innerHTML=`<div class="screen ${state.mobileDetail?'in-detail':''}" id="app-screen"><nav class="rail"><div class="rail-brand" title="Tender"><img src="buffalo.webp" alt="Buffalo"></div>${navItem('chats','chat','Chats')}${navItem('friends','users','Friends')}${navItem('pieces','pieces','Pieces')}${navItem('discover','compass','Discover')}<div class="rail-bottom"><button class="rail-btn" data-action="open-alerts" title="Activity inbox">${ico('bell')}${renderBadge(unreadAll())}</button>${navItem('settings','settings','Settings')}<button type="button" class="rail-btn rail-toggle" title="Expand or collapse sidebar" data-action="toggle-rail">${ico('pieces')}<span class="rail-label">Expand rail</span></button><button type="button" class="rail-btn" title="Show or hide member panel" data-action="toggle-info">${ico('users')}<span class="rail-label">Members</span></button></div><button class="rail-btn mobile-only ${state.area==='settings'?'active':''}" data-action="area" data-area="settings" aria-label="Settings">${ico('settings')}<span class="rail-label">Settings</span></button></nav><aside class="sidebar" id="sidebar"></aside><div class="splitter splitter-sidebar" data-split="sidebar" role="separator" aria-label="Resize conversation list" aria-orientation="vertical" aria-valuemin="210" aria-valuemax="420" tabindex="0"></div><main class="main" id="main"></main><div class="splitter splitter-info" data-split="info" role="separator" aria-label="Resize member list" aria-orientation="vertical" aria-valuemin="190" aria-valuemax="430" tabindex="0"></div><aside class="info-panel" id="info-panel" aria-label="Conversation details"></aside></div>`;
  const screen=document.getElementById('app-screen');
  screen.classList.toggle('rail-expanded',localStorage.getItem('tender-rail-expanded')==='1');
+ screen.style.setProperty('--tender-sidebar-width',readSplitWidth('sidebar')+'px');
+ screen.style.setProperty('--tender-info-width',readSplitWidth('info')+'px');
  applyLocalAppearance();renderSidebar();renderMain()}
 function renderInfoPanel(){
  const box=document.getElementById('info-panel'),screen=document.getElementById('app-screen');if(!box||!screen)return;
  const visible=!!state.selected&&(state.area==='chats'||state.area==='pieces'||state.area==='discover');
  screen.classList.toggle('has-info',visible);
  screen.classList.toggle('info-hidden',localStorage.getItem('tender-info-hidden')==='1');
- screen.style.setProperty('--tender-info-width',Math.min(380,Math.max(190,Number(localStorage.getItem('tender-info-width'))||248))+'px');
+ screen.style.setProperty('--tender-info-width',readSplitWidth('info')+'px');
  if(!visible){box.replaceChildren();return}
  let members=[],name='',description='';
  if(state.area==='chats'){
@@ -311,7 +374,7 @@ function renderInfoPanel(){
  }
  members=members.sort((a,b)=>(a.display_name||'').localeCompare(b.display_name||''));
  const rows=members.slice(0,65).map(p=>`<button type="button" class="info-member info-member-button" data-action="open-profile" data-id="${esc(p.id)}" title="View profile">${avatars(p)}<span class="info-person"><strong>${esc(p.display_name)}</strong><small>@${esc(p.handle||'member')}${p._role?' · '+esc(p._role):''}</small></span></button>`).join('');
- box.innerHTML=`<div class="info-head"><span class="info-heading">DETAILS</span><button type="button" class="round-btn" data-action="toggle-info" aria-label="Hide panel">${ico('x','icon-sm')}</button></div><div class="info-overview"><div class="info-emblem">🍗</div><h3>${esc(name)}</h3><p>${esc(description)}</p></div><div class="info-count">Members <strong>${members.length}</strong></div><div class="info-members">${rows||'<p class="hint">No members to display.</p>'}</div><label class="info-resizer">Panel width <input type="range" id="info-width" min="190" max="380" step="10" value="${Math.min(380,Math.max(190,Number(localStorage.getItem('tender-info-width'))||248))}"></label>`;
+ box.innerHTML=`<div class="info-head"><span class="info-heading">DETAILS</span><button type="button" class="round-btn" data-action="toggle-info" aria-label="Hide panel">${ico('x','icon-sm')}</button></div><div class="info-overview"><div class="info-emblem">🍗</div><h3>${esc(name)}</h3><p>${esc(description)}</p></div><div class="info-count">Members <strong>${members.length}</strong></div><div class="info-members">${rows||'<p class="hint">No members to display.</p>'}</div><div class="info-resize-hint">↔ Drag the divider to resize</div>`;
 }
 function renderSidebar(){const el=document.getElementById('sidebar');if(!el)return;const data={chats:['MESSAGES','Your chats','new-chat'],friends:['YOUR CIRCLE','Friends','find-friends'],pieces:['YOUR SPACES','Pieces','new-piece'],discover:['EXPLORE','Discover','new-piece'],settings:['TENDER','Settings','']};const [eyebrow,title,newAction]=data[state.area];let body='';
  if(state.area==='chats'){
@@ -353,7 +416,7 @@ function messageHTML(row,target_type='message'){
  const reacts=activeReactions.filter(r=>r.target_type===target_type&&r.target_id===row.id);const emojiMap={};reacts.forEach(r=>(emojiMap[r.emoji] ||= []).push(r));
  const reply=row.reply_to?activeMessages.find(x=>x.id===row.reply_to):null;
  const gif=giftGif(row.body);
- return `<div data-message-id="${esc(row.id)}" class="chat-bubble-wrap ${mine?'mine':''} ${grouped?'message-grouped':''} ${row.pending?'bubble-pending':''}">${profileFace(p)}<div class="bubble-content">${!grouped?`<div class="bubble-name">${profileName(p)}</div>`:''}${reply?`<div class="reply-quote" data-action="jump-reply" data-id="${reply.id}">↳ ${esc(pby(reply.author_id).display_name)}: ${esc(reply.body.slice(0,110))}</div>`:''}<div class="bubble">${messageText(row.body||'')}${gif}${attachmentHTML(row)}${row.poll_id?pollHTML(row.poll_id):''}</div><div class="bubble-meta">${fmt(row.created_at)} ${row.edited_at?'· edited':''} ${row.pending?'· Sending…':''} ${readReceiptHTML(row)}</div><div class="bubble-actions">${Object.entries(emojiMap).map(([emoji,recs])=>`<button class="react-chip ${recs.some(r=>r.author_id===user.id)?'mine-react':''}" data-action="react" data-type="${target_type}" data-id="${row.id}" data-emoji="${esc(emoji)}">${esc(emoji)} ${recs.length}</button>`).join('')}<button class="emoji-inline" data-action="reaction-menu" data-type="${target_type}" data-id="${row.id}" title="React">${ico('smile','icon-sm')}</button>${target_type==='message'&&!row.pending?`<button class="emoji-inline" data-action="reply-message" data-id="${row.id}" title="Reply">${ico('chat','icon-sm')}</button><button class="emoji-inline" data-action="bookmark-message" data-id="${row.id}" title="Bookmark">${bookmarks.some(b=>b.message_id===row.id)?'★':'☆'}</button><button class="emoji-inline" data-action="forward-message" data-id="${row.id}" title="Forward text">↗</button>`:''}${mine&&!row.pending?`<button class="emoji-inline" data-action="edit-message" data-id="${row.id}" title="Edit">${ico('edit','icon-sm')}</button><button class="emoji-inline" data-action="pin-message" data-id="${row.id}" title="Pin">${row.is_pinned?'📌':'📍'}</button><button class="emoji-inline" data-action="delete-message" data-id="${row.id}" data-type="${target_type}" title="Delete">${ico('trash','icon-sm')}</button>`:''}</div></div></div>`}
+ return `<div data-message-id="${esc(row.id)}" role="group" tabindex="0" class="chat-bubble-wrap ${mine?'mine':''} ${grouped?'message-grouped':''} ${row.pending?'bubble-pending':''}">${profileFace(p)}<div class="bubble-content">${!grouped?`<div class="bubble-name">${profileName(p)}</div>`:''}${reply?`<div class="reply-quote" data-action="jump-reply" data-id="${reply.id}">↳ ${esc(pby(reply.author_id).display_name)}: ${esc(reply.body.slice(0,110))}</div>`:''}<div class="bubble">${messageText(row.body||'')}${gif}${attachmentHTML(row)}${row.poll_id?pollHTML(row.poll_id):''}</div><div class="bubble-meta">${fmt(row.created_at)} ${row.edited_at?'· edited':''} ${row.pending?'· Sending…':''} ${readReceiptHTML(row)}</div>${Object.keys(emojiMap).length?`<div class="bubble-reactions">${Object.entries(emojiMap).map(([emoji,recs])=>`<button class="react-chip ${recs.some(r=>r.author_id===user.id)?'mine-react':''}" data-action="react" data-type="${target_type}" data-id="${row.id}" data-emoji="${esc(emoji)}">${esc(emoji)} ${recs.length}</button>`).join('')}</div>`:''}<div class="bubble-actions" aria-label="Message actions"><button class="emoji-inline" data-action="reaction-menu" data-type="${target_type}" data-id="${row.id}" title="React">${ico('smile','icon-sm')}</button>${target_type==='message'&&!row.pending?`<button class="emoji-inline" data-action="reply-message" data-id="${row.id}" title="Reply">${ico('chat','icon-sm')}</button><button class="emoji-inline" data-action="bookmark-message" data-id="${row.id}" title="Bookmark">${bookmarks.some(b=>b.message_id===row.id)?'★':'☆'}</button><button class="emoji-inline" data-action="forward-message" data-id="${row.id}" title="Forward text">↗</button>`:''}${mine&&!row.pending?`<button class="emoji-inline" data-action="edit-message" data-id="${row.id}" title="Edit">${ico('edit','icon-sm')}</button><button class="emoji-inline" data-action="pin-message" data-id="${row.id}" title="Pin">${row.is_pinned?'📌':'📍'}</button><button class="emoji-inline" data-action="delete-message" data-id="${row.id}" data-type="${target_type}" title="Delete">${ico('trash','icon-sm')}</button>`:''}</div></div></div>`}
 function composer(kind,placeholder,extra=''){const disabled=kind==='piece'&&!inPiece(state.selected);return `<form class="composer-wrap" id="composer-form" data-kind="${kind}">${replyTo&&kind==='chat'?`<div class="composer-reply">↳ Replying to ${esc(pby(replyTo.author_id).display_name)}: ${esc(replyTo.body.slice(0,90))}<button type="button" data-action="cancel-reply">×</button></div>`:''}<div id="composer-assist" class="composer-assist" hidden></div><div class="composer">${kind==='chat'?`<button type="button" class="round-btn" data-action="attach" title="Attach file">${ico('clip')}</button>`:''}<button type="button" class="round-btn" data-action="emoji-picker" title="Emojis">${ico('smile')}</button>${kind==='chat'?`<button type="button" class="round-btn composer-extra" data-action="gif-picker" title="GIF">GIF</button><button type="button" class="round-btn composer-extra" data-action="new-poll" title="Poll">📊</button><button type="button" class="round-btn composer-extra" data-action="record-voice" title="Voice message">🎙️</button>`:''}<textarea id="message-box" name="body" maxlength="4000" rows="1" ${disabled?'disabled':''} placeholder="${disabled?'Join this Piece to chat':esc(placeholder)}"></textarea><button class="send-btn" type="submit" ${disabled?'disabled':''} aria-label="Send">${ico('send')}</button></div><div class="composer-footer"><span id="typing-line"></span><span id="file-status" role="status" aria-live="polite"></span><span>${extra||'Enter to send · Shift+Enter for a new line'}</span></div><input type="file" id="message-file" hidden accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,audio/webm,audio/ogg,audio/mp4,audio/mpeg"></form>`}
 function renderFriends(){let pending=friendships.filter(f=>f.status==='pending');const incoming=pending.filter(f=>f.recipient===user.id),outgoing=pending.filter(f=>f.requester===user.id),accepted=myFriendIds();return header('Friends','Keep the people who matter close',`<button class="btn sm" data-action="find-friends">${ico('plus')} Add friends</button>`)+`<div class="main-body"><div class="content-pad"><h1 class="page-title">Your circle 🧡</h1><p class="page-subtitle">Your friends, friend requests, and the next great conversation.</p>${incoming.length?`<div class="section-row top-spacer"><h2 class="section-heading">Friend requests</h2></div><div class="card">${incoming.map(f=>friendItem(pby(f.requester),'incoming',f.id)).join('')}</div>`:''}${outgoing.length?`<div class="section-row top-spacer"><h2 class="section-heading">Sent requests</h2></div><div class="card">${outgoing.map(f=>friendItem(pby(f.recipient),'outgoing',f.id)).join('')}</div>`:''}<div class="section-row top-spacer"><h2 class="section-heading">Friends (${accepted.length})</h2></div><div class="card">${accepted.map(id=>friendItem(pby(id),'friend')).join('')||'<div class="notice-inline">No friends yet. Search for people by username and send them a request.</div>'}</div></div></div>`}
 function friendItem(p,kind,fid=''){return `<div class="friend-row">${profileFace(p)}<div class="friend-data">${profileName(p)}<p>@${esc(p.handle)}</p></div>${kind==='incoming'?`<button class="btn sm" data-action="accept-friend" data-id="${fid}">Accept</button>`:kind==='outgoing'?`<span class="tag neutral">Pending</span>`:`<button class="btn sm secondary" data-action="start-dm" data-id="${p.id}">Message</button>`}</div>`}
@@ -367,8 +430,47 @@ function renderPiece(piece){let joined=inPiece(piece.id),own=ownPiece(piece.id);
   if(state.pieceTab==='events')content=`<div class="section-row"><h2 class="section-heading">Events</h2>${(own||memberships.some(m=>m.piece_id===piece.id&&m.user_id===user.id&&m.role==='moderator'))?`<button class="btn sm" data-action="new-event">+ Create event</button>`:''}</div><div class="grid">${pieceEvents.filter(e=>e.piece_id===piece.id).map(e=>`<article class="post-card"><div class="post-meta">${new Date(e.starts_at).toLocaleString()}</div><h3>📅 ${esc(e.title)}</h3><p>${esc(e.description)}</p></article>`).join('')||'<p class="notice-inline">No upcoming events yet.</p>'}</div>`;
   return header(piece.name,piece.is_public?'Public Piece · Chat / Forum / Gallery':'Private Piece',buttons)+`<div class="main-body piece-body"><div class="piece-top-scroll"><div class="content-pad"><section class="piece-hero layout-${esc(piece.layout_style||'classic')}"><div class="piece-banner" style="background:${piece.banner_url?`linear-gradient(135deg,#0009,#0004),url(${esc(validUrl(piece.banner_url))}) center/cover`:`linear-gradient(135deg,${esc(piece.color)},#35211a)`}">${own?`<button type="button" class="piece-hero-edit" data-action="edit-piece" title="Change Piece profile picture" aria-label="Change Piece picture">${pieceAvatar(piece,'piece-icon-hero')}<span class="piece-hero-pencil">✎</span></button>`:pieceAvatar(piece,'piece-icon-hero')}</div><div class="piece-info"><div><h2>${esc(piece.name)}</h2><p>${esc(piece.description||'Welcome to this Tender Piece!')}</p>${piece.welcome_text?`<p class="hint">✨ ${esc(piece.welcome_text)}</p>`:''}</div><span class="tag">${piece.is_public?'🌎 Public':'🔒 Private'}</span></div></section><nav class="tabs" aria-label="Piece sections">${[['chat','Chat'],['forum','Forum'],['gallery','Gallery'],['events','Events']].map(([id,label])=>`<button class="${state.pieceTab===id?'active':''}" data-action="piece-tab" data-tab="${id}">${ico(id==='gallery'?'image':id==='forum'?'forum':id==='events'?'bell':'chat','icon-sm')} ${label}</button>`).join('')}</nav>${state.pieceTab!=='chat'?content:''}</div></div>${state.pieceTab==='chat'?content:''}</div>`;
 }
-function renderSettings(){const extras=extendedReady?`<div class="card top-spacer"><h2 class="section-heading">Appearance & privacy</h2><form id="preferences-form"><div class="settings-grid"><div class="field"><label>Theme</label><select class="input" name="chat_theme">${[['dark','Tender Dark'],['light','Tender Light'],['midnight','Midnight'],['cozy','Cozy Orange']].map(([v,l])=>`<option value="${v}" ${my.chat_theme===v?'selected':''}>${l}</option>`).join('')}</select></div><div class="field"><label>Accent color</label><input class="input" type="color" name="accent_color" value="${esc(my.accent_color||'#f47735')}"></div><div class="field"><label>Profile animation</label><select class="input" name="profile_effect">${['none','glow','float','sparkle'].map(v=>`<option value="${v}" ${my.profile_effect===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Presence</label><select class="input" name="presence_mode">${['online','idle','dnd','invisible'].map(v=>`<option value="${v}" ${my.presence_mode===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Notification filter</label><select class="input" name="notification_mode">${['all','mentions','none'].map(v=>`<option value="${v}" ${my.notification_mode===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Sound</label><select class="input" name="notification_sound"><option value="yes" ${my.notification_sound?'selected':''}>Enabled</option><option value="no" ${!my.notification_sound?'selected':''}>Muted</option></select></div><div class="field"><label>Notification tone</label><select class="input" name="notification_tone">${["pop","chime","soft"].map(v=>`<option value="${v}" ${my.notification_tone===v?'selected':''}>${v}</option>`).join('')}</select></div></div><button class="btn" type="submit">Save preferences</button></form><div class="divider"></div><h3>Profile banner</h3><input class="input" id="banner-file" type="file" accept="image/png,image/jpeg,image/webp"><p class="hint">Under 3 MB · publicly visible on your profile.</p></div>${deviceNotificationsPanel()}<div class="card top-spacer"><h2 class="section-heading">Extras</h2><div class="button-group"><button class="btn secondary" data-action="custom-emoji">Upload custom emoji</button><button class="btn secondary" data-action="bookmarks">Saved messages</button><button class="btn secondary" data-action="search">Search chats</button><button class="btn secondary" data-action="blocked-list">Blocked users (${blockedUsers.length})</button></div></div>`:`<div class="card top-spacer"><h2>0.2 migration needed</h2><p class="hint">Your existing chats still work. Run <strong>migration_0_2.sql</strong> from GitHub in the Supabase SQL Editor once to unlock live notifications, themes, polls, and media extras.</p></div>`;
-return header('Settings','Make Tender feel like home')+`<div class="main-body"><div class="content-pad"><h1 class="page-title">Your Tender 🍗</h1><p class="page-subtitle">All yours. No subscriptions.</p><div class="card top-spacer"><h2 class="section-heading">My profile</h2>${profileBanner(my)}<div class="friend-row"><div class="friend-data"><strong>${esc(my.display_name)}</strong><p>@${esc(my.handle)}</p></div></div><form id="profile-form"><div class="field"><label>Display name</label><input class="input" name="display_name" maxlength="40" required value="${esc(my.display_name)}"></div><div class="field"><label>Bio</label><textarea class="input textarea" name="bio" maxlength="220">${esc(my.bio||'')}</textarea></div><div class="field"><label>Custom status</label><input class="input" name="game_status" maxlength="90" value="${esc(my.game_status||'')}" placeholder="What's happening?"></div>${extendedReady?`<div class="field"><label>Status emoji</label><input class="input" name="status_emoji" maxlength="12" value="${esc(my.status_emoji||'🍗')}"></div>`:''}<button class="btn" type="submit">Save profile</button></form><div class="divider"></div><h3>Profile picture</h3><p class="hint">PNG/JPG/WEBP · 2 MB maximum</p><input type="file" class="input top-spacer" id="avatar-file" accept="image/png,image/jpeg,image/webp"></div>${extras}${appearanceStudio()}<button class="btn danger top-spacer" data-action="logout">${ico('logout')} Log out</button><p class="hint top-spacer">Tender 0.2 beta · Be thoughtful about what you share in public Pieces.</p></div></div>`}
+function renderSettings(){
+ const sections=[['profile','user','My Profile'],['account','settings','My Account'],['appearance','palette','Appearance'],['notifications','bell','Notifications'],['privacy','shield','Privacy & Safety'],['accessibility','accessibility','Accessibility']];
+ const tab=sections.some(x=>x[0]===state.settingsTab)?state.settingsTab:'profile';
+ const nav=sections.map(([id,icon,label])=>`<button type="button" class="settings-nav-item ${tab===id?'active':''}" data-action="settings-tab" data-tab="${id}" aria-current="${tab===id?'page':'false'}">${ico(icon,'icon-sm')}<span>${label}</span></button>`).join('');
+ let content='';
+ if(tab==='profile')content=`
+  <div class="settings-section-head"><span class="eyebrow">PERSONAL PROFILE</span><h1>Make it yours.</h1><p>Give your Tender profile some personality.</p></div>
+  <div class="settings-profile-preview">${profileBanner(my)}<div class="settings-preview-identity"><div><h2>${esc(my.display_name)}</h2><p>@${esc(my.handle)} ${my.pronouns?'· '+esc(my.pronouns):''}</p></div><button class="btn secondary sm" data-action="open-profile" data-id="${esc(user.id)}">Preview profile</button></div></div>
+  <div class="settings-card"><div class="settings-card-title"><h3>About you</h3><p>Shown when someone clicks your profile picture or name.</p></div>
+  <form id="profile-form" class="settings-fields">
+  <div class="field"><label>Display name</label><input class="input" name="display_name" maxlength="40" required value="${esc(my.display_name)}"></div>
+  <div class="field"><label>Pronouns</label><input class="input" name="pronouns" maxlength="40" value="${esc(my.pronouns||'')}" placeholder="e.g. he/him · she/her · they/them" ${!pronounsReady?'disabled':''}><p class="hint">${pronounsReady?'Optional. Visible on your profile.':'Pronouns will be available once the small 0.3.2 database migration finishes.'}</p></div>
+  <div class="field"><label>Bio <span class="field-caption">Up to 220 characters</span></label><textarea class="input textarea" name="bio" maxlength="220" rows="4" placeholder="Tell people something about yourself">${esc(my.bio||'')}</textarea></div>
+  <div class="settings-two-fields"><div class="field"><label>Custom text status</label><input class="input" name="game_status" maxlength="90" value="${esc(my.game_status||'')}" placeholder="What's on your mind?"></div>
+  ${extendedReady?`<div class="field"><label>Status emoji</label><input class="input" name="status_emoji" maxlength="12" value="${esc(my.status_emoji||'🍗')}"></div>`:''}</div>
+  <div class="settings-actions"><button class="btn" type="submit">Save profile</button></div></form></div>
+  <div class="settings-card"><h3>Avatar & banner</h3><p class="hint">Your pictures are visible to other Tender members.</p>
+  <div class="settings-two-fields"><div class="field"><label>Upload avatar (2 MB)</label><input type="file" class="input" id="avatar-file" accept="image/png,image/jpeg,image/webp"></div>
+  <div class="field"><label>Upload banner (3 MB)</label><input class="input" id="banner-file" type="file" accept="image/png,image/jpeg,image/webp"></div></div></div>`;
+ if(tab==='account')content=`<div class="settings-section-head"><span class="eyebrow">ACCOUNT</span><h1>My Account</h1><p>See your account details, current user identity and personal profile.</p></div>
+  <div class="settings-card"><div class="account-identity">${avatars(my)}<div><h3>${esc(my.display_name)}</h3><p>@${esc(my.handle)}</p></div><button class="btn sm secondary" data-action="settings-tab" data-tab="profile">Edit profile</button></div><div class="settings-readonly"><span>Account email</span><strong>${esc(user.email||'Available in your sign-in provider')}</strong></div><div class="settings-readonly"><span>User ID</span><code>${esc(user.id)}</code></div><p class="hint">Password and email updates are managed securely by your sign-in provider. Never share your password.</p></div>
+  <div class="settings-card"><h3>Session</h3><p class="hint">Sign out from this browser.</p><button class="btn danger" data-action="logout">Log out of Tender</button></div>`;
+ if(tab==='appearance')content=`<div class="settings-section-head"><span class="eyebrow">CUSTOMIZE</span><h1>Appearance</h1><p>Give your Tender client the look you want.</p></div>
+  ${extendedReady?`<div class="settings-card"><h3>Synced appearance</h3><p class="hint">These options are saved to your account and follow you across devices.</p><form id="preferences-form"><div class="settings-two-fields">
+  <div class="field"><label>Theme</label><select class="input" name="chat_theme">${[['dark','Tender Dark'],['light','Tender Light'],['midnight','Midnight'],['cozy','Cozy Orange']].map(([v,l])=>`<option value="${v}" ${my.chat_theme===v?'selected':''}>${l}</option>`).join('')}</select></div>
+  <div class="field"><label>Accent color</label><input class="input" type="color" name="accent_color" value="${esc(my.accent_color||'#f47735')}"></div>
+  <div class="field"><label>Profile animation</label><select class="input" name="profile_effect">${['none','glow','float','sparkle'].map(v=>`<option value="${v}" ${my.profile_effect===v?'selected':''}>${v}</option>`).join('')}</select></div></div><button class="btn" type="submit">Save synced appearance</button></form></div>`:''}
+  ${appearanceStudio()}`;
+ if(tab==='notifications')content=`<div class="settings-section-head"><span class="eyebrow">STAY CONNECTED</span><h1>Notifications</h1><p>Keep up with friends even while browsing other tabs.</p></div>
+  ${deviceNotificationsPanel()}
+  ${extendedReady?`<div class="settings-card"><h3>Notification preferences</h3><form id="notification-preferences-form" class="settings-fields"><div class="settings-two-fields"><div class="field"><label>Notify me about</label><select class="input" name="notification_mode">${[['all','All messages & friends'],['mentions','Mentions & friend requests'],['none','Nothing']].map(([v,label])=>`<option value="${v}" ${my.notification_mode===v?'selected':''}>${label}</option>`).join('')}</select></div><div class="field"><label>Sound</label><select class="input" name="notification_sound"><option value="yes" ${my.notification_sound?'selected':''}>Enabled</option><option value="no" ${!my.notification_sound?'selected':''}>Muted</option></select></div><div class="field"><label>Notification sound</label><select class="input" name="notification_tone">${["pop","chime","soft"].map(v=>`<option value="${v}" ${my.notification_tone===v?'selected':''}>${v}</option>`).join('')}</select></div></div><button class="btn" type="submit">Save notification preferences</button></form></div>`:''}`;
+ if(tab==='privacy')content=`<div class="settings-section-head"><span class="eyebrow">YOUR SPACE</span><h1>Privacy & Safety</h1><p>Decide how others can interact with you.</p></div>
+  ${extendedReady?`<div class="settings-card"><h3>Privacy options</h3><form id="privacy-preferences-form"><div class="field"><label>Presence</label><select class="input" name="presence_mode">${[['online','Online'],['idle','Idle'],['dnd','Do Not Disturb'],['invisible','Invisible']].map(([v,t])=>`<option value="${v}" ${my.presence_mode===v?'selected':''}>${t}</option>`).join('')}</select></div><button class="btn" type="submit">Save privacy options</button></form></div>
+  <div class="settings-card"><h3>Blocked users</h3><p class="hint">Blocked accounts cannot contact you by DM.</p><button class="btn secondary" data-action="blocked-list">Manage blocked people (${blockedUsers.length})</button></div>`:''}
+  <div class="settings-card"><h3>Staying safe</h3><p class="hint">Think carefully before sharing personal details in public Pieces. Moderation tools are still being developed.</p></div>`;
+ if(tab==='accessibility')content=`<div class="settings-section-head"><span class="eyebrow">COMFORT</span><h1>Accessibility</h1><p>Adjust readability and motion to suit you.</p></div>
+  <div class="settings-card"><h3>Readability & motion</h3><p class="hint">Find font size, density, and reduced-motion controls in Appearance Studio.</p><button class="btn secondary" data-action="settings-tab" data-tab="appearance">Open Appearance Studio</button></div>
+  <div class="settings-card"><h3>Keyboard shortcuts</h3><div class="shortcut-row"><kbd>Any letter</kbd><span>Start typing into the current chat</span></div><div class="shortcut-row"><kbd>Enter</kbd><span>Send message while composing</span></div><div class="shortcut-row"><kbd>Shift + Enter</kbd><span>New line</span></div><div class="shortcut-row"><kbd>Esc</kbd><span>Close an open dialog</span></div><div class="shortcut-row"><kbd>Tab</kbd><span>Navigate buttons and inputs</span></div></div>`;
+ return header('User Settings','Your space, your rules')+`<div class="main-body settings-page"><div class="settings-layout"><nav class="settings-navigation" aria-label="Settings categories"><div class="settings-nav-label">USER SETTINGS</div>${nav}</nav><section class="settings-content">${content}<div class="settings-footer">Tender 0.3.2 · Stay close. Stay crispy. 🍗</div></section></div></div>`;
+}
+
 let activeLoadVersion=0;
 async function loadActive(){
  if(!db||!state.selected)return;
@@ -392,8 +494,22 @@ async function loadActive(){
  await Promise.all([prepareAttachmentUrls(),loadPolls()]);
 }
 async function goTo(area,id=null){state.area=area;state.selected=id;state.search='';state.mobileDetail=!!id||['discover','settings'].includes(area);if(area==='friends'&&!id)state.mobileDetail=true;if(area==='pieces'||area==='discover')state.pieceTab='chat';replyTo=null;if(id&&['chats','pieces','discover'].includes(area))await loadActive();if(state.area!==area||state.selected!==id)return;applyLocalAppearance();render();if(area==='chats'&&id){markRead(id);subscribeTyping().catch(console.warn)}else if(['pieces','discover'].includes(area)&&id&&state.pieceTab==='chat'){subscribeTyping().catch(console.warn)}else{unsubTyping()}if(area==='friends')markRead(null,true);}
+let confirmationResolve=null;
+function tenderConfirm(title,description,action='Confirm',danger=true){
+ if(confirmationResolve){confirmationResolve(false);confirmationResolve=null}
+ return new Promise(resolve=>{
+  confirmationResolve=resolve;
+  modal(title,description,`<div class="tender-confirm"><div class="tender-confirm-icon">${danger?'⚠️':'🍗'}</div>
+  <p>${esc(description)}</p><div class="tender-confirm-actions"><button type="button" class="btn secondary" data-action="confirm-no">Cancel</button>
+  <button type="button" class="btn ${danger?'danger':''}" data-action="confirm-yes">${esc(action)}</button></div></div>`);
+ });
+}
+function settleConfirm(value){
+ const resolver=confirmationResolve;confirmationResolve=null;
+ closeModal();if(resolver)resolver(value);
+}
 function modal(title,sub,body,footer=''){MODALS.innerHTML=`<div class="modal-outer" data-action="close-on-backdrop"><div class="modal-panel" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="modal-head"><div><h2>${esc(title)}</h2><p>${esc(sub)}</p></div><button class="round-btn" data-action="close-modal" aria-label="Close">${ico('x')}</button></div>${body}${footer}</div></div>`;const first=MODALS.querySelector('input,textarea,button');first?.focus()}
-function closeModal(){const preview=document.getElementById('piece-pfp-preview-img');if(preview?.dataset?.previewUrl)URL.revokeObjectURL(preview.dataset.previewUrl);MODALS.innerHTML=''}
+function closeModal(){if(confirmationResolve){const resolver=confirmationResolve;confirmationResolve=null;resolver(false)}const preview=document.getElementById('piece-pfp-preview-img');if(preview?.dataset?.previewUrl)URL.revokeObjectURL(preview.dataset.previewUrl);MODALS.innerHTML=''}
 function findFriendsModal(){const options=profiles.filter(p=>p.id!==user.id&&!myFriendIds().includes(p.id)).slice(0,30);modal('Find friends','Search by exact username, then send a friend request.',`<form id="friend-search-form"><div class="field"><label for="friend-handle">Username</label><input class="input" id="friend-handle" name="handle" autocomplete="off" placeholder="friend_username" required maxlength="20"></div><button class="btn full" type="submit">${ico('search')} Search</button></form><div id="friend-search-results" class="top-spacer"></div>`)}
 function newChatModal(){let options=myFriendIds().map(id=>pby(id));modal('New conversation','Choose a friend or build a squad.',`<div class="button-group"><button class="btn secondary" data-action="find-friends">${ico('users')} Find friends</button></div><div class="divider"></div><form id="group-form"><div class="field"><label>Group name</label><input name="group_name" class="input" maxlength="50" minlength="2" required placeholder="The crispy squad"></div><h3 class="section-heading">Invite friends</h3><div style="max-height:230px;overflow:auto">${options.map(p=>`<label class="member-checkbox"><input type="checkbox" name="member" value="${p.id}">${avatars(p)} ${esc(p.display_name)}</label>`).join('')||'<p class="notice-inline">Add friends before creating a group.</p>'}</div><button class="btn full top-spacer" type="submit">Create group</button></form>`)}
 function newPieceModal(p=null){
@@ -521,7 +637,20 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
   if(a==='open-profile'){await showProfile(id);return}
   if(a==='open-alerts'){alertsModal();return}
  if(a==='open-alert'){closeModal();if(el.dataset.cid)await goTo('chats',el.dataset.cid);else await goTo('friends');return}
- if(a==='notification-permission'){if(typeof Notification==='undefined')return toast('Unavailable in this browser',true);const perm=await Notification.requestPermission();toast(perm==='granted'?'Browser notifications enabled!':'Notification permission: '+perm);renderMain();return}
+ if(a==='confirm-yes'){settleConfirm(true);return}
+  if(a==='confirm-no'){settleConfirm(false);return}
+  if(a==='settings-tab'){state.settingsTab=el.dataset.tab||'profile';renderMain();return}
+  if(a==='notification-permission'){
+   if(!window.isSecureContext||typeof Notification==='undefined')return toast('HTTPS and browser notification support are required.',true);
+   const perm=await Notification.requestPermission();
+   if(perm==='granted')await ensureNotificationWorker();
+   toast(perm==='granted'?'System notifications enabled! 🍗':perm==='denied'?'Notifications blocked in browser settings.':'Permission not granted.',perm!=='granted');
+   renderMain();return;
+ }
+ if(a==='notification-test'){
+   const ok=await emitSystemNotification('🍗 Tender notifications work!','You’ll see alerts for new messages and friend requests while Tender is open.','tender-notification-test');
+   toast(ok?'Test notification sent! Check your system notifications.':'Could not display a notification. Check HTTPS and browser permissions.',!ok);return;
+ }
  if(a==='emoji-picker'){emojiPicker();return}
  if(a==='emoji-insert'){const val=el.dataset.emoji;closeModal();const area=document.getElementById('message-box');if(area){area.value+=val;area.focus()}return}
  if(a==='custom-emoji'){customEmojiModal();return}
@@ -530,7 +659,7 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='search'){searchModal();return}
  if(a==='bookmarks'){await openBookmarks();return}
  if(a==='blocked-list'){modal('Blocked users','Blocking stops DMs from that account.',`<div class="search-results">${blockedUsers.map(b=>`<button class="saved-row" data-action="toggle-block" data-id="${b.blocked_id}">Unblock ${esc(pby(b.blocked_id).display_name)}</button>`).join('')||'<p class="hint">Nobody blocked.</p>'}</div>`);return}
- if(a==='toggle-block'){if(!extendedReady)return;await safe(async()=>{const b=blockedUsers.find(x=>x.blocked_id===id);if(b){assert(await q('user_blocks').delete().eq('blocker_id',user.id).eq('blocked_id',id));toast('User unblocked.')}else{if(!confirm('Block this person? They will not be able to DM you.'))return;assert(await q('user_blocks').insert({blocker_id:user.id,blocked_id:id}));toast('User blocked.')}await refreshExtras();closeModal();render()});return}
+ if(a==='toggle-block'){if(!extendedReady)return;await safe(async()=>{const b=blockedUsers.find(x=>x.blocked_id===id);if(b){assert(await q('user_blocks').delete().eq('blocker_id',user.id).eq('blocked_id',id));toast('User unblocked.')}else{if(!await tenderConfirm('Block this user?','They will not be able to send you direct messages.','Block user'))return;assert(await q('user_blocks').insert({blocker_id:user.id,blocked_id:id}));toast('User blocked.')}await refreshExtras();closeModal();render()});return}
  if(a==='new-event'){eventModal();return}
  if(a==='pin-post'||a==='lock-post'){if(!extendedReady)return;await safe(async()=>{const post=activePosts.find(p=>p.id===id);if(!post)return;const key=a==='pin-post'?'pinned':'locked';assert(await q('piece_posts').update({[key]:!post[key]}).eq('id',id));post[key]=!post[key];renderMain();toast('Discussion updated!')});return}
  if(a==='piece-roles'){roleModal();return}
@@ -564,20 +693,20 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='open-post'){await postModal(id);return}
  if(a==='reaction-menu'){reactionModal(el.dataset.type,id);return}
  if(a==='chat-info'){chatInfo();return}
- if(a==='settings-profile'){closeModal();await goTo('settings');return}
+ if(a==='settings-profile'){closeModal();state.settingsTab='profile';await goTo('settings');return}
  if(a==='attach'){document.getElementById('message-file')?.click();return}
  if(a==='enlarge'){MODALS.innerHTML=`<div class="backdrop-img" data-action="close-modal"><img src="${esc(validUrl(el.dataset.src))}" alt="Gallery picture"></div>`;return}
  if(a==='open-attachment'){let url=assert(await db.storage.from('tender-chat').createSignedUrl(el.dataset.path,60)).signedUrl;window.open(validUrl(url),'_blank','noopener,noreferrer');return}
  if(a==='logout'){await safe(async()=>{assert(await db.auth.signOut());unsub();reset();renderAuth()});return}
  if(a==='start-dm')await safe(async()=>{let cid=assert(await db.rpc('start_dm',{other_id:id}));closeModal();await refreshData();await goTo('chats',cid)});
  if(a==='accept-friend')await safe(async()=>{assert(await q('friendships').update({status:'accepted'}).eq('id',id));await refreshData();render();toast('Friend request accepted!')});
- if(a==='remove-friend') {if(!confirm('Remove this friend?'))return;await safe(async()=>{let f=friendships.find(f=>f.status==='accepted'&&[f.requester,f.recipient].includes(id));if(f)assert(await q('friendships').delete().eq('id',f.id));await refreshData();await goTo('friends');toast('Friend removed.')})}
+ if(a==='remove-friend') {if(!await tenderConfirm('Remove friend?','They will be removed from your friends list. You can add them back later.','Remove friend'))return;await safe(async()=>{let f=friendships.find(f=>f.status==='accepted'&&[f.requester,f.recipient].includes(id));if(f)assert(await q('friendships').delete().eq('id',f.id));await refreshData();await goTo('friends');toast('Friend removed.')})}
  if(a==='join-piece')await safe(async()=>{assert(await db.rpc('join_piece',{pid:state.selected}));await refreshData();await loadActive();render();toast('Joined the Piece! 🍗')});
- if(a==='leave-piece'){if(ownPiece(state.selected)||!confirm('Leave this Piece?'))return;await safe(async()=>{assert(await db.rpc('leave_piece',{pid:state.selected}));await refreshData();render();toast('Left Piece.')})}
+ if(a==='leave-piece'){if(ownPiece(state.selected)||!await tenderConfirm('Leave this Piece?','You will stop seeing its member-only messages unless you rejoin.','Leave Piece'))return;await safe(async()=>{assert(await db.rpc('leave_piece',{pid:state.selected}));await refreshData();render();toast('Left Piece.')})}
  if(a==='react'){const type=el.dataset.type, emoji=el.dataset.emoji;let existing=activeReactions.find(r=>r.target_type===type&&r.target_id===id&&r.author_id===user.id&&r.emoji===emoji);if(existing)activeReactions=activeReactions.filter(r=>r!==existing);else activeReactions.push({id:'pending-'+crypto.randomUUID(),author_id:user.id,target_type:type,target_id:id,emoji});closeModal();renderMain();safe(async()=>{try{if(existing)assert(await q('reactions').delete().eq('id',existing.id));else assert(await q('reactions').insert({author_id:user.id,target_type:type,target_id:id,emoji}));}catch(e){await loadActive();renderMain();throw e}});return}
- if(a==='delete-message'){if(!confirm('Delete this message?'))return;await safe(async()=>{assert(await q(el.dataset.type==='message'?'messages':'piece_messages').delete().eq('id',id));await loadActive();renderMain()})}
- if(a==='delete-post'){if(!confirm('Delete this discussion and its replies?'))return;await safe(async()=>{assert(await q('piece_posts').delete().eq('id',id));await loadActive();renderMain()})}
- if(a==='delete-gallery'){if(!confirm('Remove this gallery entry?'))return;await safe(async()=>{assert(await q('piece_gallery').delete().eq('id',id));await loadActive();renderMain()})}
+ if(a==='delete-message'){if(!await tenderConfirm('Delete message?','This message will be removed for everyone who could see it. This cannot be undone.','Delete message'))return;await safe(async()=>{assert(await q(el.dataset.type==='message'?'messages':'piece_messages').delete().eq('id',id));await loadActive();renderMain()})}
+ if(a==='delete-post'){if(!await tenderConfirm('Delete discussion?','This discussion and all of its replies will be permanently removed.','Delete discussion'))return;await safe(async()=>{assert(await q('piece_posts').delete().eq('id',id));await loadActive();renderMain()})}
+ if(a==='delete-gallery'){if(!await tenderConfirm('Delete gallery image?','This entry will disappear from the Piece gallery.','Delete image'))return;await safe(async()=>{assert(await q('piece_gallery').delete().eq('id',id));await loadActive();renderMain()})}
  }catch(e){toast(e.message||'Could not complete action.',true);console.error(e)}}
 async function submitForm(form){switch(form.id){
  case'auth-form':return authSubmit(form);
@@ -634,8 +763,31 @@ async function submitForm(form){switch(form.id){
  case'post-form':return safe(async()=>{let d=new FormData(form);assert(await q('piece_posts').insert({piece_id:state.selected,author_id:user.id,title:String(d.get('title')).trim(),body:String(d.get('body')).trim(),...(extendedReady?{tags:String(d.get('tags')||'').split(',').map(x=>x.trim().replace(/[^a-z0-9_-]/gi,'').slice(0,24)).filter(Boolean).slice(0,5)}:{})}));closeModal();await loadActive();renderMain();toast('Discussion published!')});
  case'reply-form':return safe(async()=>{assert(await q('piece_comments').insert({post_id:selectedPost.id,author_id:user.id,body:String(new FormData(form).get('body')).trim()}));await postModal(selectedPost.id);toast('Reply posted!')});
  case'gallery-form':return safe(async()=>{let d=new FormData(form),file=d.get('file');if(!file?.size||file.size>5*1024*1024||!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type))throw Error('Choose a PNG/JPG/WEBP/GIF under 5 MB.');let path=`${state.selected}/${user.id}/${crypto.randomUUID()}.${file.name.split('.').pop().toLowerCase()}`;assert(await db.storage.from('tender-gallery').upload(path,file,{contentType:file.type}));try{assert(await q('piece_gallery').insert({piece_id:state.selected,author_id:user.id,image_path:path,caption:String(d.get('caption')).trim()}))}catch(e){await db.storage.from('tender-gallery').remove([path]);throw e}closeModal();await loadActive();renderMain();toast('Image uploaded!')});
- case'profile-form':return safe(async()=>{let d=new FormData(form),upd={display_name:String(d.get('display_name')).trim(),bio:String(d.get('bio')).trim(),game_status:String(d.get('game_status')).trim()};if(extendedReady)upd.status_emoji=String(d.get('status_emoji')||'🍗').slice(0,12);assert(await q('profiles').update(upd).eq('id',user.id));await refreshData();render();toast('Profile saved!')});
- case'preferences-form':return safe(async()=>{if(!extendedReady)throw Error('Run the 0.2 migration first.');const d=new FormData(form),upd={chat_theme:d.get('chat_theme'),accent_color:d.get('accent_color'),profile_effect:d.get('profile_effect'),presence_mode:d.get('presence_mode'),notification_mode:d.get('notification_mode'),notification_sound:d.get('notification_sound')==='yes',notification_tone:d.get('notification_tone')||'pop'};assert(await q('profiles').update(upd).eq('id',user.id));Object.assign(my,upd);applyTheme();render();toast('Preferences saved!')});
+ case'profile-form':return safe(async()=>{
+  const d=new FormData(form),upd={
+    display_name:String(d.get('display_name')||'').trim().slice(0,40),
+    bio:String(d.get('bio')||'').trim().slice(0,220),
+    game_status:String(d.get('game_status')||'').trim().slice(0,90)
+  };
+  if(!upd.display_name)throw Error('Please enter a display name.');
+  if(extendedReady)upd.status_emoji=String(d.get('status_emoji')||'🍗').slice(0,12);
+  if(pronounsReady)upd.pronouns=String(d.get('pronouns')||'').trim().slice(0,40);
+  assert(await q('profiles').update(upd).eq('id',user.id));
+  await refreshData();renderMain();renderSidebar();toast('Profile saved! 🍗');
+});
+ case'preferences-form':
+ case'notification-preferences-form':
+ case'privacy-preferences-form':return safe(async()=>{
+   if(!extendedReady)throw Error('Notification and privacy preferences require the Tender 0.2 schema.');
+   const d=new FormData(form),upd={};
+   if(form.id==='preferences-form'){
+    upd.chat_theme=d.get('chat_theme');upd.accent_color=d.get('accent_color');upd.profile_effect=d.get('profile_effect');
+   }else if(form.id==='notification-preferences-form'){
+    upd.notification_mode=d.get('notification_mode');upd.notification_sound=d.get('notification_sound')==='yes';upd.notification_tone=d.get('notification_tone')||'pop';
+   }else{upd.presence_mode=d.get('presence_mode')}
+   assert(await q('profiles').update(upd).eq('id',user.id));
+   Object.assign(my,upd);applyTheme();renderMain();toast('Preferences saved! 🍗');
+ });
  case'edit-message-form':return safe(async()=>{const d=new FormData(form),id=String(d.get('id')),body=String(d.get('body')).trim();assert(await q('messages').update({body,edited_at:new Date().toISOString()}).eq('id',id));closeModal();await loadActive();renderMain();toast('Message edited.')});
  case'forward-form':return safe(async()=>{const d=new FormData(form),id=String(d.get('message_id')),cid=String(d.get('conversation_id'));if(!cid)throw Error('Choose a conversation');const m=activeMessages.find(x=>x.id===id);if(!m)throw Error('Message no longer available');assert(await q('messages').insert({conversation_id:cid,author_id:user.id,body:'↗ Forwarded: '+m.body}));closeModal();toast('Message forwarded!')});
  case'gif-form':{const u=String(new FormData(form).get('url')).trim();if(!giftGif(u))return toast('Use a direct media.giphy.com or media.tenor.com GIF image URL.',true);closeModal();const field=document.getElementById('message-box');if(field){field.value=(field.value?field.value+'\n':'')+u;field.focus();}return}
@@ -666,10 +818,92 @@ async function submitForm(form){switch(form.id){
  case'event-form':return safe(async()=>{const d=new FormData(form);assert(await q('piece_events').insert({piece_id:state.selected,creator_id:user.id,title:String(d.get('title')).trim(),description:String(d.get('description')).trim(),starts_at:new Date(String(d.get('starts_at'))).toISOString()}));closeModal();await refreshExtras();renderMain();toast('Event created!')});
  case'role-form':return safe(async()=>{const d=new FormData(form);assert(await q('piece_roles').insert({piece_id:state.selected,name:String(d.get('name')).trim(),color:String(d.get('color'))}));closeModal();await refreshExtras();toast('Role created!')});
  }}
+// Drag either separator directly; widths persist on pointer release. Keyboard arrows supported.
+const splitterSpec={
+ sidebar:{min:210,max:420,initial:270,key:'tender-sidebar-width',property:'--tender-sidebar-width'},
+ info:{min:190,max:430,initial:248,key:'tender-info-width',property:'--tender-info-width'}
+};
+function readSplitWidth(which){
+ const spec=splitterSpec[which];if(!spec)return 270;
+ const stored=Number(localStorage.getItem(spec.key));
+ return Number.isFinite(stored)&&stored>=spec.min&&stored<=spec.max?stored:spec.initial;
+}
+function updateSplitWidth(which,value,save=false){
+ const spec=splitterSpec[which];if(!spec)return;
+ const screen=document.getElementById('app-screen');if(!screen)return;
+ const available=Math.max(spec.min,window.innerWidth-(which==='sidebar'?630:700));
+ const width=Math.round(Math.min(spec.max,available,Math.max(spec.min,value)));
+ screen.style.setProperty(spec.property,width+'px');
+ const handle=screen.querySelector('[data-split="'+which+'"]');
+ if(handle)handle.setAttribute('aria-valuenow',String(width));
+ if(save)localStorage.setItem(spec.key,String(width));
+ return width;
+}
+let dragSplit=null;
+document.addEventListener('pointerdown',event=>{
+ const handle=event.target.closest?.('[data-split]');if(!handle||event.button!==0)return;
+ const which=handle.dataset.split,screen=document.getElementById('app-screen');
+ if(!screen||window.matchMedia('(max-width:760px)').matches)return;
+ const spec=splitterSpec[which];
+ dragSplit={which,pointerId:event.pointerId,startX:event.clientX,initial:parseFloat(getComputedStyle(screen).getPropertyValue(spec.property))||readSplitWidth(which)};
+ handle.setPointerCapture?.(event.pointerId);
+ handle.classList.add('dragging');document.body.classList.add('tender-dragging');
+ event.preventDefault();
+});
+document.addEventListener('pointermove',event=>{
+ if(!dragSplit||event.pointerId!==dragSplit.pointerId)return;
+ const delta=event.clientX-dragSplit.startX;
+ updateSplitWidth(dragSplit.which,dragSplit.initial+(dragSplit.which==='info'?-delta:delta));
+});
+function endSplitDrag(event){
+ if(!dragSplit||event.pointerId!==dragSplit.pointerId)return;
+ const which=dragSplit.which,handle=document.querySelector('[data-split="'+which+'"]');
+ const screen=document.getElementById('app-screen');
+ if(screen){
+  const current=parseFloat(getComputedStyle(screen).getPropertyValue(splitterSpec[which].property));
+  updateSplitWidth(which,current,true);
+ }
+ if(handle?.hasPointerCapture?.(event.pointerId))handle.releasePointerCapture(event.pointerId);
+ handle?.classList.remove('dragging');document.body.classList.remove('tender-dragging');dragSplit=null;
+}
+document.addEventListener('pointerup',endSplitDrag);
+document.addEventListener('pointercancel',endSplitDrag);
+document.addEventListener('dblclick',event=>{
+ const handle=event.target.closest?.('[data-split]');if(handle)updateSplitWidth(handle.dataset.split,splitterSpec[handle.dataset.split].initial,true);
+});
 document.addEventListener('submit',event=>{if(event.target.matches('form')){event.preventDefault();submitForm(event.target).catch(e=>{console.error(e);toast(e.message||'Error',true)})}});
 document.addEventListener('click',event=>{let t=event.target.closest('[data-action]');if(!t)return;if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
-document.addEventListener('input',e=>{if(e.target.id==='message-box'&&user&&state.selected){const key='tender-draft:'+user.id+':'+[state.area,state.selected,state.pieceTab].join(':');if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='info-width'){document.getElementById('app-screen')?.style.setProperty('--tender-info-width',e.target.value+'px');return}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();if(e.key==='Enter'&&!e.shiftKey&&e.target.id==='message-box'){e.preventDefault();e.target.closest('form')?.requestSubmit()}if(e.key==='Enter'&&e.target.getAttribute('role')==='button')e.target.click()});
+document.addEventListener('input',e=>{if(e.target.id==='message-box'&&user&&state.selected){const key='tender-draft:'+user.id+':'+[state.area,state.selected,state.pieceTab].join(':');if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
+// Type-to-chat works like a desktop messenger: printable keystrokes land
+// in the current composer, never in settings or behind an open modal.
+document.addEventListener('keydown',event=>{
+ if(event.defaultPrevented||event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
+ if(event.key.length!==1||event.target?.closest?.('input,textarea,select,button,[contenteditable="true"],[role="dialog"]'))return;
+ if(document.getElementById('modal-root')?.children?.length)return;
+ if(!user||!state.selected||!(state.area==='chats'||(['pieces','discover'].includes(state.area)&&state.pieceTab==='chat')))return;
+ const field=document.getElementById('message-box');
+ if(!field||field.disabled||!field.isConnected||field.getClientRects().length===0)return;
+ event.preventDefault();
+ field.focus();
+ const caret=Number.isInteger(field.selectionStart)?field.selectionStart:field.value.length;
+ const end=Number.isInteger(field.selectionEnd)?field.selectionEnd:caret;
+ field.setRangeText(event.key,caret,end,'end');
+ field.dispatchEvent(new Event('input',{bubbles:true}));
+});
+if('serviceWorker' in navigator){
+ navigator.serviceWorker.addEventListener('message',event=>{
+  if(event.data?.type==='tender-notification-open'&&user&&event.data.conversationId&&conversations.some(c=>c.id===event.data.conversationId)){
+   goTo('chats',event.data.conversationId).catch(console.warn);
+  }
+ });
+}
+document.addEventListener('keydown',e=>{
+ if(e.target?.matches?.('[data-split]')&&['ArrowLeft','ArrowRight','Home'].includes(e.key)){
+   e.preventDefault();const which=e.target.dataset.split,spec=splitterSpec[which],dir=which==='info'?-1:1;
+   const value=e.key==='Home'?spec.initial:readSplitWidth(which)+dir*(e.key==='ArrowRight'?16:-16);
+   updateSplitWidth(which,value,true);return;
+ }
+ if(e.key==='Escape')closeModal();if(e.key==='Enter'&&!e.shiftKey&&e.target.id==='message-box'){e.preventDefault();e.target.closest('form')?.requestSubmit()}if(e.key==='Enter'&&e.target.getAttribute('role')==='button')e.target.click()});
 document.addEventListener('change',e=>{
   if(e.target.id==='tender-theme-import'){
     const file=e.target.files?.[0];if(!file)return;
@@ -687,7 +921,7 @@ document.addEventListener('change',e=>{
     return
   }
   if(e.target.matches('.tender-local-pref')){const p=localPrefs(),k=e.target.name;p[k]=k==='fontSize'?Number(e.target.value):k==='reduceMotion'?e.target.value==='yes':e.target.value;localStorage.setItem('tender-0.3-appearance',JSON.stringify(p));applyLocalAppearance();return}
-  if(e.target.id==='info-width'){localStorage.setItem('tender-info-width',e.target.value);document.getElementById('app-screen')?.style.setProperty('--tender-info-width',e.target.value+'px');return}
+  
  if(e.target.id==='piece-pfp-file'){
    const file=e.target.files?.[0],preview=document.getElementById('piece-pfp-preview'),image=document.getElementById('piece-pfp-preview-img');
    if(preview&&image){if(image.dataset.previewUrl)URL.revokeObjectURL(image.dataset.previewUrl);
