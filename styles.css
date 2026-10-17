@@ -488,3 +488,24 @@ kbd{display:inline-block;background:var(--surface);border:1px solid var(--stroke
  .settings-preview-identity{padding:46px 15px 14px}
  .settings-preview-identity .btn{font-size:11px}
 }
+
+/* Tender's own decision dialogs: never fall back to window.confirm */
+.tender-confirm{display:grid;gap:14px;justify-items:start}
+.tender-confirm-icon{width:46px;height:46px;border-radius:14px;background:color-mix(in srgb,var(--orange) 15%,var(--surface));font-size:23px;display:grid;place-items:center}
+.tender-confirm p{font-size:13px;color:var(--muted);line-height:1.65;max-width:460px}
+.tender-confirm-actions{display:flex;gap:10px;justify-content:flex-end;width:100%;margin-top:13px}
+.tender-confirm-actions .btn{min-width:105px}
+.modal-panel:has(.tender-confirm){max-width:480px;border-radius:18px;box-shadow:0 28px 85px #000a}
+.modal-panel:has(.tender-confirm) .modal-head{margin-bottom:5px}
+.tender-dragging,.tender-dragging *{cursor:col-resize!important;user-select:none!important}
+.info-resize-hint{padding:9px 11px;border-top:1px solid var(--stroke);font-size:10px;color:var(--muted);text-align:center}
+.notification-settings .button-group{display:flex;flex-wrap:wrap;gap:9px}
+.notification-settings .btn{min-width:0;max-width:100%}
+.profile-pronouns{font-size:12px;color:var(--muted);padding:0 2px}
+.profile-popout-head h2{margin-bottom:4px}
+.profile-popout-body{gap:10px}
+.profile-popout .profile-status{border:1px solid var(--stroke);background:var(--surface)}
+@media(max-width:760px){
+ .tender-confirm-actions{display:grid;grid-template-columns:1fr 1fr}
+ .tender-confirm-actions .btn{min-width:0}
+}
