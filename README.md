@@ -1,63 +1,47 @@
 # Tender 🍗
 
-**Stay close. Stay crispy.** A responsive HTML/CSS/JavaScript messenger featuring Buffalo the mascot, private DMs, friend requests, group chats, and customizable forum-like **Pieces** with chat, discussions, and galleries.
+**Stay close. Stay crispy.**
 
+Tender is a responsive social messaging app with **Buffalo** the mascot. Chat with friends, build group conversations, and discover communities called **Pieces**.
 
-## 🍗 Tender 0.2 — The Crispy Update
+**[🍗 Open Tender](https://fyrix341.github.io/Tender/)** · [Source code](https://github.com/FYRIX341/Tender)
 
-**MAJOR UPDATE:** [Read the changelog and migration instructions](RELEASE_0_2.md).
+## ✨ Tender 0.2 — The Crispy Update
 
-**Existing users:** To unlock the new features, run [migration_0_2.sql](migration_0_2.sql) **once** in your existing Supabase SQL Editor. Do not rerun the initial schema and do not create a new database. Your existing Supabase `config.js` stays the same. The original DMs and Pieces remain intact.
+The Crispy Update is live! 🎉
 
-**Important:** In-app notifications and browser notifications with the page open are supported; closed-browser push is not yet implemented. Rich GIF link embedding works, but a searchable third-party GIF catalog is not integrated. This remains a small beta with free-tier limits.
+Tender 0.2 builds on the original messaging experience with richer conversations, personalization, and a smoother interface.
 
-## Live hosting
+### What you can do
 
-Source: https://github.com/FYRIX341/Tender
+- **Your profile:** Sign up, sign in, set a username, display name, bio, and profile picture.
+- **Find your people:** Discover users, send friend requests, and connect with friends.
+- **Chat:** Send private messages, create group chats, and see messages update in real time.
+- **Express yourself:** React with emojis and share supported attachments.
+- **Explore Pieces:** Join or create public and private communities with live chat, discussions, threaded replies, and image galleries.
+- **Make it yours:** Enjoy profile and interface customization in a responsive desktop and mobile design.
+- **Stay in the loop:** See in-app notifications while using Tender.
 
-GitHub Pages deployment is configured in `.github/workflows/pages.yml` and aims to publish at https://fyrix341.github.io/Tender/ . The link only works once the deployment succeeds. If needed, open repository **Settings → Pages**, choose **GitHub Actions** as the source, then check the Actions tab.
+For more detail, see the [0.2 release notes](RELEASE_0_2.md).
 
-## Required backend setup (free tier)
+## 📱 Made for desktop and mobile
 
-**GitHub Pages does not provide a messaging database.** Real accounts and messages require a free Supabase project.
+Tender runs in your browser—no app-store installation required. The interface adapts to both phones and computers.
 
-1. Create a free project at https://supabase.com/dashboard/projects.
-2. In **SQL Editor**, paste and run the entire [schema.sql](schema.sql). This creates tables, access restrictions, storage buckets, and Realtime publication.
-3. In **Project Settings → API** (or **Connect**), copy the **Project URL** and the **publishable / anon key**.
-4. On GitHub, edit [config.js](config.js) to set:
-   ```js
-   window.TENDER_CONFIG = {
-     supabaseUrl: 'https://YOUR_PROJECT.supabase.co',
-     supabaseAnonKey: 'YOUR_PUBLIC_PUBLISHABLE_OR_ANON_KEY'
-   };
-   ```
-   **Never** put a secret, service_role key, password, or private token in this public repo.
-5. In Supabase **Authentication → URL Configuration**, set Site URL to your deployed Tender URL and allow that redirect URL. Enable email sign-in. If email confirmation is enabled, make sure your project can send sign-up emails (free email services have rate limits).
-6. Wait for GitHub Pages to deploy the updated config. Register two accounts and verify they can exchange messages using different devices.
+## 🛠️ Built with
 
-There is **no real-time demo or local-only fake chat**: before a Supabase project is connected, Tender displays setup instructions rather than pretending messages are shared.
+- HTML, CSS, and JavaScript
+- Supabase for authentication, data, storage, and realtime features
+- GitHub Pages for web hosting
 
-## Current functionality
+## 🌱 What's next?
 
-- Supabase email/password login and signup; public profile with username, display name, bio and avatar.
-- Username lookup, friend requests and acceptance, private DMs and group chats.
-- Realtime updates, emoji reactions, message deletion, image/PDF attachments (5 MB limit).
-- Public/private Pieces with member controls and three Blocks: live chat, forum posts with threaded replies, and image gallery.
-- Responsive desktop/mobile layout and Buffalo mascot artwork.
+Tender is still evolving. Future improvements may include more ways to personalize profiles, richer messaging, better discovery, and stronger community tools.
 
-## Beta limitations and safety
+## 🛡️ Beta notice
 
-This is an early **private beta**, not a fully moderated public social network. The free tier has limits, including realtime concurrency, bandwidth, emails and storage. Piece galleries for public Pieces are public URLs. Changing a Piece to private does **not** retroactively remove already shared public gallery files; do not upload sensitive content. In-browser content controls and database row-level security are a starting point, not a substitute for anti-spam systems, user reporting, blocking, abuse handling, or child-safety policies. Add these and relevant legal/privacy safeguards before promoting Tender to the public.
+Tender is an early beta. Free-tier limits apply, and features may change. Browser notifications with the page open are supported; background push notifications are not yet implemented. Public Piece gallery links may remain accessible after a Piece is made private, so avoid sharing sensitive files. Full moderation, anti-spam, and safety systems are still works in progress.
 
-No paid subscription is required for users, and deployment starts at $0 within the providers' free tiers. Infrastructure is still required—"no servers" means no Discord-style user-created servers, not serverless storage of other people's messages.
+---
 
-## Files
-
-- `index.html`: entry point
-- `styles.css`: desktop/mobile UI
-- `app.js`: Supabase-powered application
-- `schema.sql`: Supabase database and access policies
-- `config.js`: public, intentionally blank configuration
-- `buffalo.webp`: optimized Buffalo mascot
-
-Made with crispy enthusiasm. 🍗
+**Made with crispy enthusiasm. Stay close. Stay crispy.** 🍗
