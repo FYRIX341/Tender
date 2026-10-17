@@ -64,7 +64,15 @@ jobs:
           query(sql)
           verified=query("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='piece_messages' AND column_name='channel_id';",read_only=True)
           if not isinstance(verified,list) or not any(row.get('column_name')=='channel_id' for row in verified):
-              print('::error::Migration response did not verify pronouns column. Inspect Supabase.')
+              print('::error::Migration did not verify the new message channel column. Inspect Supabase.')
               sys.exit(1)
-          print('Tender 0.4: secure Piece channels and message channel link present; prior conversations preserved.')
+          tables=query("SELECT to_regclass('public.piece_channels') IS NOT NULL AS channels_ready, to_regclass('public.piece_channel_reads') IS NOT NULL AS reads_ready;",read_only=True)
+          if not isinstance(tables,list) or not tables or not tables[0].get('channels_ready') or not tables[0].get('reads_ready'):
+              print('::error::Piece channels or read cursors were not created.')
+              sys.exit(1)
+          mime=query("SELECT allowed_mime_types FROM storage.buckets WHERE id='tender-avatars';",read_only=True)
+          if not isinstance(mime,list) or not mime or 'image/gif' not in str(mime[0].get('allowed_mime_types','')):
+              print('::error::Animated avatars were not enabled in storage.')
+              sys.exit(1)
+          print('Tender 0.4: secure channels, read cursors, and GIF avatars verified; existing data preserved.')
           PY
