@@ -33,7 +33,7 @@ function tenderHarness(){
  const win={TENDER_CONFIG:{}};
  const ctx={
   document,navigator,window:win,localStorage,URL,Intl,console,
-  location:{origin:'https://fyrix341.github.io',href:'https://fyrix341.github.io/Tender/'},
+  location:{origin:'https://fyrix341.github.io',href:'https://fyrix341.github.io/Tender/',hostname:'fyrix341.github.io',pathname:'/Tender/',protocol:'https:'},
   setTimeout(){},clearTimeout(){},
   FormData:class{}
  };
