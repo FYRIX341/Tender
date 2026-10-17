@@ -709,9 +709,17 @@ function renderSidebar(){
  }else if(state.area==='friends'){
   const ids=myFriendIds();
   body=`<div class="side-section">Friends <span>${ids.length}</span></div>${ids.map(id=>`<div class="side-row ${state.selected===id?'selected':''}" data-action="open-friend" data-id="${esc(id)}">${profileFace(pby(id))}<div class="grow">${profileName(pby(id))}<p>@${esc(pby(id).handle)}</p></div></div>`).join('')||'<p class="hint" style="padding:18px">Friends will show up here.</p>'}`;
+ }else if((state.area==='pieces'||state.area==='discover')&&state.selected&&selectedPiece()&&inPiece(state.selected)){
+  const piece=selectedPiece(),channels=channelsFor(piece.id);
+  const filtered=channels.filter(c=>!state.search||c.name.toLowerCase().includes(state.search.toLowerCase())||c.category.toLowerCase().includes(state.search.toLowerCase()));
+  const groups=[...new Set(filtered.map(c=>c.category||'TEXT CHANNELS'))];
+  body=`<button type="button" class="piece-sidebar-home ${state.pieceTab!=='chat'?'active':''}" data-action="piece-home"><span>🏠</span><div><strong>${esc(piece.name)}</strong><small>Community home · Forum · Gallery</small></div></button>
+    <div class="piece-sidebar-header"><span>CHANNELS</span>${(ownPiece(piece.id)||memberships.some(m=>m.piece_id===piece.id&&m.user_id===user.id&&m.role==='moderator'))&&channelReady?`<button class="plus-btn" type="button" title="Create channel" aria-label="Create channel" data-action="new-channel">${ico('plus','icon-sm')}</button>`:''}</div>
+    ${groups.map(category=>`<section class="piece-channel-category"><div class="piece-category-label">${ico('back','icon-sm')} ${esc(category)}</div>
+    ${filtered.filter(c=>(c.category||'TEXT CHANNELS')===category).map(c=>`<button type="button" class="piece-channel-row ${state.pieceTab==='chat'&&selectedChannel()?.id===c.id?'selected':''} ${channelUnreadCount(c.id)?'unread':''}" data-action="select-channel" data-id="${esc(c.id)}" aria-current="${state.pieceTab==='chat'&&selectedChannel()?.id===c.id?'page':'false'}"><span class="piece-channel-hash">${c.kind==='announcements'?'📣':'#'}</span><span class="channel-title">${esc(c.name)}</span>${channelUnreadCount(c.id)?`<span class="channel-unread-count">${Math.min(99,channelUnreadCount(c.id))}</span>`:''}${c.is_default?'':ownPiece(piece.id)?`<span class="channel-settings-btn" data-action="edit-channel" data-id="${esc(c.id)}" title="Edit channel">⚙</span>`:''}</button>`).join('')}</section>`).join('')||'<p class="hint">No channels match your search.</p>'}`;
  }else if(state.area==='pieces'||state.area==='discover'){
   const showing=pieces.filter(p=>(state.area==='discover'?p.is_public:inPiece(p.id))&&(!state.search||p.name.toLowerCase().includes(state.search.toLowerCase())));
-  body=showing.map(p=>`<div class="side-row ${state.selected===p.id?'selected':''}" data-action="open-piece" data-id="${esc(p.id)}">${pieceAvatar(p)}<div class="grow"><strong>${esc(p.name)}</strong><p>${esc((p.description||'A Tender Piece').slice(0,58))}</p></div></div>`).join('')||'<p class="hint" style="padding:18px">No Pieces here yet.</p>';
+  body=showing.map(p=>`<div class="side-row ${state.selected===p.id?'selected':''}" data-action="open-piece" data-id="${esc(p.id)}">${pieceAvatar(p)}<div class="grow"><strong>${esc(p.name)}</strong><p>${esc((p.description||'A Tender Piece').slice(0,58))}</p></div>${pieceUnreadCount(p.id)?`<span class="piece-sidebar-dot"></span>`:''}</div>`).join('')||'<p class="hint" style="padding:18px">No Pieces here yet.</p>';
  }else{
   body=`<button type="button" class="side-row account-side-shortcut" data-action="settings-profile">${avatars(my)}<span class="grow"><strong>${esc(my.display_name)}</strong><p>@${esc(my.handle)}</p></span></button>`;
  }
@@ -793,7 +801,7 @@ function cacheUpdatedProfile(saved){
 function renderMain(){const m=document.getElementById('main');if(!m)return;
  const settingsSnapshot=captureSettingsView(m);
  const oldDraft=m.querySelector('#message-box')?.value||'';
- const oldKey=m.dataset.threadKey, newKey=[state.area,state.selected||'',state.pieceTab].join(':');
+ const oldKey=m.dataset.threadKey, newKey=[state.area,state.selected||'',state.pieceTab,(['pieces','discover'].includes(state.area)&&state.pieceTab==='chat')?selectedChannel()?.id||'':''].join(':');
  if(oldKey&&oldKey!==newKey&&oldDraft&&user)localStorage.setItem('tender-draft:'+user.id+':'+oldKey,oldDraft);
  const oldScroll=m.querySelector('.chat-scroll');
  const pos=oldScroll?{top:oldScroll.scrollTop,near:oldScroll.scrollHeight-oldScroll.scrollTop-oldScroll.clientHeight<96}:null;
@@ -920,26 +928,30 @@ function renderSettings(){
 let activeLoadVersion=0;
 async function loadActive(){
  if(!db||!state.selected)return;
- const seq=++activeLoadVersion,selected=state.selected,area=state.area,tab=state.pieceTab;
- const pending=activeMessages.filter(m=>m.pending&&(area==='chats'?m.conversation_id===selected:m.piece_id===selected));
+ const seq=++activeLoadVersion,selected=state.selected,area=state.area,tab=state.pieceTab,chosenChannel=state.channelId;
+ const pending=activeMessages.filter(m=>m.pending&&(area==='chats'?m.conversation_id===selected:(m.piece_id===selected&&(!channelReady||m.channel_id===state.channelId))));
  let fresh=[],reactions=[],posts=[],gallery=[];
  if(area==='chats'){
   fresh=assert(await q('messages').select('*').eq('conversation_id',selected).order('created_at',{ascending:true}).limit(150))||[];
   if(fresh.length)reactions=assert(await q('reactions').select('*').eq('target_type','message').in('target_id',fresh.map(x=>x.id)))||[];
  }else if(area==='pieces'||area==='discover'){
   if(tab==='chat'){
-   fresh=assert(await q('piece_messages').select('*').eq('piece_id',selected).order('created_at',{ascending:true}).limit(150))||[];
+   const activeChannel=selectedChannel(selected);
+    let query=q('piece_messages').select('*').eq('piece_id',selected);
+    if(channelReady&&activeChannel&&!activeChannel.id.startsWith('legacy-'))
+      query=activeChannel.is_default?query.or('channel_id.eq.'+activeChannel.id+',channel_id.is.null'):query.eq('channel_id',activeChannel.id);
+    fresh=assert(await query.order('created_at',{ascending:true}).limit(150))||[];
    if(fresh.length)reactions=assert(await q('reactions').select('*').eq('target_type','piece_message').in('target_id',fresh.map(x=>x.id)))||[];
   }
   if(tab==='forum')posts=assert(await q('piece_posts').select('*').eq('piece_id',selected).order('created_at',{ascending:false}).limit(100))||[];
   if(tab==='gallery')gallery=assert(await q('piece_gallery').select('*').eq('piece_id',selected).order('created_at',{ascending:false}).limit(100))||[];
  }
- if(seq!==activeLoadVersion||selected!==state.selected||area!==state.area||tab!==state.pieceTab)return;
+ if(seq!==activeLoadVersion||selected!==state.selected||area!==state.area||tab!==state.pieceTab||chosenChannel!==state.channelId)return;
  const ids=new Set(fresh.map(x=>x.id));for(const row of pending)if(!ids.has(row.id))fresh.push(row);
  activeMessages=fresh;activeReactions=reactions;activePosts=posts;activeGallery=gallery;
  await Promise.all([prepareAttachmentUrls(),loadPolls()]);
 }
-async function goTo(area,id=null){state.area=area;state.selected=id;state.search='';state.mobileDetail=!!id||['discover','settings'].includes(area);if(area==='friends'&&!id)state.mobileDetail=true;if(area==='pieces'||area==='discover')state.pieceTab='chat';replyTo=null;if(id&&['chats','pieces','discover'].includes(area))await loadActive();if(state.area!==area||state.selected!==id)return;applyLocalAppearance();render();if(area==='chats'&&id){markRead(id);subscribeTyping().catch(console.warn)}else if(['pieces','discover'].includes(area)&&id&&state.pieceTab==='chat'){subscribeTyping().catch(console.warn)}else{unsubTyping()}if(area==='friends')markRead(null,true);}
+async function goTo(area,id=null){state.area=area;state.selected=id;state.search='';state.mobileDetail=!!id||['discover','settings'].includes(area);if(area==='friends'&&!id)state.mobileDetail=true;if(area==='pieces'||area==='discover')state.pieceTab='chat';state.channelId=channelsFor(id).find(c=>c.is_default)?.id||channelsFor(id)[0]?.id||null;replyTo=null;if(id&&['chats','pieces','discover'].includes(area))await loadActive();if(state.area!==area||state.selected!==id)return;applyLocalAppearance();render();if(area==='chats'&&id){markRead(id);subscribeTyping().catch(console.warn)}else if(['pieces','discover'].includes(area)&&id&&state.pieceTab==='chat'){subscribeTyping().catch(console.warn)}else{unsubTyping()}if(area==='friends')markRead(null,true);}
 let confirmationResolve=null;
 function tenderConfirm(title,description,action='Confirm',danger=true){
  if(confirmationResolve){confirmationResolve(false);confirmationResolve=null}
@@ -1063,12 +1075,13 @@ function applySlashCommand(body,kind){
 }
 async function sendMessage(form){let text=String(new FormData(form).get('body')||'').trim();const command=text.startsWith('/')?applySlashCommand(text,form.dataset.kind):null;if(command?.error){toast(command.error,true);return}if(command?.handled){const field=form.querySelector('#message-box');if(field)field.value='';return}if(command?.text)text=command.text;let file=document.getElementById('message-file')?.files?.[0]||recordedVoice||null;if(!text&&!file)return;
  if(state.busy)return;const kind=form.dataset.kind,table=kind==='chat'?'messages':'piece_messages',target=state.selected,area=state.area;
- const original=text,replyId=replyTo?.id||null;const tmp=crypto.randomUUID();const pending={id:tmp,created_at:new Date().toISOString(),author_id:user.id,body:text,pending:true,conversation_id:kind==='chat'?target:null,piece_id:kind==='piece'?target:null,attachment_path:file?file.name:null,pendingFile:file?URL.createObjectURL(file):null,reply_to:replyId};
+ const original=text,replyId=replyTo?.id||null;const tmp=crypto.randomUUID();const pending={id:tmp,created_at:new Date().toISOString(),author_id:user.id,body:text,pending:true,conversation_id:kind==='chat'?target:null,piece_id:kind==='piece'?target:null,channel_id:kind==='piece'?state.channelId:null,attachment_path:file?file.name:null,pendingFile:file?URL.createObjectURL(file):null,reply_to:replyId};
  const field=form.querySelector('#message-box');if(field)field.value='';localStorage.removeItem('tender-draft:'+user.id+':'+[area,target,kind==='piece'?'chat':state.pieceTab].join(':'));if(form.querySelector('#message-file'))form.querySelector('#message-file').value='';recordedVoice=null;replyTo=null;updateComposerReply();
  activeMessages.push(pending);syncActiveStream(true);document.getElementById('message-box')?.focus();
  await safe(async()=>{let attachment_path=null;try{
  if(file){const status=document.getElementById('file-status');if(status)status.textContent='Uploading attachment…';if(kind!=='chat')throw Error('Upload attachments in DMs/groups, or use the Gallery in Pieces.');if(file.size>5*1024*1024)throw Error('Maximum attachment size is 5 MB.');if(!['image/png','image/jpeg','image/webp','image/gif','application/pdf','audio/webm','audio/ogg','audio/mp4','audio/mpeg'].includes(file.type))throw Error('Unsupported file type.');attachment_path=`${target}/${user.id}/${crypto.randomUUID()}-${file.name.replace(/[^a-z0-9_.-]/gi,'_')}`;assert(await db.storage.from('tender-chat').upload(attachment_path,file,{contentType:file.type,upsert:false}));}
- const record=kind==='chat'?{id:tmp,conversation_id:target,author_id:user.id,body:text,attachment_path}:{id:tmp,piece_id:target,author_id:user.id,body:text};
+ const chosenChannel=kind==='piece'&&channelReady?selectedChannel(target):null;
+  const record=kind==='chat'?{id:tmp,conversation_id:target,author_id:user.id,body:text,attachment_path}:{id:tmp,piece_id:target,author_id:user.id,body:text,...(chosenChannel&&!chosenChannel.id.startsWith('legacy-')?{channel_id:chosenChannel.id}:{})};
  if(replyId&&((kind==='chat'&&extendedReady)||(kind==='piece'&&pieceRepliesReady)))record.reply_to=replyId;
  const status=document.getElementById('file-status');if(status)status.textContent='Sending…';const result=assert(await q(table).insert(record).select('*').single());let pos=activeMessages.findIndex(m=>m.id===tmp);if(pos>=0)activeMessages[pos]=result;else if(state.selected===target&&state.area===area&&!activeMessages.some(m=>m.id===result.id))activeMessages.push(result);
  if(pending.pendingFile){URL.revokeObjectURL(pending.pendingFile)}if(status)status.textContent='Sent ✓';if(attachment_path)await prepareAttachmentUrls();if(state.selected===target&&state.area===area){syncActiveStream();document.getElementById('message-box')?.focus()}else scheduleReconcile(false);
