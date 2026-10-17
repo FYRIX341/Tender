@@ -13,14 +13,27 @@ function harness(){
   documentElement:{dataset:{},style:{setProperty(){},removeProperty(){}}}
  };
  const storage=new Map();
- const navigator={mediaDevices:{getUserMedia:async()=>{mediaRequests++;return stream},getDisplayMedia:async()=>stream}};
+ const shareVideo={kind:'video',enabled:true,stop(){}};
+ const shareStream={id:'share-stream',getTracks:()=>[shareVideo],getAudioTracks:()=>[],getVideoTracks:()=>[shareVideo]};
+ const navigator={mediaDevices:{getUserMedia:async()=>{mediaRequests++;return stream},getDisplayMedia:async()=>shareStream}};
  const db={rpc:async(method,args)=>{
   callRpc={method,args};if(method==='tender_start_call')return {data:'call-001',error:null};return {data:true,error:null};
  },from(table){
   if(table==='tender_call_signals')return {insert:async(data)=>{lastSignaled=data;return {error:null}}};
   return {};
  }};
- const win={TENDER_CONFIG:{},isSecureContext:true,innerWidth:1150,innerHeight:720,RTCPeerConnection:class{}};
+ class MockPeer {
+  constructor(){this.signalingState='stable';this.connectionState='new';this.localDescription=null;this.remoteDescription=null;this.senders=[]}
+  addTrack(track){const sender={track};this.senders.push(sender);return sender}
+  removeTrack(sender){this.senders=this.senders.filter(x=>x!==sender)}
+  async createOffer(){return {type:'offer',sdp:'test-offer'}}
+  async createAnswer(){return {type:'answer',sdp:'test-answer'}}
+  async setLocalDescription(desc){this.localDescription={...desc,toJSON(){return {type:desc.type,sdp:desc.sdp}}};this.signalingState=desc.type==='offer'?'have-local-offer':'stable'}
+  async setRemoteDescription(desc){this.remoteDescription=desc;this.signalingState='stable'}
+  async addIceCandidate(){}
+  close(){}
+ }
+ const win={TENDER_CONFIG:{},isSecureContext:true,innerWidth:1150,innerHeight:720,RTCPeerConnection:MockPeer};
  const context={window:win,navigator,document:doc,console,URL,Intl,
   location:{origin:'https://example.org',hostname:'example.org',pathname:'/',href:'https://example.org/'},
   localStorage:{getItem(k){return storage.get(k)||null},setItem(k,v){storage.set(k,String(v))},removeItem(k){storage.delete(k)}},
@@ -34,7 +47,7 @@ function harness(){
   },
   link:richLinkCardData, cards:richLinkCards,background:profileGradientStyle,styled:styledName,
   start:startTenderCall, decline:answerTenderCall, hangup:finishTenderCall,
-  mic:toggleTenderMicrophone, setVolume:setTenderVolume,volume:callVolumes,
+  mic:toggleTenderMicrophone, share:toggleTenderScreen, setVolume:setTenderVolume,volume:callVolumes,
   signal:tenderSignal,getCall:()=>activeCall,
   setIncoming(id){incomingCall={id,caller_id:'user2',callee_id:'user1',conversation_id:'dm-id',wants_video:false};showCallUI()},
   getIncoming:()=>incomingCall,
@@ -127,6 +140,28 @@ test('Per-person voice volume and stream volume are persisted independently',asy
  h.qa.setVolume('voice',25);h.qa.setVolume('stream',85);
  assert.equal(h.qa.volume('user2').voice,25);
  assert.equal(h.qa.volume('user2').stream,85);
+ await h.qa.hangup();
+});
+test('Answering a real incoming call creates a WebRTC peer and local media tracks',async()=>{
+ const h=harness();h.qa.setIncoming('incoming-test');
+ await h.qa.decline(true);
+ assert.equal(h.getRpc().method,'tender_answer_call');
+ assert.equal(h.getRpc().args.accept,true);
+ assert.equal(h.getMediaRequests(),1);
+ const call=h.qa.getCall();
+ assert.equal(call.status,'active');
+ assert.ok(call.pc);
+ assert.equal(call.pc.senders.length,2);
+ await h.qa.hangup();
+});
+test('Screen sharing adds a separate video track and publishes an authorized announcement',async()=>{
+ const h=harness();h.qa.setIncoming('incoming-screen');
+ await h.qa.decline(true);
+ await h.qa.share();
+ assert.equal(h.qa.getCall().screenStream.id,'share-stream');
+ assert.ok(h.qa.getCall().pc.senders.length>=3);
+ assert.equal(h.getSignal().kind,'offer');
+ assert.match(h.getMarkup(),/You're sharing/);
  await h.qa.hangup();
 });
 test('Call backend never stores microphone/video media blobs or grants public signaling access',()=>{
