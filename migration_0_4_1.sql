@@ -45,6 +45,12 @@ CREATE INDEX IF NOT EXISTS tender_signals_receive_idx ON public.tender_call_sign
 
 ALTER TABLE public.tender_call_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tender_call_signals ENABLE ROW LEVEL SECURITY;
+
+-- Explicit API permissions: PostgreSQL RLS then narrows every read/write to call participants.
+GRANT SELECT ON public.tender_call_sessions TO authenticated;
+GRANT SELECT, INSERT ON public.tender_call_signals TO authenticated;
+GRANT USAGE, SELECT ON SEQUENCE public.tender_call_signals_id_seq TO authenticated;
+
 DROP POLICY IF EXISTS "call sessions participating users" ON public.tender_call_sessions;
 CREATE POLICY "call sessions participating users" ON public.tender_call_sessions
  FOR SELECT TO authenticated
@@ -90,7 +96,7 @@ BEGIN
  WHERE conversation_id=cid AND status='ringing' AND created_at<now()-interval '90 seconds';
  -- Rate-limit callers to one live/ringing call to avoid repeated notifications.
  IF EXISTS(SELECT 1 FROM public.tender_call_sessions
-           WHERE (caller_id=caller OR callee_id=caller)
+           WHERE (caller_id IN (caller,peer) OR callee_id IN (caller,peer))
              AND status IN ('ringing','active')) THEN
   RAISE EXCEPTION 'You are already in a call or waiting for an answer';
  END IF;
