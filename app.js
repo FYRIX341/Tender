@@ -91,8 +91,25 @@ function badgeText(n){return n>99?'99+':String(n)}
 function unreadCount(id){return notifications.filter(n=>!n.is_read&&n.kind==='message'&&n.conversation_id===id).length}
 function unreadFriends(){return notifications.filter(n=>!n.is_read&&n.kind==='friend').length}
 function unreadAll(){return notifications.filter(n=>!n.is_read).length}
-function messageText(text){let result=esc(text||'').replace(/(https:\/\/[^\s<]+)/g,m=>{const u=validUrl(m.replace(/&amp;/g,'&'));return u==='#'?m:`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer" class="message-link">${m}</a>`});
+function messageText(text){if(String(text||'').startsWith('[TENDER_EMBED]'))return richEmbedHTML(text);let result=esc(text||'').replace(/(https:\/\/[^\s<]+)/g,m=>{const u=validUrl(m.replace(/&amp;/g,'&'));return u==='#'?m:`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer" class="message-link">${m}</a>`});
  result=result.replace(/:([a-z0-9_]{2,24}):/g,(whole,code)=>{const e=customEmojis.find(x=>x.shortcode===code&&(x.piece_id===null||x.piece_id===state.selected));return e?`<img class="inline-custom-emoji" src="${esc(db.storage.from('tender-emoji').getPublicUrl(e.image_path).data.publicUrl)}" alt=":${esc(code)}:" title=":${esc(code)}:">`:whole});if(/^:[a-z0-9_]{2,24}:$/.test(String(text||'').trim()))result=result.replace('class="inline-custom-emoji"','class="inline-custom-emoji sticker-emoji"');return result.replace(/\n/g,'<br>')}
+// Rich announcement embeds are stored as ordinary message text (no new tables needed).
+function richEmbedHTML(text){
+ let p;try{p=JSON.parse(String(text).slice('[TENDER_EMBED]'.length))}catch{return esc(text)}
+ if(!p||typeof p!=='object')return esc(text);
+ const color=/^#[0-9a-f]{6}$/i.test(p.color||'')?p.color:'#f47735';
+ const thumb=typeof p.thumbnail==='string'&&/^https:\/\//i.test(p.thumbnail)&&validUrl(p.thumbnail)!=='#'?validUrl(p.thumbnail):null;
+ return `<article class="rich-embed" style="--embed-accent:${esc(color)}"><div class="rich-embed-main">${p.author?`<small class="rich-embed-author">${esc(String(p.author).slice(0,70))}</small>`:''}<strong class="rich-embed-title">${esc(String(p.title||'Announcement').slice(0,120))}</strong><p class="rich-embed-body">${esc(String(p.description||'').slice(0,1600)).replace(/\n/g,'<br>')}</p>${p.footer?`<small class="rich-embed-footer">${esc(String(p.footer).slice(0,110))}</small>`:''}</div>${thumb?`<img src="${esc(thumb)}" alt="" loading="lazy" class="rich-embed-thumb">`:''}</article>`;
+}
+function embedModal(){
+ modal('✨ Build an announcement','Post a rich card into the current chat or Piece using safe text formatting.',`<form id="embed-form">
+ <div class="field"><label>Title</label><input class="input" name="title" maxlength="120" required placeholder="Big Tender Announcement"></div>
+ <div class="field"><label>Description</label><textarea class="input textarea" name="description" maxlength="1600" required placeholder="What should everyone know?"></textarea></div>
+ <div class="settings-grid"><div class="field"><label>Author label</label><input class="input" name="author" maxlength="70" placeholder="Community team"></div><div class="field"><label>Accent</label><input class="input" name="color" type="color" value="#f47735"></div></div>
+ <div class="field"><label>Thumbnail URL (HTTPS, optional)</label><input class="input" name="thumbnail" type="url" placeholder="https://..."></div>
+ <div class="field"><label>Footer text</label><input class="input" name="footer" maxlength="110" placeholder="Stay crispy 🍗"></div>
+ <button class="btn full" type="submit">Send announcement</button></form>`);
+}
 function giftGif(text){const s=String(text||'').trim();if(!/^https:\/\/(?:media\d?\.giphy\.com|media\.tenor\.com)\//i.test(s))return '';if(!/\.(gif|webp)(?:\?|$)/i.test(s))return '';return `<img class="gif-preview" src="${esc(validUrl(s))}" alt="Shared GIF" loading="lazy">`}
 function attachmentHTML(row){if(!row.attachment_path&&!row.pendingFile)return '';
  const path=row.attachment_path||'', name=(path.split('/').pop()||'attachment').replace(/^[0-9a-f-]{36}-/i,'');
@@ -349,7 +366,8 @@ const tenderCommands=[
  {name:'search',detail:'Search your messages',usage:'/search'},
  {name:'theme',detail:'Change current chat wallpaper',usage:'/theme'},
  {name:'who',detail:'Show conversation members',usage:'/who'},
- {name:'trivia',detail:'Play a private trivia round',usage:'/trivia'}
+ {name:'trivia',detail:'Play a private trivia round',usage:'/trivia'},
+ {name:'embed',detail:'Build a rich announcement card',usage:'/embed'}
 ];
 function updateComposerAssist(field){
  let box=document.getElementById('composer-assist');if(!box||!field)return;
@@ -381,6 +399,7 @@ function applySlashCommand(body,kind){
   case'help':modal('Tender slash commands','These commands are interactive shortcuts, not a third-party bot.',`<div class="command-list">${tenderCommands.map(c=>`<div class="command-item"><strong>${esc(c.usage)}</strong><small>${esc(c.detail)}</small></div>`).join('')}</div>`);return {handled:true};
   case'who':if(kind==='chat')chatInfo();else{const p=selectedPiece();modal('Piece members',p?.name||'Members',`<div>${memberships.filter(x=>x.piece_id===state.selected).slice(0,50).map(x=>friendItem(pby(x.user_id),'info')).join('')}</div>`)}return {handled:true};
   case'trivia':triviaModal();return {handled:true};
+  case'embed':embedModal();return {handled:true};
   case'poll':if(kind!=='chat')return {error:'Piece polls require backend support; use a DM or group for now.'};pollModal();return {handled:true};
   case'gif':gifModal();return {handled:true};
   case'search':searchModal();return {handled:true};
@@ -475,6 +494,13 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  }catch(e){toast(e.message||'Could not complete action.',true);console.error(e)}}
 async function submitForm(form){switch(form.id){
  case'auth-form':return authSubmit(form);
+  case'embed-form':{const d=new FormData(form);const image=String(d.get('thumbnail')||'').trim();if(image&&(!/^https:\/\//i.test(image)||validUrl(image)==='#'))throw Error('Use a valid HTTPS thumbnail URL.');
+    const payload={title:String(d.get('title')||'').trim(),description:String(d.get('description')||'').trim(),author:String(d.get('author')||'').trim(),color:String(d.get('color')||'#f47735'),thumbnail:image,footer:String(d.get('footer')||'').trim()};
+    if(!payload.title||!payload.description)throw Error('Title and description are required.');
+    const body='[TENDER_EMBED]'+JSON.stringify(payload);if(body.length>4000)throw Error('Announcement too long.');
+    closeModal();const composer=document.getElementById('composer-form'),field=document.getElementById('message-box');
+    if(!composer||!field){toast('Open a chat before sending an announcement.',true);return}
+    field.value=body;composer.requestSubmit();return}
   case'room-appearance-form':{const d=new FormData(form),key=roomKey();if(!key)return;
     const wallpaper=String(d.get('wallpaper')||'none'),image=String(d.get('image')||'').trim();
     if(wallpaper==='image' && (!/^https:\/\//i.test(image)||validUrl(image)==='#'))throw Error('Choose an HTTPS image URL.');
