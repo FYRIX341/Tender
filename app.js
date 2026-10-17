@@ -59,7 +59,7 @@ const avatars = p => `<span class="avatar md">${p?.avatar_url?`<img src="${esc(v
 const pieceHasPhoto = p => typeof p?.icon==='string' && /^https:\/\//i.test(p.icon) && validUrl(p.icon)!=='#';
 function pieceAvatar(p,extra=''){
  const color=/^#[0-9a-f]{6}$/i.test(p?.color||'')?p.color:'#f47735';
- return `<span class="piece-avatar ${esc(extra)}" style="background:${esc(color)}33">${pieceHasPhoto(p)?`<img class="piece-avatar-image" src="${esc(validUrl(p.icon))}" alt="" loading="lazy">`:esc(p?.icon||'🍗')}</span>`;
+ return `<span class="piece-avatar ${esc(extra)} piece-shape-${['round','rounded','square','squircle'].includes(p?.icon_shape)?p.icon_shape:'rounded'}" style="background:${esc(color)}33">${pieceHasPhoto(p)?`<img class="piece-avatar-image" src="${esc(validUrl(p.icon))}" alt="" loading="lazy">`:esc(p?.icon||'🍗')}</span>`;
 }
 const profileFace=p=>`<button type="button" class="profile-click profile-face" data-action="mini-profile" data-id="${esc(p.id||'')}" aria-label="View ${esc(p.display_name||'member')}'s profile" title="View profile">${avatars(p)}</button>`;
 const profileName=p=>`<button type="button" class="profile-click profile-name" data-action="mini-profile" data-id="${esc(p.id||'')}" title="View ${esc(p.display_name||'member')}'s profile">${styledName(p)}</button>`;
@@ -937,7 +937,7 @@ function renderPiece(piece){let joined=inPiece(piece.id),own=ownPiece(piece.id);
  if(state.pieceTab==='forum') content=`<div class="section-row"><h2 class="section-heading">Discussions</h2>${joined?`<button class="btn sm" data-action="new-post">${ico('plus')} New post</button>`:''}</div><div class="grid">${activePosts.map(post=>`<article class="post-card" role="button" tabindex="0" data-action="open-post" data-id="${post.id}"><div class="post-meta">${profileName(pby(post.author_id))} · ${relative(post.created_at)}</div><h3>${post.pinned?'📌 ':''}${esc(post.title)}</h3>${post.tags?.length?`<div class="tagline">${post.tags.map(t=>`<span class="tag">#${esc(t)}</span>`).join('')}</div>`:''}<p class="post-body">${esc(post.body.slice(0,240))}${post.body.length>240?'...':''}</p><div class="post-footer">${ico('chat','icon-sm')} ${post.locked?'🔒 Locked':'Read discussion'} ${(own||memberships.some(m=>m.piece_id===post.piece_id&&m.user_id===user.id&&m.role==='moderator'))&&extendedReady?`<button class="emoji-inline" data-action="pin-post" data-id="${post.id}" title="Pin">📌</button><button class="emoji-inline" data-action="lock-post" data-id="${post.id}" title="Lock">🔒</button>`:''}${post.author_id===user.id||own?`<button class="emoji-inline" data-action="delete-post" data-id="${post.id}" title="Delete post">${ico('trash','icon-sm')}</button>`:''}</div></article>`).join('')||'<div class="notice-inline">No discussions yet. Be the first to post.</div>'}</div>`;
  if(state.pieceTab==='gallery')content=`<div class="section-row"><h2 class="section-heading">Gallery</h2>${joined&&piece.is_public?`<button class="btn sm" data-action="new-gallery">${ico('plus')} Upload picture</button>`:''}</div><div class="gallery-grid">${activeGallery.map(photo=>`<article class="gallery-card"><img src="${esc(galleryUrl(photo.image_path))}" alt="${esc(photo.caption||'Community image')}" data-action="enlarge" data-src="${esc(galleryUrl(photo.image_path))}"><div class="gallery-info"><p>${esc(photo.caption)}</p><div class="post-meta">${profileName(pby(photo.author_id))} · ${relative(photo.created_at)}</div><div class="bubble-actions"><button class="emoji-inline" data-action="reaction-menu" data-type="gallery" data-id="${photo.id}">${ico('smile')}</button>${own||photo.author_id===user.id?`<button class="emoji-inline" data-action="delete-gallery" data-id="${photo.id}" data-path="${esc(photo.image_path)}">${ico('trash')}</button>`:''}</div></div></article>`).join('')||'<div class="notice-inline">The gallery is waiting for its first photo.</div>'}</div>`;
   if(state.pieceTab==='events')content=`<div class="section-row"><h2 class="section-heading">Events</h2>${(own||memberships.some(m=>m.piece_id===piece.id&&m.user_id===user.id&&m.role==='moderator'))?`<button class="btn sm" data-action="new-event">+ Create event</button>`:''}</div><div class="grid">${pieceEvents.filter(e=>e.piece_id===piece.id).map(e=>`<article class="post-card"><div class="post-meta">${new Date(e.starts_at).toLocaleString()}</div><h3>📅 ${esc(e.title)}</h3><p>${esc(e.description)}</p></article>`).join('')||'<p class="notice-inline">No upcoming events yet.</p>'}</div>`;
-  return header(piece.name,piece.is_public?'Public Piece · Chat / Forum / Gallery':'Private Piece',buttons)+`<div class="main-body piece-body"><div class="piece-top-scroll"><div class="content-pad"><section class="piece-hero layout-${esc(piece.layout_style||'classic')}"><div class="piece-banner" style="background:${piece.banner_url?`linear-gradient(135deg,#0009,#0004),url(${esc(validUrl(piece.banner_url))}) center/cover`:`linear-gradient(135deg,${esc(piece.color)},#35211a)`}">${own?`<button type="button" class="piece-hero-edit" data-action="edit-piece" title="Change Piece profile picture" aria-label="Change Piece picture">${pieceAvatar(piece,'piece-icon-hero')}<span class="piece-hero-pencil">✎</span></button>`:pieceAvatar(piece,'piece-icon-hero')}</div><div class="piece-info"><div><h2>${esc(piece.name)}</h2><p>${esc(piece.description||'Welcome to this Tender Piece!')}</p>${piece.welcome_text?`<p class="hint">✨ ${esc(piece.welcome_text)}</p>`:''}</div><span class="tag">${piece.is_public?'🌎 Public':'🔒 Private'}</span></div></section><nav class="tabs" aria-label="Piece sections">${[['chat','Chat'],['forum','Forum'],['gallery','Gallery'],['events','Events']].map(([id,label])=>`<button class="${state.pieceTab===id?'active':''}" data-action="piece-tab" data-tab="${id}">${ico(id==='gallery'?'image':id==='forum'?'forum':id==='events'?'bell':'chat','icon-sm')} ${label}</button>`).join('')}</nav>${state.pieceTab!=='chat'?content:''}</div></div>${state.pieceTab==='chat'?content:''}</div>`;
+  return header(state.pieceTab==='chat'?'# '+(selectedChannel(piece.id)?.name||'general'):piece.name,state.pieceTab==='chat'?(selectedChannel(piece.id)?.topic||'Piece text channel'):(piece.is_public?'Public Piece · Chat / Forum / Gallery':'Private Piece'),buttons)+`<div class="main-body piece-body"><div class="piece-top-scroll"><div class="content-pad"><section class="piece-hero layout-${esc(piece.layout_style||'classic')}"><div class="piece-banner" style="background:${piece.banner_url?`linear-gradient(135deg,#0009,#0004),url(&quot;${esc(validUrl(piece.banner_url))}&quot;) center/cover`:`linear-gradient(135deg,${esc(tenderSafeColor(piece.color))},${esc(tenderSafeColor(piece.color_secondary,'#293758'))})`}">${own?`<button type="button" class="piece-hero-edit" data-action="edit-piece" title="Change Piece profile picture" aria-label="Change Piece picture">${pieceAvatar(piece,'piece-icon-hero')}<span class="piece-hero-pencil">✎</span></button>`:pieceAvatar(piece,'piece-icon-hero')}</div><div class="piece-info theme-${esc(piece.theme_style||'classic')}"><div><h2 class="name-font-${nameStyles.includes(piece.name_style)?piece.name_style:'classic'}">${esc(piece.name)}</h2><p>${esc(piece.description||'Welcome to this Tender Piece!')}</p>${piece.welcome_text?`<p class="hint">✨ ${esc(piece.welcome_text)}</p>`:''}</div><span class="tag">${piece.is_public?'🌎 Public':'🔒 Private'}</span></div></section><nav class="tabs" aria-label="Piece sections">${[['chat','Chat'],['forum','Forum'],['gallery','Gallery'],['events','Events']].map(([id,label])=>`<button class="${state.pieceTab===id?'active':''}" data-action="piece-tab" data-tab="${id}">${ico(id==='gallery'?'image':id==='forum'?'forum':id==='events'?'bell':'chat','icon-sm')} ${label}</button>`).join('')}</nav>${state.pieceTab!=='chat'?content:''}</div></div>${state.pieceTab==='chat'?content:''}</div>`;
 }
 function renderSettings(){
  const sections=[['profile','user','My Profile'],['account','settings','My Account'],['appearance','palette','Appearance'],['notifications','bell','Notifications'],['privacy','shield','Privacy & Safety'],['accessibility','accessibility','Accessibility']];
@@ -1047,7 +1047,7 @@ function newPieceModal(p=null){
      <p class="hint">Upload a PNG, JPG or WEBP (max 3 MB), or keep an emoji icon.</p></div>
    </div>
    <div class="field"><label for="piece-pfp-file">Piece profile picture (optional)</label>
-     <input class="input" id="piece-pfp-file" name="piece_pfp" type="file" accept="image/png,image/jpeg,image/webp">
+     <input class="input" id="piece-pfp-file" name="piece_pfp" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
      <div class="piece-image-preview" id="piece-pfp-preview" hidden><img id="piece-pfp-preview-img" alt="Selected Piece picture preview"></div>
    </div>
    <div class="field"><label for="piece-icon-mode">Picture or emoji</label>
@@ -1062,6 +1062,12 @@ function newPieceModal(p=null){
    <div class="field"><label>Piece name</label><input class="input" name="name" minlength="2" maxlength="70" required value="${esc(p?.name||'')}" placeholder="My First Piece"></div>
    <div class="field"><label>Description</label><textarea class="input textarea" name="description" maxlength="500" placeholder="What is this Piece all about?">${esc(p?.description||'')}</textarea></div>
    <div class="field"><label>Accent color</label><input class="input" name="color" type="color" value="${esc(p?.color||'#f47735')}"></div>
+ ${visualReady?`<div class="piece-custom-grid">
+ <div class="field"><label>Secondary gradient color</label><input class="input" type="color" name="color_secondary" value="${esc(tenderSafeColor(p?.color_secondary,'#293758'))}"></div>
+ <div class="field"><label>Icon shape</label><select class="input" name="icon_shape">${['rounded','round','square','squircle'].map(v=>`<option value="${v}" ${p?.icon_shape===v?'selected':''}>${v}</option>`).join('')}</select></div>
+ <div class="field"><label>Community theme</label><select class="input" name="theme_style">${['classic','aurora','sunset','midnight','neon'].map(v=>`<option value="${v}" ${p?.theme_style===v?'selected':''}>${v}</option>`).join('')}</select></div>
+ <div class="field"><label>Piece name font</label><select class="input" name="name_style">${nameStyles.map(v=>`<option value="${v}" ${p?.name_style===v?'selected':''}>${v}</option>`).join('')}</select></div></div>
+ <div class="field"><label>Welcome message for new members</label><textarea name="channel_welcome" class="input textarea" maxlength="300" rows="2" placeholder="Welcome to our community!">${esc(p?.channel_welcome||'')}</textarea></div>`:''}
    <div class="field"><label>Visibility</label><select class="input" name="visibility">
      <option value="public" ${!p||p.is_public?'selected':''}>Public · Discoverable</option>
      <option value="private" ${p&&!p.is_public?'selected':''}>Private · Members only</option>
@@ -1391,12 +1397,19 @@ async function submitForm(form){switch(form.id){
   const old=pieceId?pieces.find(p=>p.id===pieceId):null;
   if(pieceId&&(!old||old.owner_id!==user.id))throw Error('Only the Piece owner can edit this Piece.');
   const image=d.get('piece_pfp'),banner=d.get('banner');
-  const mime=['image/png','image/jpeg','image/webp'];
+  const mime=['image/png','image/jpeg','image/webp','image/gif'];
   if(image?.size&&(image.size>3145728||!mime.includes(image.type)))throw Error('Choose a PNG, JPG or WEBP Piece picture under 3 MB.');
   if(banner?.size&&(banner.size>3145728||!mime.includes(banner.type)))throw Error('Choose a PNG, JPG or WEBP banner under 3 MB.');
   const emoji=String(d.get('icon_emoji')||'🍗').trim().slice(0,12)||'🍗';
   const mode=d.get('icon_mode');
   const updated={name,description,color,is_public};
+  if(visualReady){
+   const shape=String(d.get('icon_shape')||'rounded'),theme=String(d.get('theme_style')||'classic'),font=String(d.get('name_style')||'classic');
+   Object.assign(updated,{color_secondary:tenderSafeColor(d.get('color_secondary'),'#293758'),
+    icon_shape:['rounded','round','square','squircle'].includes(shape)?shape:'rounded',
+    theme_style:['classic','aurora','sunset','midnight','neon'].includes(theme)?theme:'classic',
+    name_style:nameStyles.includes(font)?font:'classic',channel_welcome:String(d.get('channel_welcome')||'').slice(0,300)});
+  }
   if(old){
     if(image?.size)updated.icon=(await uploadPublicAsset(image,'tender-banners',3145728,mime,'piece-avatar-'+old.id)).url;
     else if(mode==='emoji')updated.icon=emoji;
@@ -1409,16 +1422,18 @@ async function submitForm(form){switch(form.id){
     toast('Piece updated! 🍗');
   }else{
     const id=assert(await db.rpc('create_piece',{piece_name:name,piece_description:description,piece_color:color,piece_public:is_public}));
-    state.selected=id;state.area='pieces';state.pieceTab='chat';
-    if(image?.size||mode==='emoji'||emoji!=='🍗'){
+    state.selected=id;state.area='pieces';state.pieceTab='chat';state.channelId=null;
+    if(image?.size||mode==='emoji'||emoji!=='🍗'||visualReady){
       try{
         const icon=image?.size?(await uploadPublicAsset(image,'tender-banners',3145728,mime,'piece-avatar-'+id)).url:emoji;
-        assert(await q('pieces').update({icon}).eq('id',id).eq('owner_id',user.id));
+        const details=visualReady?{...updated,icon}:{icon};
+        if(extendedReady&&banner?.size)details.banner_url=(await uploadPublicAsset(banner,'tender-banners',3145728,mime,'piece-banner-'+id)).url;
+        assert(await q('pieces').update(details).eq('id',id).eq('owner_id',user.id));
       }catch(e){console.warn('Piece picture could not be set:',e);toast('Piece created, but the picture was not saved. You can retry in Edit Piece.',true)}
     }
     toast('Piece created! 🍗');
   }
-  closeModal();await refreshData();await loadActive();render();
+  closeModal();await refreshData();state.channelId=channelsFor(state.selected).find(c=>c.is_default)?.id||null;await loadActive();render();
 });
  case'post-form':return safe(async()=>{let d=new FormData(form);assert(await q('piece_posts').insert({piece_id:state.selected,author_id:user.id,title:String(d.get('title')).trim(),body:String(d.get('body')).trim(),...(extendedReady?{tags:String(d.get('tags')||'').split(',').map(x=>x.trim().replace(/[^a-z0-9_-]/gi,'').slice(0,24)).filter(Boolean).slice(0,5)}:{})}));closeModal();await loadActive();renderMain();toast('Discussion published!')});
  case'reply-form':return safe(async()=>{assert(await q('piece_comments').insert({post_id:selectedPost.id,author_id:user.id,body:String(new FormData(form).get('body')).trim()}));await postModal(selectedPost.id);toast('Reply posted!')});
