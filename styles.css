@@ -509,3 +509,33 @@ kbd{display:inline-block;background:var(--surface);border:1px solid var(--stroke
  .tender-confirm-actions{display:grid;grid-template-columns:1fr 1fr}
  .tender-confirm-actions .btn{min-width:0}
 }
+
+/* No invisible toolbars may take up message-row height. */
+.chat-scroll>.chat-bubble-wrap .bubble-actions{
+ display:none!important;position:absolute;z-index:11;right:18px;top:-12px;
+ align-items:center;flex-wrap:nowrap;gap:4px;opacity:1!important;
+ background:var(--panel2);border:1px solid var(--stroke);border-radius:9px;
+ padding:4px 6px!important;margin:0!important;min-height:34px;
+ box-shadow:0 8px 25px #0008;
+}
+.chat-scroll>.chat-bubble-wrap:hover .bubble-actions,
+.chat-scroll>.chat-bubble-wrap:focus-within .bubble-actions,
+.chat-scroll>.chat-bubble-wrap:focus .bubble-actions{display:flex!important}
+.chat-scroll>.chat-bubble-wrap .bubble-meta{display:none!important}
+.chat-scroll>.chat-bubble-wrap:hover .bubble-meta,
+.chat-scroll>.chat-bubble-wrap:focus-within .bubble-meta{
+ display:inline-flex!important;position:absolute!important;right:20px;
+ top:calc(100% - 5px);z-index:3;background:var(--panel);padding:2px 6px!important;
+ border-radius:5px;border:1px solid var(--stroke);white-space:nowrap
+}
+.chat-scroll>.chat-bubble-wrap{overflow:visible}
+.chat-scroll>.chat-bubble-wrap:hover{background:color-mix(in srgb,var(--surface) 50%,transparent)}
+.bubble-reactions{display:flex;flex-wrap:wrap;gap:5px;margin:5px 0 1px}
+.bubble-reactions:empty{display:none}
+.bubble-reactions .react-chip{border-radius:6px;padding:2px 8px;font-size:11px;min-height:23px}
+.chat-scroll>.chat-bubble-wrap:focus-visible{outline:1px solid var(--orange);outline-offset:0}
+@media(hover:none){
+ .chat-scroll>.chat-bubble-wrap:focus .bubble-actions,
+ .chat-scroll>.chat-bubble-wrap:focus-within .bubble-actions{display:flex!important}
+ .chat-scroll>.chat-bubble-wrap .bubble-actions{top:-11px;right:4px;max-width:calc(100% - 4px);overflow-x:auto}
+}
