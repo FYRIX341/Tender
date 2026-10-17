@@ -95,7 +95,7 @@ function railPieceHTML(){
  if(!user)return '';
  const joined=pieces.filter(p=>inPiece(p.id)).slice(0,80);
  return `<div class="rail-piece-divider" role="separator"></div><div class="rail-piece-list" aria-label="Your Pieces">
- ${joined.map(p=>`<button type="button" class="rail-piece ${state.selected===p.id&&['pieces','discover'].includes(state.area)?'active':''}" data-action="rail-piece" data-id="${esc(p.id)}" title="${esc(p.name)}" aria-label="Open Piece ${esc(p.name)}">${pieceAvatar(p)}${pieceUnreadCount(p.id)?`<span class="rail-piece-unread" aria-label="${pieceUnreadCount(p.id)} unread Piece messages">${Math.min(99,pieceUnreadCount(p.id))}</span>`:''}</button>`).join('')}
+ ${joined.map(p=>`<button type="button" class="rail-piece ${state.selected===p.id&&['pieces','discover'].includes(state.area)?'active':''} ${pieceUnreadCount(p.id)?'has-unread':''}" data-action="rail-piece" data-id="${esc(p.id)}" title="${esc(p.name)}" aria-label="Open Piece ${esc(p.name)}">${pieceAvatar(p)}${pieceUnreadCount(p.id)?`<span class="rail-piece-unread" aria-label="${pieceUnreadCount(p.id)} unread Piece messages">${Math.min(99,pieceUnreadCount(p.id))}</span>`:''}</button>`).join('')}
  </div><button type="button" class="rail-piece-add" data-action="new-piece" title="Create a Piece" aria-label="Create Piece">${ico('plus','icon-sm')}</button>`;
 }
 let unreadRefreshTimer=null;
@@ -1384,6 +1384,7 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='open-friend'){await goTo('friends',id);return}
  if(a==='rail-piece'){await goTo('pieces',id);return}
  if(a==='select-channel'){
+  if(!channelReady&&id===selectedChannel()?.id)return;
   const selected=pieceChannels.find(c=>c.id===id&&c.piece_id===state.selected);
   if(!selected||!inPiece(selected.piece_id))return toast('Channel unavailable.',true);
   if(state.channelId===id&&state.pieceTab==='chat')return;
