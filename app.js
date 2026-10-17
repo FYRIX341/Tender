@@ -214,7 +214,7 @@ async function markRead(cid=null,friend=false){if(!extendedReady||!user)return;t
  if(cid||friend){await db.rpc('mark_tender_notifications_read',{cid:cid||null,pid:null,include_friends:friend});notifications.forEach(n=>{if(cid&&n.conversation_id===cid||friend&&n.kind==='friend')n.is_read=true});renderSidebar();renderNavBadges();}
  }catch(e){console.warn('Read receipts:',e)}}
 function renderNavBadges(){const chatButton=document.querySelector('.rail-btn[data-area="chats"]'),friendButton=document.querySelector('.rail-btn[data-area="friends"]');for(const [el,n] of [[chatButton,notifications.filter(x=>x.kind==='message'&&!x.is_read).length],[friendButton,unreadFriends()]]){if(!el)continue;el.querySelector('.unread-badge')?.remove();if(n)el.insertAdjacentHTML('beforeend',renderBadge(n))}document.title=unreadAll()?`(${unreadAll()}) Tender 🍗`:'Tender 🍗'}
-function soundPing(){if(!my?.notification_sound||my?.presence_mode==='dnd')return;try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return;const c=new C(),o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.setValueAtTime(my.notification_tone==='soft'?480:my.notification_tone==='chime'?900:680,c.currentTime);o.frequency.exponentialRampToValueAtTime(my.notification_tone==='soft'?550:my.notification_tone==='chime'?1150:920,c.currentTime+.08);g.gain.setValueAtTime(.001,c.currentTime);g.gain.exponentialRampToValueAtTime(.04,c.currentTime+.02);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.17);o.connect(g).connect(c.destination);o.start();o.stop(c.currentTime+.2);o.onended=()=>c.close();}catch{}}
+function soundPing(){if(audioPrefs().deafened||!my?.notification_sound||my?.presence_mode==='dnd')return;try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return;const c=new C(),o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.setValueAtTime(my.notification_tone==='soft'?480:my.notification_tone==='chime'?900:680,c.currentTime);o.frequency.exponentialRampToValueAtTime(my.notification_tone==='soft'?550:my.notification_tone==='chime'?1150:920,c.currentTime+.08);g.gain.setValueAtTime(.001,c.currentTime);g.gain.exponentialRampToValueAtTime(.04,c.currentTime+.02);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.17);o.connect(g).connect(c.destination);o.start();o.stop(c.currentTime+.2);o.onended=()=>c.close();}catch{}}
 // Notifications require HTTPS and an explicit permission grant. The service worker
 // enables notifications on mobile while the Tender page is open; it is NOT a push server.
 let notificationWorkerPromise=null;
@@ -666,6 +666,7 @@ function renderMain(){const m=document.getElementById('main');if(!m)return;
  renderNavBadges();m.dataset.threadKey=newKey;
  const chatScroll=m.querySelector('.chat-scroll');
  if(chatScroll)chatScroll.scrollTop=pos&&oldKey===newKey&&!pos.near?pos.top:chatScroll.scrollHeight;
+ syncDeafenedAudio();
  renderInfoPanel()
 }
 function renderChat(c){const title=namesFor(c),otherId=c.kind!=='group'?(c.conversation_members||[]).find(x=>x.user_id!==user.id)?.user_id:null;return header(title,c.kind==='group'?`${(c.conversation_members||[]).length} members`:'Private conversation',`${otherId?`<button class="round-btn" data-action="open-profile" data-id="${esc(otherId)}" title="View profile" aria-label="View profile">${ico('users')}</button>`:''}<button class="round-btn" data-action="search" title="Search messages">${ico('search')}</button><button class="round-btn" data-action="chat-info" title="Conversation info">${ico('info')}</button><button class="round-btn" data-action="toggle-info" title="Toggle member panel">${ico('users')}</button><button class="round-btn" data-action="room-appearance" title="Customize this chat">🎨</button>`)+`<div class="main-body"><div class="chat-history">${pinnedHTML()}<div class="chat-scroll" id="chat-scroll">${activeMessages.length?activeMessages.map(x=>messageHTML(x,'message')).join(''):`<div class="chat-empty"><img src="buffalo.webp" alt="Buffalo"><h3>Start the conversation</h3><p class="hint">Say hi to ${esc(title)}!</p></div>`}</div><button type="button" class="chat-jump-new" id="chat-jump-new" data-action="jump-latest" hidden>↓ New messages · Jump to latest</button>${composer('chat',`Message ${title}`)}</div></div>`}
@@ -933,6 +934,52 @@ async function sendMessage(form){let text=String(new FormData(form).get('body')|
 }
 const galleryUrl=path=>db.storage.from('tender-gallery').getPublicUrl(path).data.publicUrl;
 async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=el.dataset.tab;try{
+ if(a==='account-menu-toggle'){
+  const menu=document.getElementById('tender-account-menu');
+  if(menu){menu.hidden=!menu.hidden;el.setAttribute('aria-expanded',String(!menu.hidden));}
+  return;
+ }
+ if(a==='account-profile'){closeAccountMenu();await showProfile(user.id);return}
+ if(a==='account-settings'){closeAccountMenu();state.settingsTab='profile';await goTo('settings');return}
+ if(a==='account-copy-id'){
+  closeAccountMenu();
+  try{if(!navigator.clipboard?.writeText)throw Error('Clipboard unavailable');await navigator.clipboard.writeText(user.id);toast('Your Tender user ID was copied. 🍗')}
+  catch{modal('Copy your Tender ID','This identifies your account, not your password.',`<label class="field"><span>Your user ID</span><input class="input" id="tender-user-id-copy" readonly value="${esc(user.id)}"></label>`);document.getElementById('tender-user-id-copy')?.select();}
+  return;
+ }
+ if(a==='account-switch'){
+  closeAccountMenu();
+  if(!await tenderConfirm('Switch Tender accounts?','Your current session will end on this device. Sign in using your other account to continue.','Switch accounts',false))return;
+  await safe(async()=>{assert(await db.auth.signOut());unsub();reset();state.loginMode='login';renderAuth()});
+  return;
+ }
+ if(a==='account-presence'){
+  const value=String(el.dataset.value||'');
+  if(!availability.some(x=>x[0]===value))return;
+  if(!extendedReady)return toast('Presence settings require Tender account features.',true);
+  await safe(async()=>{
+   assert(await q('profiles').update({presence_mode:value}).eq('id',user.id));
+   cacheUpdatedProfile({presence_mode:value});
+   renderAccountDock(true);
+   toast('Status set to '+availability.find(x=>x[0]===value)[1]+'.');
+  });
+  return;
+ }
+ if(a==='account-mic'){
+  const audio=audioPrefs();
+  if(!audio.micMuted&&voiceRecorder?.state==='recording')return toast('Finish recording your voice note before muting the microphone.',true);
+  audio.micMuted=!audio.micMuted;
+  saveAudioPrefs(audio);renderAccountDock(false);
+  toast(audio.micMuted?'Tender microphone muted for voice notes.':'Tender microphone ready for voice notes.');
+  return;
+ }
+ if(a==='account-deafen'){
+  const audio=audioPrefs();
+  audio.deafened=!audio.deafened;saveAudioPrefs(audio);
+  syncDeafenedAudio();renderAccountDock(false);
+  toast(audio.deafened?'Tender sounds muted. 🔇':'Tender sounds enabled. 🔊');
+  return;
+ }
  if(a==='trivia-answer'){const box=document.getElementById('trivia-result');if(box){box.textContent=el.dataset.correct==='1'?'✅ Nice! Buffalo approves. 🍗':'Not quite! Try another round.';box.style.color=el.dataset.correct==='1'?'#70ddb6':'#ffad80';document.querySelectorAll('.trivia-answer').forEach(b=>b.disabled=true)}return}
   if(a==='insert-slash'||a==='insert-mention'){const field=document.getElementById('message-box');if(!field)return;if(a==='insert-slash')field.value='/'+el.dataset.command+' ';else field.value=field.value.replace(/@[a-z0-9_]*$/i,'@'+el.dataset.handle+' ');field.focus();updateComposerAssist(field);field.dispatchEvent(new Event('input',{bubbles:true}));return}
   if(a==='copy-piece-link'){invitePieceModal(selectedPiece());return}
@@ -1205,7 +1252,7 @@ document.addEventListener('dblclick',event=>{
  const handle=event.target.closest?.('[data-split]');if(handle)updateSplitWidth(handle.dataset.split,splitterSpec[handle.dataset.split].initial,true);
 });
 document.addEventListener('submit',event=>{if(event.target.matches('form')){event.preventDefault();submitForm(event.target).catch(e=>{console.error(e);toast(e.message||'Error',true)})}});
-document.addEventListener('click',event=>{let t=event.target.closest('[data-action]');if(!t)return;if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
+document.addEventListener('click',event=>{if(!event.target.closest?.('.sidebar-account-dock'))closeAccountMenu();let t=event.target.closest('[data-action]');if(!t)return;if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
 document.addEventListener('input',e=>{if(e.target.id==='message-box'&&user&&state.selected){const key='tender-draft:'+user.id+':'+[state.area,state.selected,state.pieceTab].join(':');if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
 // Type-to-chat works like a desktop messenger: printable keystrokes land
 // in the current composer, never in settings or behind an open modal.
@@ -1236,7 +1283,7 @@ document.addEventListener('keydown',e=>{
    const value=e.key==='Home'?spec.initial:readSplitWidth(which)+dir*(e.key==='ArrowRight'?16:-16);
    updateSplitWidth(which,value,true);return;
  }
- if(e.key==='Escape')closeModal();if(e.key==='Enter'&&!e.shiftKey&&e.target.id==='message-box'){e.preventDefault();e.target.closest('form')?.requestSubmit()}if(e.key==='Enter'&&e.target.getAttribute('role')==='button')e.target.click()});
+ if(e.key==='Escape'){closeAccountMenu();closeModal()}if(e.key==='Enter'&&!e.shiftKey&&e.target.id==='message-box'){e.preventDefault();e.target.closest('form')?.requestSubmit()}if(e.key==='Enter'&&e.target.getAttribute('role')==='button')e.target.click()});
 document.addEventListener('change',e=>{
   if(e.target.id==='tender-theme-import'){
     const file=e.target.files?.[0];if(!file)return;
@@ -1271,12 +1318,14 @@ document.addEventListener('change',e=>{
  if(e.target.matches('.role-assign')&&e.target.value){const role=e.target.dataset.role;const userId=e.target.value;safe(async()=>{assert(await q('piece_role_assignments').insert({role_id:role,user_id:userId}));toast('Role assigned!')})}
 });
 let dragDepth=0;
+document.addEventListener('play',e=>{if(audioPrefs().deafened&&e.target?.matches?.('audio,video'))syncDeafenedAudio()},true);
 document.addEventListener('scroll',e=>{if(!e.target?.matches?.('.chat-scroll'))return;const pill=document.getElementById('chat-jump-new');if(pill&&e.target.scrollHeight-e.target.scrollTop-e.target.clientHeight<55)pill.hidden=true},true);
 document.addEventListener('dragover',e=>{if(e.dataTransfer?.types?.includes('Files')&&document.querySelector('#composer-form')){e.preventDefault();document.body.classList.add('dragover')}});
 document.addEventListener('dragleave',e=>{if(e.relatedTarget===null)document.body.classList.remove('dragover')});
 document.addEventListener('drop',e=>{if(!document.querySelector('#composer-form'))return;e.preventDefault();document.body.classList.remove('dragover');const file=e.dataTransfer?.files?.[0],input=document.getElementById('message-file');if(file&&input){const transfer=new DataTransfer();transfer.items.add(file);input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}))}});
 async function toggleVoiceRecording(){
  if(voiceRecorder&&voiceRecorder.state==='recording'){voiceRecorder.stop();return}
+ if(audioPrefs().micMuted){toast('Your Tender microphone is muted. Unmute it in your account dock to record a voice note.',true);return}
  if(!navigator.mediaDevices?.getUserMedia||typeof MediaRecorder==='undefined'){toast('Voice recording unavailable in this browser.',true);return}
  try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});voiceChunks=[];const mime=['audio/webm','audio/ogg','audio/mp4'].find(t=>MediaRecorder.isTypeSupported(t));voiceRecorder=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);voiceRecorder.ondataavailable=e=>{if(e.data?.size)voiceChunks.push(e.data)};
  voiceRecorder.onstop=()=>{stream.getTracks().forEach(t=>t.stop());const type=voiceRecorder.mimeType||'audio/webm',extension=type.includes('ogg')?'ogg':type.includes('mp4')?'mp4':'webm';const blob=new Blob(voiceChunks,{type});if(blob.size>5*1024*1024){toast('Voice note too large. Maximum 5 MB.',true);return}recordedVoice=new File([blob],'Voice-message.'+extension,{type});const label=document.getElementById('file-status');if(label)label.textContent='🎙️ Voice note ready. Press Send!';toast('Voice note ready!')};voiceRecorder.start();const label=document.getElementById('file-status');if(label)label.textContent='🔴 Recording… press microphone again to stop.';
