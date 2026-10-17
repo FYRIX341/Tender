@@ -356,6 +356,7 @@ async function refreshExtras(){
  }catch(e){console.warn('0.2 optional features unavailable',e)}
  try{const probe=await q('profiles').select('pronouns').limit(1);pronounsReady=!probe.error}catch{pronounsReady=false}
  try{const probe=await q('piece_messages').select('reply_to').limit(1);pieceRepliesReady=!probe.error}catch{pieceRepliesReady=false}
+ try{const probe=await q('profiles').select('name_style,name_effect,profile_gradient_start').limit(1);visualReady=!probe.error}catch{visualReady=false}
  applyTheme();
 }
 async function loadPolls(){activePolls=[];activePollVotes=[];if(!extendedReady||state.area!=='chats'||!state.selected)return;const ids=activeMessages.map(m=>m.poll_id).filter(Boolean);if(!ids.length)return;const [p,v]=await Promise.all([q('polls').select('*').in('id',ids),q('poll_votes').select('*').in('poll_id',ids)]);if(!p.error)activePolls=p.data||[];if(!v.error)activePollVotes=v.data||[]}
@@ -516,10 +517,10 @@ function profileCardHTML(person){
  const isSelf=person.id===user?.id;
  return `<div class="tender-profile-dialog">
   <section class="profile-dialog-identity">
-   <div class="profile-dialog-banner" ${person.banner_url?`style="background-image:linear-gradient(#07091440,#07091499),url(&quot;${esc(validUrl(person.banner_url))}&quot;)"`:''}></div>
+   <div class="profile-dialog-banner" style="${profileGradientStyle(person)}${person.banner_url?`background-image:linear-gradient(#07091440,#07091499),url(&quot;${esc(validUrl(person.banner_url))}&quot;);`:''}"></div>
    <div class="profile-dialog-id">
     <div class="profile-dialog-avatar effect-${esc(person.profile_effect||'none')}">${avatars(person)}</div>
-    <div class="profile-dialog-name-row"><div><h2>${esc(person.display_name||'Tender member')}</h2><p>@${esc(person.handle||'member')}${person.pronouns?' · '+esc(person.pronouns):''}</p></div>${profileStatus(person)}</div>
+    <div class="profile-dialog-name-row"><div>${styledName(person,'h2')}<p>@${esc(person.handle||'member')}${person.pronouns?' · '+esc(person.pronouns):''}</p></div>${profileStatus(person)}</div>
     ${person.game_status?`<div class="profile-dialog-status">${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</div>`:''}
     <div class="profile-dialog-buttons">${profileActions(person)}</div>
     <div class="profile-dialog-meta"><span>🍗 Tender member</span><span>${isSelf?'Your profile':'Public profile'}</span></div>
@@ -578,7 +579,11 @@ async function showProfile(id){
  if(!person)return toast('Profile unavailable.',true);
  modal(person.display_name||'Member profile','Tender profile',profileCardHTML(person));
 }
-function profileBanner(p){const isSelf=p.id===user?.id;return `<div class="profile-banner crispy-profile effect-${esc(p.profile_effect||'none')}" style="${profileGradientStyle(p)}" ${p.banner_url?`style="background-image:linear-gradient(0deg,#17191d7a,transparent),url('${esc(validUrl(p.banner_url))}')"`:''}>${avatars(p)}${isSelf?'<span class="banner-hint">Your Tender profile</span>':''}</div>`}
+function profileBanner(p){
+ const isSelf=p.id===user?.id;
+ return `<div class="profile-banner crispy-profile effect-${esc(p.profile_effect||'none')}" style="${profileGradientStyle(p)}${p.banner_url?`background-image:linear-gradient(0deg,#17191d7a,transparent),url(&quot;${esc(validUrl(p.banner_url))}&quot;);`:''}">${avatars(p)}${isSelf?'<span class="banner-hint">Your Tender profile</span>':''}</div>`;
+}
+
 async function uploadPublicAsset(file,bucket,limit,mimes,prefix){if(!file||file.size>limit||!mimes.includes(file.type))throw Error('This file type or size is not supported.');const extension=({"image/png":"png","image/jpeg":"jpg","image/webp":"webp","image/gif":"gif"})[file.type];const path=`${user.id}/${prefix}-${crypto.randomUUID()}.${extension}`;assert(await db.storage.from(bucket).upload(path,file,{contentType:file.type,upsert:false}));return {url:db.storage.from(bucket).getPublicUrl(path).data.publicUrl,path}}
 function deviceNotificationsPanel(){
  const secure=window.isSecureContext===true,enabled=secure&&typeof Notification!=='undefined';
@@ -950,8 +955,19 @@ function renderSettings(){
   <div class="settings-two-fields"><div class="field"><label>Custom text status</label><input class="input" name="game_status" maxlength="90" value="${esc(my.game_status||'')}" placeholder="What's on your mind?"></div>
   ${extendedReady?`<div class="field"><label>Status emoji</label><input class="input" name="status_emoji" maxlength="12" value="${esc(my.status_emoji||'🍗')}"></div>`:''}</div>
   <div class="settings-actions"><button class="btn" type="submit">Save profile</button></div></form></div>
-  <div class="settings-card"><h3>Avatar & banner</h3><p class="hint">Your pictures are visible to other Tender members.</p>
-  <div class="settings-two-fields"><div class="field"><label>Upload avatar (2 MB)</label><input type="file" class="input" id="avatar-file" accept="image/png,image/jpeg,image/webp"></div>
+  ${visualReady?`<div class="settings-card free-nitro-studio"><h3>✨ Free profile studio</h3><p>Gradients, name fonts and effects — free for every Tender member!</p>
+ <form id="profile-style-form" class="settings-fields">
+ <div class="settings-two-fields">
+ <div class="field"><label>Profile gradient: start</label><input class="input" type="color" name="profile_gradient_start" value="${esc(tenderSafeColor(my.profile_gradient_start,'#21385d'))}"></div>
+ <div class="field"><label>Profile gradient: end</label><input class="input" type="color" name="profile_gradient_end" value="${esc(tenderSafeColor(my.profile_gradient_end,'#563561'))}"></div>
+ <div class="field"><label>Display name font</label><select class="input" name="name_style">${nameStyles.map(style=>`<option value="${style}" ${my.name_style===style?'selected':''}>${style[0].toUpperCase()+style.slice(1)}</option>`).join('')}</select></div>
+ <div class="field"><label>Display name effect</label><select class="input" name="name_effect">${nameEffects.map(effect=>`<option value="${effect}" ${my.name_effect===effect?'selected':''}>${effect[0].toUpperCase()+effect.slice(1)}</option>`).join('')}</select></div>
+ <div class="field"><label>Solid / neon text color</label><input class="input" type="color" name="name_color" value="${esc(tenderSafeColor(my.name_color,'#ffffff'))}"></div>
+ </div>
+ <div class="profile-name-preview">${styledName(my)}</div><button type="submit" class="btn">Apply free profile style</button>
+ </form></div>`:'<div class="settings-card"><h3>Free profile gradients & fonts</h3><p>These features activate automatically when Tender 0.4 database setup finishes.</p></div>'}
+<div class="settings-card"><h3>Avatar & banner</h3><p class="hint">Your pictures are visible to other Tender members.</p>
+  <div class="settings-two-fields"><div class="field"><label>Upload avatar (2 MB — PNG, WEBP, GIF)</label><input type="file" class="input" id="avatar-file" accept="image/png,image/jpeg,image/webp,image/gif"></div>
   <div class="field"><label>Upload banner (3 MB)</label><input class="input" id="banner-file" type="file" accept="image/png,image/jpeg,image/webp"></div></div></div>`;
  if(tab==='account')content=`<div class="settings-section-head"><span class="eyebrow">ACCOUNT</span><h1>My Account</h1><p>See your account details, current user identity and personal profile.</p></div>
   <div class="settings-card"><div class="account-identity">${avatars(my)}<div><h3>${esc(my.display_name)}</h3><p>@${esc(my.handle)}</p></div><button class="btn sm secondary" data-action="settings-tab" data-tab="profile">Edit profile</button></div><div class="settings-readonly"><span>Account email</span><strong>${esc(user.email||'Available in your sign-in provider')}</strong></div><div class="settings-readonly"><span>User ID</span><code>${esc(user.id)}</code></div><p class="hint">Password and email updates are managed securely by your sign-in provider. Never share your password.</p></div>
@@ -1407,6 +1423,17 @@ async function submitForm(form){switch(form.id){
  case'post-form':return safe(async()=>{let d=new FormData(form);assert(await q('piece_posts').insert({piece_id:state.selected,author_id:user.id,title:String(d.get('title')).trim(),body:String(d.get('body')).trim(),...(extendedReady?{tags:String(d.get('tags')||'').split(',').map(x=>x.trim().replace(/[^a-z0-9_-]/gi,'').slice(0,24)).filter(Boolean).slice(0,5)}:{})}));closeModal();await loadActive();renderMain();toast('Discussion published!')});
  case'reply-form':return safe(async()=>{assert(await q('piece_comments').insert({post_id:selectedPost.id,author_id:user.id,body:String(new FormData(form).get('body')).trim()}));await postModal(selectedPost.id);toast('Reply posted!')});
  case'gallery-form':return safe(async()=>{let d=new FormData(form),file=d.get('file');if(!file?.size||file.size>5*1024*1024||!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type))throw Error('Choose a PNG/JPG/WEBP/GIF under 5 MB.');let path=`${state.selected}/${user.id}/${crypto.randomUUID()}.${file.name.split('.').pop().toLowerCase()}`;assert(await db.storage.from('tender-gallery').upload(path,file,{contentType:file.type}));try{assert(await q('piece_gallery').insert({piece_id:state.selected,author_id:user.id,image_path:path,caption:String(d.get('caption')).trim()}))}catch(e){await db.storage.from('tender-gallery').remove([path]);throw e}closeModal();await loadActive();renderMain();toast('Image uploaded!')});
+ case'profile-style-form':return safe(async()=>{
+  if(!visualReady)throw Error('Wait for the Tender 0.4 profile update.');
+  const d=new FormData(form),style=String(d.get('name_style')),effect=String(d.get('name_effect'));
+  const updates={profile_gradient_start:tenderSafeColor(d.get('profile_gradient_start'),'#21385d'),
+   profile_gradient_end:tenderSafeColor(d.get('profile_gradient_end'),'#563561'),
+   name_style:nameStyles.includes(style)?style:'classic',
+   name_effect:nameEffects.includes(effect)?effect:'solid',
+   name_color:tenderSafeColor(d.get('name_color'),'#ffffff')};
+  assert(await q('profiles').update(updates).eq('id',user.id));cacheUpdatedProfile(updates);renderMain();renderSidebar();
+  toast('Profile style saved for everyone to see — FREE! ✨');
+ });
  case'profile-form':return safe(async()=>{
   const d=new FormData(form),upd={
     display_name:String(d.get('display_name')||'').trim().slice(0,40),
@@ -1581,7 +1608,7 @@ document.addEventListener('change',e=>{
    return;
  }
  if(e.target.id==='avatar-file'||e.target.id==='banner-file'){
- const file=e.target.files[0];if(!file)return;safe(async()=>{const isAvatar=e.target.id==='avatar-file';const asset=await uploadPublicAsset(file,isAvatar?'tender-avatars':'tender-banners',isAvatar?2097152:3145728,['image/png','image/jpeg','image/webp'],isAvatar?'avatar':'banner');assert(await q('profiles').update(isAvatar?{avatar_url:asset.url}:{banner_url:asset.url}).eq('id',user.id));await refreshData();render();toast(isAvatar?'Profile picture updated!':'Banner updated!')});}
+ const file=e.target.files[0];if(!file)return;safe(async()=>{const isAvatar=e.target.id==='avatar-file';const asset=await uploadPublicAsset(file,isAvatar?'tender-avatars':'tender-banners',isAvatar?2097152:3145728,isAvatar?['image/png','image/jpeg','image/webp','image/gif']:['image/png','image/jpeg','image/webp'],isAvatar?'avatar':'banner');assert(await q('profiles').update(isAvatar?{avatar_url:asset.url}:{banner_url:asset.url}).eq('id',user.id));await refreshData();render();toast(isAvatar?'Profile picture updated!':'Banner updated!')});}
  if(e.target.id==='message-file'){const label=document.getElementById('file-status');if(label)label.textContent=e.target.files?.[0]?`📎 ${e.target.files[0].name}`:''}
  if(e.target.matches('.core-role-change')&&e.target.value){const uid=e.target.dataset.person,role=e.target.value;safe(async()=>{assert(await db.rpc('set_piece_member_role',{pid:state.selected,uid,new_role:role}));await refreshData();toast('Member role updated!')})}
  if(e.target.matches('.role-assign')&&e.target.value){const role=e.target.dataset.role;const userId=e.target.value;safe(async()=>{assert(await q('piece_role_assignments').insert({role_id:role,user_id:userId}));toast('Role assigned!')})}
