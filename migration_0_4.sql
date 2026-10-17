@@ -71,6 +71,15 @@ CREATE TABLE IF NOT EXISTS public.piece_channel_reads(
 );
 ALTER TABLE public.piece_channels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.piece_channel_reads ENABLE ROW LEVEL SECURITY;
+-- First migration: don't mark years of previously read #general history as new.
+-- New messages after installation will still receive unread markers normally.
+INSERT INTO public.piece_channel_reads(channel_id,user_id,last_read_at)
+ SELECT c.id,pm.user_id,now()
+ FROM public.piece_channels c
+ JOIN public.piece_members pm ON pm.piece_id=c.piece_id
+ WHERE c.is_default
+ ON CONFLICT(channel_id,user_id) DO NOTHING;
+
 DROP POLICY IF EXISTS "tender channels visible" ON public.piece_channels;
 CREATE POLICY "tender channels visible" ON public.piece_channels FOR SELECT TO authenticated
  USING(public.can_view_piece(piece_id));
