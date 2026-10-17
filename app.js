@@ -39,6 +39,20 @@ const esc=(value='')=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<'
 const fmt = iso => {try{return new Date(iso).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});}catch{return ''}};
 const relative = iso => {let d=(Date.now()-new Date(iso).getTime())/1000;return d<60?'just now':d<3600?Math.floor(d/60)+'m ago':d<86400?Math.floor(d/3600)+'h ago':new Date(iso).toLocaleDateString();};
 const validUrl = url => {try{let u=new URL(url,location.origin);return ['http:','https:'].includes(u.protocol)?u.href:'#';}catch{return '#'}};
+const tenderSafeColor=(value,fallback='#f47735')=>/^#[0-9a-f]{6}$/i.test(String(value||''))?value:fallback;
+const nameStyles=['classic','serif','mono','rounded','display','retro'];
+const nameEffects=['solid','gradient','neon','shadow'];
+function styledName(person,tag='span'){
+ const style=nameStyles.includes(person?.name_style)?person.name_style:'classic';
+ const effect=nameEffects.includes(person?.name_effect)?person.name_effect:'solid';
+ const color=tenderSafeColor(person?.name_color,'#ffffff');
+ const first=tenderSafeColor(person?.profile_gradient_start,'#21385d'),second=tenderSafeColor(person?.profile_gradient_end,'#563561');
+ return `<${tag} class="tender-styled-name name-font-${style} name-effect-${effect}" style="--name-color:${esc(color)};--name-gradient-a:${esc(first)};--name-gradient-b:${esc(second)}">${esc(person?.display_name||'Tender member')}</${tag}>`;
+}
+function profileGradientStyle(p){
+ const a=tenderSafeColor(p?.profile_gradient_start,'#21385d'),b=tenderSafeColor(p?.profile_gradient_end,'#563561');
+ return `--profile-start:${esc(a)};--profile-end:${esc(b)};`;
+}
 const avatars = p => `<span class="avatar md">${p?.avatar_url?`<img src="${esc(validUrl(p.avatar_url))}" alt="">`:esc((p?.display_name||p?.handle||'?').slice(0,1).toUpperCase())}</span>`;
 // Piece avatars reuse the existing text "icon" column: HTTPS storage image URL or legacy emoji.
 // Existing emoji icons remain compatible; no SQL migration is necessary.
@@ -47,8 +61,8 @@ function pieceAvatar(p,extra=''){
  const color=/^#[0-9a-f]{6}$/i.test(p?.color||'')?p.color:'#f47735';
  return `<span class="piece-avatar ${esc(extra)}" style="background:${esc(color)}33">${pieceHasPhoto(p)?`<img class="piece-avatar-image" src="${esc(validUrl(p.icon))}" alt="" loading="lazy">`:esc(p?.icon||'🍗')}</span>`;
 }
-const profileFace=p=>`<button type="button" class="profile-click profile-face" data-action="open-profile" data-id="${esc(p.id||'')}" aria-label="View ${esc(p.display_name||'member')}'s profile" title="View profile">${avatars(p)}</button>`;
-const profileName=p=>`<button type="button" class="profile-click profile-name" data-action="open-profile" data-id="${esc(p.id||'')}" title="View ${esc(p.display_name||'member')}'s profile">${esc(p.display_name||'Tender member')}</button>`;
+const profileFace=p=>`<button type="button" class="profile-click profile-face" data-action="mini-profile" data-id="${esc(p.id||'')}" aria-label="View ${esc(p.display_name||'member')}'s profile" title="View profile">${avatars(p)}</button>`;
+const profileName=p=>`<button type="button" class="profile-click profile-name" data-action="mini-profile" data-id="${esc(p.id||'')}" title="View ${esc(p.display_name||'member')}'s profile">${styledName(p)}</button>`;
 const config = window.TENDER_CONFIG || {};
 let db, session, user, my, profiles=[], friendships=[], conversations=[], pieces=[], memberships=[], activeMessages=[], activePosts=[], activeGallery=[], activeComments=[], activeReactions=[], activeMembers=[], selectedPost=null, channel=null;
 let state={area:'chats', selected:null, channelId:null, pieceTab:'chat', settingsTab:'profile', search:'', loginMode:'login', mobileDetail:false, setup:false, busy:false, authReady:false};
@@ -518,6 +532,42 @@ function profileCardHTML(person){
   </section>
  </div>`;
 }
+// Small Discord-inspired popover: tapping an avatar never forces the large modal.
+function closeMiniProfile(){
+ document.getElementById('tender-mini-profile')?.remove();
+}
+function miniProfileHTML(person){
+ return `<div class="mini-profile-banner" style="${profileGradientStyle(person)}${person.banner_url?`background-image:linear-gradient(#0002,#0005),url(&quot;${esc(validUrl(person.banner_url))}&quot;);`:''}"></div>
+ <div class="mini-profile-content">
+  <div class="mini-profile-avatar">${avatars(person)}${presenceDotHTML(activePresence(person.id))}</div>
+  <div class="mini-profile-identity">${styledName(person,'h3')}<small>@${esc(person.handle||'member')}${person.pronouns?' · '+esc(person.pronouns):''}</small></div>
+  ${person.game_status?`<p class="mini-profile-status">${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</p>`:''}
+  <div class="mini-profile-bio">${esc((person.bio||'No bio yet. 🍗').slice(0,240)).replace(/\n/g,'<br>')}</div>
+  <div class="mini-profile-buttons">${profileActions(person,true)}<button type="button" class="btn secondary sm" data-action="open-full-profile" data-id="${esc(person.id)}">Full profile ${ico('external','icon-sm')}</button></div>
+ </div>`;
+}
+async function showMiniProfile(id,trigger){
+ if(!user||!id)return;
+ const existing=document.getElementById('tender-mini-profile');
+ if(existing?.dataset.userId===id){closeMiniProfile();return}
+ closeMiniProfile();
+ let person=profiles.find(p=>p.id===id);
+ if(!person){const r=await q('profiles').select('*').eq('id',id).maybeSingle();if(r.error)throw r.error;person=r.data}
+ if(!person)return toast('Profile unavailable.',true);
+ const el=document.createElement('div');el.id='tender-mini-profile';el.className='tender-mini-profile';el.dataset.userId=id;
+ el.setAttribute('role','dialog');el.setAttribute('aria-label','Profile of '+(person.display_name||'member'));
+ el.innerHTML=miniProfileHTML(person);
+ document.body.appendChild(el);
+ const rect=trigger?.getBoundingClientRect?.()||{left:24,right:60,top:100,bottom:125};
+ const width=Math.min(320,window.innerWidth-20),height=el.offsetHeight||335;
+ const left=Math.max(10,Math.min(window.innerWidth-width-10,rect.right+12+width>window.innerWidth?rect.left-width-12:rect.right+12));
+ const top=Math.max(10,Math.min(window.innerHeight-height-10,rect.top-45));
+ el.style.left=left+'px';el.style.top=top+'px';el.style.width=width+'px';
+}
+document.addEventListener('pointerdown',event=>{
+ const pop=document.getElementById('tender-mini-profile');
+ if(pop&&!pop.contains(event.target)&&!event.target.closest?.('[data-action="mini-profile"]'))closeMiniProfile();
+},true);
 async function showProfile(id){
  if(!id||!user)return;
  let person=profiles.find(p=>p.id===id);
@@ -528,7 +578,7 @@ async function showProfile(id){
  if(!person)return toast('Profile unavailable.',true);
  modal(person.display_name||'Member profile','Tender profile',profileCardHTML(person));
 }
-function profileBanner(p){const isSelf=p.id===user?.id;return `<div class="profile-banner crispy-profile effect-${esc(p.profile_effect||'none')}" ${p.banner_url?`style="background-image:linear-gradient(0deg,#17191d7a,transparent),url('${esc(validUrl(p.banner_url))}')"`:''}>${avatars(p)}${isSelf?'<span class="banner-hint">Your Tender profile</span>':''}</div>`}
+function profileBanner(p){const isSelf=p.id===user?.id;return `<div class="profile-banner crispy-profile effect-${esc(p.profile_effect||'none')}" style="${profileGradientStyle(p)}" ${p.banner_url?`style="background-image:linear-gradient(0deg,#17191d7a,transparent),url('${esc(validUrl(p.banner_url))}')"`:''}>${avatars(p)}${isSelf?'<span class="banner-hint">Your Tender profile</span>':''}</div>`}
 async function uploadPublicAsset(file,bucket,limit,mimes,prefix){if(!file||file.size>limit||!mimes.includes(file.type))throw Error('This file type or size is not supported.');const extension=({"image/png":"png","image/jpeg":"jpg","image/webp":"webp","image/gif":"gif"})[file.type];const path=`${user.id}/${prefix}-${crypto.randomUUID()}.${extension}`;assert(await db.storage.from(bucket).upload(path,file,{contentType:file.type,upsert:false}));return {url:db.storage.from(bucket).getPublicUrl(path).data.publicUrl,path}}
 function deviceNotificationsPanel(){
  const secure=window.isSecureContext===true,enabled=secure&&typeof Notification!=='undefined';
@@ -1181,7 +1231,9 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
   if(a==='toggle-info'){const visible=localStorage.getItem('tender-info-hidden')==='1';localStorage.setItem('tender-info-hidden',visible?'0':'1');renderInfoPanel();return}
   if(a==='toggle-rail'){const expanded=localStorage.getItem('tender-rail-expanded')==='1';localStorage.setItem('tender-rail-expanded',expanded?'0':'1');document.getElementById('app-screen')?.classList.toggle('rail-expanded',!expanded);return}
   if(a==='open-profile-piece'){closeModal();await goTo('pieces',id);return}
-   if(a==='open-profile'){await showProfile(id);return}
+   if(a==='mini-profile'){await showMiniProfile(id,el);return}
+ if(a==='open-full-profile'){closeMiniProfile();await showProfile(id);return}
+ if(a==='open-profile'){closeMiniProfile();await showProfile(id);return}
   if(a==='open-alerts'){alertsModal();return}
  if(a==='open-alert'){closeModal();if(el.dataset.cid)await goTo('chats',el.dataset.cid);else await goTo('friends');return}
  if(a==='confirm-yes'){settleConfirm(true);return}
@@ -1223,8 +1275,8 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='goto-piece-message'){closeModal();await goTo('pieces',el.dataset.cid);document.querySelector('[data-message-id="'+CSS.escape(id)+'"]')?.scrollIntoView({behavior:'smooth',block:'center'});return}
   if(a==='goto-message'){closeModal();await goTo('chats',el.dataset.cid);document.querySelector(`[data-message-id="${CSS.escape(id)}"]`)?.scrollIntoView({behavior:'smooth',block:'center'});return}
  if(a==='auth-tab'){state.loginMode=tab;renderAuth();return}
- if(a==='area'){await goTo(el.dataset.area);return}
- if(a==='go-back'){state.mobileDetail=false;state.selected=null;render();return}
+ if(a==='area'){closeMiniProfile();await goTo(el.dataset.area);return}
+ if(a==='go-back'){closeMiniProfile();state.mobileDetail=false;state.selected=null;render();return}
  if(a==='open-chat'){await goTo('chats',id);return}
  if(a==='open-friend'){await goTo('friends',id);return}
  if(a==='rail-piece'){await goTo('pieces',id);return}
@@ -1500,7 +1552,7 @@ document.addEventListener('keydown',e=>{
    const value=e.key==='Home'?spec.initial:readSplitWidth(which)+dir*(e.key==='ArrowRight'?16:-16);
    updateSplitWidth(which,value,true);return;
  }
- if(e.key==='Escape'){closeAccountMenu();closeModal()}if(e.key==='Enter'&&!e.shiftKey&&e.target.id==='message-box'){e.preventDefault();e.target.closest('form')?.requestSubmit()}if(e.key==='Enter'&&e.target.getAttribute('role')==='button')e.target.click()});
+ if(e.key==='Escape'){closeMiniProfile();closeAccountMenu();closeModal()}if(e.key==='Enter'&&!e.shiftKey&&e.target.id==='message-box'){e.preventDefault();e.target.closest('form')?.requestSubmit()}if(e.key==='Enter'&&e.target.getAttribute('role')==='button')e.target.click()});
 document.addEventListener('change',e=>{
   if(e.target.id==='tender-theme-import'){
     const file=e.target.files?.[0];if(!file)return;
