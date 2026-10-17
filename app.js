@@ -200,6 +200,305 @@ function updatePresenceMarkers(){
  });
 }
 
+// Tender 0.4.1 — real 1:1 WebRTC media, database-authorized signaling.
+// Never store audio/video tracks in Supabase; only SDP/ICE and call state are stored.
+// No TURN infrastructure is bundled; symmetric NAT/firewalls may prevent connection.
+let callReady=false,activeCall=null,incomingCall=null,callInboxTimer=null,callPollBusy=false;
+const callRoot=()=>document.getElementById('tender-call-root');
+function secureCallingAvailable(){return !!(window.isSecureContext&&navigator.mediaDevices?.getUserMedia&&window.RTCPeerConnection)}
+function callPeerName(id){return pby(id).display_name||'Tender friend'}
+function callVolumeKey(peer){return 'tender-call-vol:'+user?.id+':'+peer}
+function callVolumes(peer){
+ try{const v=JSON.parse(localStorage.getItem(callVolumeKey(peer))||'{}');return {voice:Math.max(0,Math.min(100,Number(v.voice) || (v.voice===0?0:100))),stream:Math.max(0,Math.min(100,Number(v.stream)||(v.stream===0?0:100)))}}
+ catch{return {voice:100,stream:100}}
+}
+function callMediaAttach(){
+ const c=activeCall;if(!c)return;
+ const own=document.getElementById('tender-call-local'),remote=document.getElementById('tender-call-remote'),screen=document.getElementById('tender-call-screen');
+ if(own&&own.srcObject!==c.localStream)own.srcObject=c.localStream;
+ if(remote&&remote.srcObject!==c.remoteStream)remote.srcObject=c.remoteStream;
+ if(screen&&screen.srcObject!==c.remoteScreenStream)screen.srcObject=c.remoteScreenStream;
+ if(remote){remote.muted=!!audioPrefs().deafened;remote.volume=callVolumes(c.peerId).voice/100;remote.play().catch(()=>{})}
+ if(screen){screen.muted=!!audioPrefs().deafened;screen.volume=callVolumes(c.peerId).stream/100;screen.play().catch(()=>{})}
+}
+function showCallUI(){
+ const root=callRoot();if(!root)return;
+ const c=activeCall,incoming=incomingCall;
+ if(!c&&!incoming){root.replaceChildren();return}
+ if(!c&&incoming){
+  const caller=pby(incoming.caller_id);
+  root.innerHTML=`<section class="tender-call-incoming" role="dialog" aria-label="Incoming Tender call" aria-live="polite">
+    <div class="call-incoming-avatar">${avatars(caller)}</div>
+    <strong>${esc(caller.display_name||'Tender member')}</strong>
+    <p>Incoming ${incoming.wants_video?'video':'voice'} call</p>
+    <div class="tender-call-actions"><button class="btn secondary" data-action="call-decline" aria-label="Decline call">Decline</button>
+    <button class="btn" data-action="call-accept" aria-label="Answer call">Answer ${incoming.wants_video?'with camera':'voice'}</button></div>
+   </section>`;return;
+ }
+ const name=callPeerName(c.peerId),volume=callVolumes(c.peerId);
+ root.innerHTML=`<section class="tender-call-overlay" role="dialog" aria-label="Tender ${c.video?'video':'voice'} call with ${esc(name)}">
+  <header class="tender-call-header"><div><strong>${ico('chat','icon-sm')} ${esc(name)}</strong><p aria-live="polite">${esc(c.statusLabel||'Connecting…')}</p></div><button class="round-btn" data-action="call-hangup" title="End call" aria-label="End call">✕</button></header>
+  <div class="tender-call-stage">
+    <div class="call-remote-scene"><video id="tender-call-remote" autoplay playsinline ${c.remoteHasVideo?'':'hidden'}></video>
+    <div class="call-placeholder" ${c.remoteHasVideo?'hidden':''}>${avatars(pby(c.peerId))}<strong>${esc(name)}</strong><span>${esc(c.statusLabel||'Calling…')}</span></div></div>
+    <div class="call-stream-frame" ${c.remoteScreenStream?'':'hidden'}><span>🖥 Shared screen</span><video id="tender-call-screen" autoplay playsinline></video></div>
+    <video class="tender-call-self" id="tender-call-local" autoplay muted playsinline ${c.cameraOn?'':'hidden'} aria-label="Your camera preview"></video>
+  </div>
+  <div class="tender-call-controls">
+    <button class="call-control ${c.muted?'off':''}" data-action="call-toggle-mic" aria-pressed="${c.muted}" aria-label="${c.muted?'Unmute':'Mute'} microphone">${ico(c.muted?'mic-off':'mic','icon-sm')}<span>${c.muted?'Unmute':'Mute'}</span></button>
+    <button class="call-control ${c.deafened?'off':''}" data-action="call-toggle-deafen" aria-pressed="${c.deafened}" aria-label="${c.deafened?'Undeafen':'Deafen'}">${ico(c.deafened?'headphones-off':'headphones','icon-sm')}<span>Deafen</span></button>
+    <button class="call-control ${c.cameraOn?'':'off'}" data-action="call-toggle-video" aria-pressed="${c.cameraOn}" aria-label="Toggle camera">📹<span>Camera</span></button>
+    <button class="call-control ${c.screenStream?'sharing':''}" data-action="call-share-screen" aria-pressed="${!!c.screenStream}" aria-label="${c.screenStream?'Stop sharing screen':'Share screen'}">🖥<span>${c.screenStream?'Stop sharing':'Share screen'}</span></button>
+    <button class="call-control call-end" data-action="call-hangup" aria-label="Hang up">📞<span>Hang up</span></button>
+  </div>
+  <div class="tender-call-mix">
+   <label>🔊 ${esc(name)} voice <output id="tender-call-voice-value">${volume.voice}%</output><input type="range" min="0" max="100" step="5" value="${volume.voice}" data-action="call-voice-volume" aria-label="Person's voice volume"></label>
+   <label>🖥 Stream audio <output id="tender-call-stream-value">${volume.stream}%</output><input type="range" min="0" max="100" step="5" value="${volume.stream}" data-action="call-stream-volume" aria-label="Shared screen stream volume"></label>
+  </div>
+  <p class="call-security-hint">🔒 Peer-to-peer encrypted WebRTC media. Screen sharing requires your permission. On restrictive networks, calls may fail without a TURN server.</p>
+ </section>`;
+ callMediaAttach();
+}
+function stopTracks(stream){if(stream?.getTracks)stream.getTracks().forEach(track=>{try{track.stop()}catch{}})}
+function localCallCleanup(){
+ const c=activeCall;activeCall=null;incomingCall=null;
+ if(c){try{c.pc?.close()}catch{}stopTracks(c.localStream);stopTracks(c.cameraExtra);stopTracks(c.screenStream)}
+ showCallUI();
+}
+async function finishTenderCall(){
+ const id=activeCall?.id||incomingCall?.id;
+ localCallCleanup();
+ if(id&&callReady){try{const r=await db.rpc('tender_end_call',{call_uuid:id});if(r.error)console.warn('Call end not acknowledged',r.error)}catch(e){console.warn('Call end failed',e)}}
+}
+function startCallInbox(){
+ clearInterval(callInboxTimer);if(!user||!db)return;
+ callInboxTimer=setInterval(()=>pollTenderCalls().catch(e=>console.warn('Tender calling poll',e)),1800);
+ pollTenderCalls().catch(console.warn);
+}
+function stopCallInbox(){clearInterval(callInboxTimer);callInboxTimer=null;localCallCleanup();callReady=false;callPollBusy=false}
+async function checkCallReady(){
+ if(!user||!db)return;
+ try{const r=await q('tender_call_sessions').select('id').limit(1);callReady=!r.error}catch{callReady=false}
+ if(callReady)startCallInbox();
+}
+async function startTenderCall(video=false){
+ if(!secureCallingAvailable())return toast('Voice/video calls require HTTPS and a browser with WebRTC and microphone access.',true);
+ if(!callReady)return toast('Tender calling is waiting for the 0.4.1 database migration.',true);
+ if(activeCall||incomingCall)return toast('Finish or decline the current call first.',true);
+ const conversation=getConversation(state.selected);
+ if(state.area!=='chats'||conversation?.kind!=='dm')return toast('Calls currently work only in private 1-to-1 DMs.',true);
+ const peerId=conversation.conversation_members?.find(m=>m.user_id!==user.id)?.user_id;
+ if(!peerId)return toast('No other participant found in this DM.',true);
+ let stream=null;
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:!!video});
+  const res=await db.rpc('tender_start_call',{cid:conversation.id,peer:peerId,video:!!video});
+  const id=assert(res);
+  const a=audioPrefs();
+  activeCall={id,peerId,conversationId:conversation.id,isCaller:true,video:!!video,
+   status:'ringing',statusLabel:'Ringing…',localStream:stream,remoteStream:null,remoteScreenStream:null,
+   cameraExtra:null,pc:null,screenStream:null,screenSender:null,screenId:null,remoteScreenId:null,
+   cameraOn:!!video,remoteHasVideo:false,muted:!!a.micMuted,deafened:!!a.deafened,
+   lastSignal:0,processing:false,makingOffer:false,pendingIce:[]};
+  if(a.micMuted)stream.getAudioTracks().forEach(t=>t.enabled=false);
+  showCallUI();
+ }catch(e){stopTracks(stream);toast(e.message||'Unable to start the call.',true)}
+}
+async function answerTenderCall(accept){
+ const incoming=incomingCall;if(!incoming)return;
+ if(!accept){
+  incomingCall=null;showCallUI();
+  try{assert(await db.rpc('tender_answer_call',{call_uuid:incoming.id,accept:false}))}catch(e){console.warn(e)}
+  return;
+ }
+ if(!secureCallingAvailable())return toast('Calling requires HTTPS and WebRTC.',true);
+ let stream=null;
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:!!incoming.wants_video});
+  assert(await db.rpc('tender_answer_call',{call_uuid:incoming.id,accept:true}));
+  incomingCall=null;
+  const a=audioPrefs();
+  activeCall={id:incoming.id,peerId:incoming.caller_id,conversationId:incoming.conversation_id,
+   isCaller:false,video:!!incoming.wants_video,status:'active',statusLabel:'Connecting media…',
+   localStream:stream,remoteStream:null,remoteScreenStream:null,cameraExtra:null,pc:null,
+   screenStream:null,screenSender:null,remoteScreenId:null,cameraOn:!!incoming.wants_video,
+   remoteHasVideo:false,muted:!!a.micMuted,deafened:!!a.deafened,lastSignal:0,
+   processing:false,makingOffer:false,pendingIce:[]};
+  if(a.micMuted)stream.getAudioTracks().forEach(t=>t.enabled=false);
+  await setupTenderPeer(activeCall);showCallUI();
+ }catch(e){stopTracks(stream);incomingCall=null;showCallUI();toast(e.message||'Could not answer call',true)}
+}
+async function pollTenderCalls(){
+ if(!user||!callReady||callPollBusy)return;
+ callPollBusy=true;
+ try{
+  if(activeCall){
+   const c=activeCall;
+   const r=await q('tender_call_sessions').select('id,status,created_at').eq('id',c.id).maybeSingle();
+   if(r.error)throw r.error;
+   if(!r.data||['ended','declined'].includes(r.data.status)||r.data.status==='ringing'&&Date.now()-new Date(r.data.created_at).getTime()>90000){
+    const wasDeclined=r.data?.status==='declined';const stale=r.data?.status==='ringing';
+    if(stale)await db.rpc('tender_end_call',{call_uuid:c.id}).catch(()=>{});
+    localCallCleanup();toast(wasDeclined?'Call declined.':'Call ended.');return;
+   }
+   if(r.data.status==='active'&&c.status==='ringing'){
+    c.status='active';c.statusLabel='Connecting media…';await setupTenderPeer(c);
+    showCallUI();if(c.isCaller)await tenderMakeOffer(c);
+   }
+   if(c.status==='active')await pollTenderSignals(c);
+  }else if(!incomingCall){
+   const r=await q('tender_call_sessions').select('*').eq('callee_id',user.id).eq('status','ringing').gte('created_at',new Date(Date.now()-90000).toISOString()).order('created_at',{ascending:false}).limit(1);
+   if(r.error)throw r.error;
+   if(r.data?.length){incomingCall=r.data[0];showCallUI()}
+  }else{
+   const r=await q('tender_call_sessions').select('status').eq('id',incomingCall.id).maybeSingle();
+   if(r.error||!r.data||r.data.status!=='ringing'){incomingCall=null;showCallUI()}
+  }
+ }finally{callPollBusy=false}
+}
+async function setupTenderPeer(c){
+ if(c.pc)return;
+ const pc=new window.RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
+ c.pc=pc;
+ c.localStream.getTracks().forEach(track=>pc.addTrack(track,c.localStream));
+ pc.onicecandidate=event=>{if(event.candidate&&activeCall===c)tenderSignal(c,'ice',{candidate:event.candidate.toJSON()}).catch(console.warn)};
+ pc.ontrack=event=>{
+  if(activeCall!==c)return;
+  const stream=event.streams?.[0]||new MediaStream([event.track]);
+  if(c.remoteScreenId&&stream.id===c.remoteScreenId)c.remoteScreenStream=stream;
+  else{c.remoteStream=stream;if(event.track.kind==='video')c.remoteHasVideo=true}
+  showCallUI();
+ };
+ pc.onconnectionstatechange=()=>{
+  if(activeCall!==c)return;
+  const val=pc.connectionState;
+  c.statusLabel=val==='connected'?'Connected · private peer-to-peer':val==='failed'?'Connection failed · a TURN server may be needed':val==='disconnected'?'Reconnecting…': 'Connecting media…';
+  const label=document.querySelector('.tender-call-header p');if(label)label.textContent=c.statusLabel;
+  if(val==='failed')toast('Could not connect the call. Some networks require a TURN server.',true);
+ };
+}
+async function tenderSignal(c,kind,payload){
+ if(activeCall!==c||c.status!=='active')return;
+ const r=await q('tender_call_signals').insert({call_id:c.id,sender_id:user.id,recipient_id:c.peerId,kind,payload});
+ if(r.error)throw r.error;
+}
+async function tenderMakeOffer(c){
+ if(activeCall!==c||!c.pc||c.makingOffer||c.pc.signalingState!=='stable')return;
+ c.makingOffer=true;
+ try{
+  await c.pc.setLocalDescription(await c.pc.createOffer());
+  await tenderSignal(c,'offer',{sdp:c.pc.localDescription.toJSON()});
+ }finally{c.makingOffer=false}
+}
+async function tenderFlushIce(c){
+ if(!c.pc?.remoteDescription)return;
+ while(c.pendingIce.length){
+  const candidate=c.pendingIce.shift();
+  try{await c.pc.addIceCandidate(candidate)}catch(e){console.warn('ICE candidate unavailable',e)}
+ }
+}
+async function tenderHandleSignal(c,row){
+ const pc=c.pc;if(!pc)return;
+ const data=row.payload||{};
+ if(row.kind==='screen-announcement'){c.remoteScreenId=String(data.stream_id||'');return}
+ if(row.kind==='screen-stop'){c.remoteScreenStream=null;c.remoteScreenId=null;showCallUI();return}
+ if(row.kind==='ice'){
+  if(!data.candidate)return;
+  if(!pc.remoteDescription){c.pendingIce.push(data.candidate);return}
+  try{await pc.addIceCandidate(data.candidate)}catch(e){console.warn('Ignored ICE candidate',e)}
+  return;
+ }
+ if(row.kind==='offer'){
+  if(!data.sdp||data.sdp.type!=='offer')return;
+  const collision=c.makingOffer||pc.signalingState!=='stable';
+  // Callee wins a simultaneous offer collision; caller waits for the next stable state.
+  if(collision&&c.isCaller)return;
+  if(collision)await pc.setLocalDescription({type:'rollback'});
+  await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+  await tenderFlushIce(c);
+  await pc.setLocalDescription(await pc.createAnswer());
+  await tenderSignal(c,'answer',{sdp:pc.localDescription.toJSON()});return;
+ }
+ if(row.kind==='answer'&&data.sdp?.type==='answer'&&pc.signalingState==='have-local-offer'){
+  await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));await tenderFlushIce(c);
+ }
+}
+async function pollTenderSignals(c){
+ if(activeCall!==c||c.processing)return;
+ c.processing=true;
+ try{
+  const r=await q('tender_call_signals').select('id,kind,payload').eq('call_id',c.id).eq('recipient_id',user.id).gt('id',c.lastSignal).order('id',{ascending:true}).limit(80);
+  if(r.error)throw r.error;
+  for(const row of r.data||[]){
+   if(activeCall!==c)break;
+   await tenderHandleSignal(c,row);
+   c.lastSignal=Number(row.id);
+  }
+ }finally{c.processing=false}
+}
+async function toggleTenderMicrophone(){
+ const c=activeCall;if(!c)return;
+ c.muted=!c.muted;c.localStream.getAudioTracks().forEach(track=>track.enabled=!c.muted);
+ showCallUI();
+}
+function toggleTenderDeafen(){
+ const c=activeCall;if(!c)return;c.deafened=!c.deafened;
+ const prefs=audioPrefs();prefs.deafened=c.deafened;saveAudioPrefs(prefs);
+ callMediaAttach();showCallUI();renderAccountDock(false);
+}
+async function toggleTenderCamera(){
+ const c=activeCall;if(!c||c.status!=='active')return toast('Wait for the call to connect first.',true);
+ const track=c.localStream.getVideoTracks()[0]||c.cameraExtra?.getVideoTracks()[0];
+ if(track){c.cameraOn=!c.cameraOn;track.enabled=c.cameraOn;showCallUI();return}
+ let extra=null;
+ try{
+  extra=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+  const cam=extra.getVideoTracks()[0];if(!cam)throw Error('Camera not available');
+  c.cameraExtra=extra;c.cameraOn=true;
+  c.pc.addTrack(cam,extra);
+  await tenderMakeOffer(c);showCallUI();
+ }catch(e){stopTracks(extra);toast('Camera unavailable: '+(e.message||'permission denied'),true)}
+}
+async function toggleTenderScreen(){
+ const c=activeCall;if(!c||c.status!=='active'||!c.pc)return toast('Connect a call before sharing your screen.',true);
+ if(c.screenStream){await stopTenderScreen(c);return}
+ if(!navigator.mediaDevices?.getDisplayMedia)return toast('This browser does not support screen sharing.',true);
+ if(c.pc.signalingState!=='stable')return toast('Wait a moment while media connects, then try sharing again.',true);
+ let stream=null;
+ try{
+  stream=await navigator.mediaDevices.getDisplayMedia({video:{cursor:'always'},audio:true});
+  if(!stream.getVideoTracks().length)throw Error('No screen video track');
+  if(activeCall!==c){stopTracks(stream);return}
+  c.screenStream=stream;
+  await tenderSignal(c,'screen-announcement',{stream_id:stream.id});
+  c.screenSender=c.pc.addTrack(stream.getVideoTracks()[0],stream);
+  // Optional screen audio uses the same stream, so the peer can set its volume separately.
+  c.screenAudioSender=stream.getAudioTracks()[0]?c.pc.addTrack(stream.getAudioTracks()[0],stream):null;
+  stream.getVideoTracks()[0].onended=()=>stopTenderScreen(c).catch(console.warn);
+  await tenderMakeOffer(c);showCallUI();
+ }catch(e){stopTracks(stream);if(c.screenStream===stream)c.screenStream=null;toast(e.message||'Screen share canceled.',true)}
+}
+async function stopTenderScreen(c){
+ if(!c||!c.screenStream)return;
+ const stream=c.screenStream;c.screenStream=null;
+ for(const sender of [c.screenSender,c.screenAudioSender])if(sender&&c.pc){try{c.pc.removeTrack(sender)}catch{}}
+ c.screenSender=null;c.screenAudioSender=null;
+ stopTracks(stream);
+ if(activeCall===c&&c.status==='active'){
+  await tenderSignal(c,'screen-stop',{});
+  if(c.pc?.signalingState==='stable')await tenderMakeOffer(c);
+  showCallUI();
+ }
+}
+function setTenderVolume(kind,value){
+ const c=activeCall;if(!c)return;
+ const values=callVolumes(c.peerId),key=kind==='stream'?'stream':'voice';
+ values[key]=Math.min(100,Math.max(0,Number(value)||0));
+ localStorage.setItem(callVolumeKey(c.peerId),JSON.stringify(values));
+ callMediaAttach();
+ const label=document.getElementById(key==='voice'?'tender-call-voice-value':'tender-call-stream-value');
+ if(label)label.textContent=values[key]+'%';
+}
 function empty(title,description,action='',label=''){return `<div class="empty-content"><img src="buffalo.webp" alt="Buffalo"><h2>${esc(title)}</h2><p>${esc(description)}</p>${action?`<button class="btn" data-action="${esc(action)}">${esc(label)}</button>`:''}</div>`}
 // Tender 0.2 helpers. Shared DB features are gated behind migration_0_2.sql.
 let extendedReady=false, pronounsReady=false, pieceRepliesReady=false, channelReady=false, visualReady=false, pieceChannels=[],channelUnread=[], notifications=[], customEmojis=[], reads=[], bookmarks=[], blockedUsers=[], pieceEvents=[], pieceRoles=[], roleAssignments=[], activePolls=[], activePollVotes=[];
