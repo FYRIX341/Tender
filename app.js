@@ -259,36 +259,71 @@ function eventModal(){modal('Create Piece event','Events belong to this Piece.',
 function roleModal(){const members=memberships.filter(m=>m.piece_id===state.selected);const roles=pieceRoles.filter(r=>r.piece_id===state.selected);modal('Piece roles','Custom labels are decorative. Moderator permissions remain separate for safety.',`<form id="role-form"><div class="field"><label>New role name</label><input class="input" name="name" maxlength="32" required placeholder="Contributor"></div><div class="field"><label>Color</label><input class="input" name="color" type="color" value="#f47735"></div><button class="btn full" type="submit">Create role</button></form><h3 class="section-heading top-spacer">Moderator permissions</h3>${members.filter(m=>m.role!=='owner').map(m=>`<div class="role-entry">${esc(pby(m.user_id).display_name)} <select class="input core-role-change" data-person="${m.user_id}"><option value="member" ${m.role==='member'?'selected':''}>Member</option><option value="moderator" ${m.role==='moderator'?'selected':''}>Moderator</option></select></div>`).join('')}<h3 class="section-heading top-spacer">Custom role labels</h3>${roles.map(r=>`<div class="role-entry"><span style="color:${esc(r.color)}">●</span> ${esc(r.name)} <select class="input role-assign" data-role="${r.id}"><option value="">Assign to member...</option>${members.map(m=>`<option value="${m.user_id}">${esc(pby(m.user_id).display_name)}</option>`).join('')}</select></div>`).join('')}`)}
 function pinnedHTML(){const list=activeMessages.filter(x=>x.is_pinned);return list.length?`<div class="pinned-strip">📌 ${list.length} pinned · ${esc(list[list.length-1].body.slice(0,85)||'Attachment')}</div>`:''}
 function readReceiptHTML(row){if(!extendedReady||row.author_id!==user?.id||!row.id||row.pending)return '';const c=getConversation(state.selected);const ids=(c?.conversation_members||[]).map(m=>m.user_id).filter(id=>id!==user.id);if(!ids.length)return '';const seen=ids.filter(id=>reads.some(r=>r.conversation_id===state.selected&&r.user_id===id&&new Date(r.last_read_at)>=new Date(row.created_at))).length;return `<span class="receipt">${seen===ids.length?'✓✓ Seen':seen?'✓✓ '+seen+' seen':'✓ Sent'}</span>`}
+// Only show community overlap supported by the current membership data.
+function sharedPublicPieces(otherId){
+ if(!user||!otherId)return [];
+ const mine=new Set(memberships.filter(m=>m.user_id===user.id).map(m=>m.piece_id));
+ const theirs=new Set(memberships.filter(m=>m.user_id===otherId).map(m=>m.piece_id));
+ return pieces.filter(p=>p.is_public&&mine.has(p.id)&&theirs.has(p.id));
+}
+function profileStatus(p){
+ if(!p)return '';
+ const presence=String(p.presence_mode||'online');
+ if(presence==='invisible')return '';
+ return `<span class="profile-presence ${['online','idle','dnd'].includes(presence)?presence:'online'}">${presence==='dnd'?'Do not disturb':presence==='idle'?'Idle':'Online'}</span>`;
+}
+function profileActions(person,compact=false){
+ const isSelf=person.id===user?.id;
+ if(isSelf)return `<button type="button" class="btn ${compact?'sm':''}" data-action="settings-profile">${ico('edit','icon-sm')} Edit profile</button>`;
+ const relationship=friendships.find(f=>(f.requester===user.id&&f.recipient===person.id)||(f.recipient===user.id&&f.requester===person.id));
+ const dm=`<button type="button" class="btn ${compact?'sm':''}" data-action="start-dm" data-id="${esc(person.id)}">${ico('chat','icon-sm')} Message</button>`;
+ const secondary=relationship?.status==='accepted'
+   ? `<span class="tag neutral">✓ Friends</span>`
+   :relationship?.status==='pending'
+     ? `<span class="tag neutral">${relationship.recipient===user.id?'Friend request received':'Request pending'}</span>`
+     :`<button type="button" class="btn secondary ${compact?'sm':''}" data-action="request-friend" data-id="${esc(person.id)}">${ico('plus','icon-sm')} Add friend</button>`;
+ return dm+secondary;
+}
+function publicProfileDetails(person){
+ const joined=person.created_at?new Date(person.created_at):null;
+ return `<div class="profile-detail-section"><h3>ABOUT ME</h3><div class="profile-detail-about">${esc(person.bio||'No bio yet. Stay crispy! 🍗').replace(/\n/g,'<br>')}</div></div>
+  ${person.game_status?`<div class="profile-detail-section"><h3>STATUS</h3><p>${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</p></div>`:''}
+  ${joined&&!Number.isNaN(joined.getTime())?`<div class="profile-detail-section"><h3>MEMBER SINCE</h3><p>${esc(joined.toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'}))}</p></div>`:''}`;
+}
+function sharedPiecesHTML(otherId,mini=false){
+ const shared=sharedPublicPieces(otherId);
+ return `<div class="profile-detail-section"><h3>SHARED PIECES <span class="profile-detail-count">${shared.length}</span></h3>
+  ${shared.length?`<div class="profile-shared-pieces">${shared.slice(0,mini?3:8).map(piece=>`<button type="button" class="profile-piece-row" data-action="open-profile-piece" data-id="${esc(piece.id)}">${pieceAvatar(piece)}<span><strong>${esc(piece.name)}</strong><small>Public community</small></span>${ico('external','icon-sm')}</button>`).join('')}</div>`:'<p class="profile-detail-empty">No shared public Pieces yet.</p>'}</div>`;
+}
+function profileCardHTML(person){
+ const isSelf=person.id===user?.id;
+ return `<div class="tender-profile-dialog">
+  <section class="profile-dialog-identity">
+   <div class="profile-dialog-banner" ${person.banner_url?`style="background-image:linear-gradient(#07091440,#07091499),url(&quot;${esc(validUrl(person.banner_url))}&quot;)"`:''}></div>
+   <div class="profile-dialog-id">
+    <div class="profile-dialog-avatar effect-${esc(person.profile_effect||'none')}">${avatars(person)}</div>
+    <div class="profile-dialog-name-row"><div><h2>${esc(person.display_name||'Tender member')}</h2><p>@${esc(person.handle||'member')}${person.pronouns?' · '+esc(person.pronouns):''}</p></div>${profileStatus(person)}</div>
+    ${person.game_status?`<div class="profile-dialog-status">${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</div>`:''}
+    <div class="profile-dialog-buttons">${profileActions(person)}</div>
+    <div class="profile-dialog-meta"><span>🍗 Tender member</span><span>${isSelf?'Your profile':'Public profile'}</span></div>
+   </div>
+  </section>
+  <section class="profile-dialog-content">
+    <div class="profile-dialog-tabs"><span class="active">Overview</span><span>${sharedPublicPieces(person.id).length} shared Pieces</span></div>
+    <div class="profile-dialog-scroll">${publicProfileDetails(person)}${sharedPiecesHTML(person.id)}
+    <div class="profile-detail-section"><h3>ABOUT TENDER PROFILES</h3><p class="hint">Only information this person chose to share is shown here.</p></div></div>
+  </section>
+ </div>`;
+}
 async function showProfile(id){
  if(!id||!user)return;
  let person=profiles.find(p=>p.id===id);
  if(!person){
-   const result=await q('profiles').select('*').eq('id',id).maybeSingle();
-   if(result.error)throw result.error;
-   person=result.data;
+  const result=await q('profiles').select('*').eq('id',id).maybeSingle();
+  if(result.error)throw result.error;person=result.data;
  }
- if(!person){toast('Profile unavailable.',true);return}
- const isSelf=id===user.id;
- const relationship=friendships.find(f=>(f.requester===user.id&&f.recipient===id)||(f.recipient===user.id&&f.requester===id));
- const actions=isSelf?
-   '<button type="button" class="btn" data-action="settings-profile">Edit my profile</button>':
-   relationship?.status==='accepted'?
-     `<button type="button" class="btn" data-action="start-dm" data-id="${esc(id)}">${ico('chat','icon-sm')} Message</button>`:
-   relationship?.status==='pending'?
-     `<span class="tag neutral">${relationship.recipient===user.id?'Friend request received':'Friend request pending'}</span>`:
-     `<button type="button" class="btn" data-action="request-friend" data-id="${esc(id)}">${ico('plus','icon-sm')} Add friend</button>`;
- modal(person.display_name||'Member profile','Tender member',`<div class="profile-popout">
-   ${profileBanner(person)}
-   <div class="profile-popout-body">
-     <div class="profile-popout-head"><div><h2>${esc(person.display_name||'Tender member')}</h2><p>@${esc(person.handle||'member')}</p></div>
-       ${person.presence_mode&&person.presence_mode!=='invisible'? `<span class="tag neutral">${esc(person.presence_mode)}</span>`:''}</div>
-     ${person.pronouns?`<div class="profile-pronouns">${esc(person.pronouns)}</div>`:''}
-      ${person.game_status?`<div class="profile-status">${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</div>`:''}
-     <h3>About me</h3>
-     <p class="profile-about">${esc(person.bio||'No bio yet. Stay crispy! 🍗')}</p>
-     <div class="profile-popout-actions">${actions}</div>
-   </div>
- </div>`);
+ if(!person)return toast('Profile unavailable.',true);
+ modal(person.display_name||'Member profile','Tender profile',profileCardHTML(person));
 }
 function profileBanner(p){const isSelf=p.id===user?.id;return `<div class="profile-banner crispy-profile effect-${esc(p.profile_effect||'none')}" ${p.banner_url?`style="background-image:linear-gradient(0deg,#17191d7a,transparent),url('${esc(validUrl(p.banner_url))}')"`:''}>${avatars(p)}${isSelf?'<span class="banner-hint">Your Tender profile</span>':''}</div>`}
 async function uploadPublicAsset(file,bucket,limit,mimes,prefix){if(!file||file.size>limit||!mimes.includes(file.type))throw Error('This file type or size is not supported.');const extension=({"image/png":"png","image/jpeg":"jpg","image/webp":"webp","image/gif":"gif"})[file.type];const path=`${user.id}/${prefix}-${crypto.randomUUID()}.${extension}`;assert(await db.storage.from(bucket).upload(path,file,{contentType:file.type,upsert:false}));return {url:db.storage.from(bucket).getPublicUrl(path).data.publicUrl,path}}
