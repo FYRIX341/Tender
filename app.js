@@ -352,7 +352,10 @@ async function pollTenderCalls(){
   }else if(!incomingCall){
    const r=await q('tender_call_sessions').select('*').eq('callee_id',user.id).eq('status','ringing').gte('created_at',new Date(Date.now()-90000).toISOString()).order('created_at',{ascending:false}).limit(1);
    if(r.error)throw r.error;
-   if(r.data?.length){incomingCall=r.data[0];showCallUI()}
+   if(r.data?.length){incomingCall=r.data[0];showCallUI();
+    if(document.visibilityState==='hidden'&&typeof Notification!=='undefined'&&Notification.permission==='granted')
+      emitSystemNotification('📞 Incoming Tender call',callPeerName(incomingCall.caller_id)+' is calling','tender-call-'+incomingCall.id).catch(console.warn);
+   }
   }else{
    const r=await q('tender_call_sessions').select('status').eq('id',incomingCall.id).maybeSingle();
    if(r.error||!r.data||r.data.status!=='ringing'){incomingCall=null;showCallUI()}
@@ -442,7 +445,8 @@ async function pollTenderSignals(c){
 async function toggleTenderMicrophone(){
  const c=activeCall;if(!c)return;
  c.muted=!c.muted;c.localStream.getAudioTracks().forEach(track=>track.enabled=!c.muted);
- showCallUI();
+ const prefs=audioPrefs();prefs.micMuted=c.muted;saveAudioPrefs(prefs);
+ renderAccountDock(false);showCallUI();
 }
 function toggleTenderDeafen(){
  const c=activeCall;if(!c)return;c.deafened=!c.deafened;
@@ -450,9 +454,10 @@ function toggleTenderDeafen(){
  callMediaAttach();showCallUI();renderAccountDock(false);
 }
 async function toggleTenderCamera(){
- const c=activeCall;if(!c||c.status!=='active')return toast('Wait for the call to connect first.',true);
+ const c=activeCall;if(!c)return;
  const track=c.localStream.getVideoTracks()[0]||c.cameraExtra?.getVideoTracks()[0];
  if(track){c.cameraOn=!c.cameraOn;track.enabled=c.cameraOn;showCallUI();return}
+ if(c.status!=='active')return toast('Wait until the call connects to add a camera.',true);
  let extra=null;
  try{
   extra=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
@@ -1615,7 +1620,7 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='account-switch'){
   closeAccountMenu();
   if(!await tenderConfirm('Switch Tender accounts?','Your current session will end on this device. Sign in using your other account to continue.','Switch accounts',false))return;
-  await safe(async()=>{assert(await db.auth.signOut());unsub();reset();state.loginMode='login';renderAuth()});
+  await safe(async()=>{await finishTenderCall();assert(await db.auth.signOut());unsub();reset();state.loginMode='login';renderAuth()});
   return;
  }
  if(a==='account-presence'){
@@ -1789,7 +1794,7 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='attach'){document.getElementById('message-file')?.click();return}
  if(a==='enlarge'){MODALS.innerHTML=`<div class="backdrop-img" data-action="close-modal"><img src="${esc(validUrl(el.dataset.src))}" alt="Gallery picture"></div>`;return}
  if(a==='open-attachment'){let url=assert(await db.storage.from('tender-chat').createSignedUrl(el.dataset.path,60)).signedUrl;window.open(validUrl(url),'_blank','noopener,noreferrer');return}
- if(a==='logout'){await safe(async()=>{assert(await db.auth.signOut());unsub();reset();renderAuth()});return}
+ if(a==='logout'){await safe(async()=>{await finishTenderCall();assert(await db.auth.signOut());unsub();reset();renderAuth()});return}
  if(a==='start-dm')await safe(async()=>{let cid=assert(await db.rpc('start_dm',{other_id:id}));closeModal();await refreshData();await goTo('chats',cid)});
  if(a==='accept-friend')await safe(async()=>{assert(await q('friendships').update({status:'accepted'}).eq('id',id));await refreshData();render();toast('Friend request accepted!')});
  if(a==='remove-friend') {if(!await tenderConfirm('Remove friend?','They will be removed from your friends list. You can add them back later.','Remove friend'))return;await safe(async()=>{let f=friendships.find(f=>f.status==='accepted'&&[f.requester,f.recipient].includes(id));if(f)assert(await q('friendships').delete().eq('id',f.id));await refreshData();await goTo('friends');toast('Friend removed.')})}
