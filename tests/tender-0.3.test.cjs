@@ -132,7 +132,7 @@ test('profile triggers open from avatars and names and show full profile cards',
  const {h,ui}=createTenderHarness();
  h.setPeople([{id:'user-2',handle:'crispyfriend',display_name:'Crispy Friend',bio:'Love Tender',avatar_url:'https://example.com/avatar.png',banner_url:null}]);
  const person={id:'user-2',handle:'crispyfriend',display_name:'Crispy Friend'};
- assert.match(h.profileFace(person),/data-action="open-profile"/);
+ assert.match(h.profileFace(person),/data-action="mini-profile"/);
  assert.match(h.profileName(person),/data-id="user-2"/);
  await h.showProfile('user-2');
  assert.match(ui.innerHTML,/Crispy Friend/);
