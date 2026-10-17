@@ -24,6 +24,10 @@ const ICONS = {
  external:'<path d="M15 3h6v6m0-6L10 14"/><path d="M21 13v8H3V3h8"/>',
  lock:'<rect x="4" y="10" width="16" height="12" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3"/>',
  globe:'<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/>',
+ user:'<circle cx="12" cy="7" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',
+ palette:'<circle cx="12" cy="12" r="9"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="8" r="1"/><path d="M16.4 14.1a2.4 2.4 0 0 0 0 4.8"/>',
+ shield:'<path d="m12 22 1.5-.7C19 18.7 21 14 21 8V4l-9-3-9 3v4c0 6 2 10.7 7.5 13.3z"/><path d="m9 12 2 2 4-4"/>',
+ accessibility:'<circle cx="12" cy="3.5" r="1.5"/><path d="M3 8h18M12 8v5m0 0-5 8m5-8 5 8"/>',
  edit:'<path d="m16 3 5 5-12 12H4v-5zM14 5l5 5"/>', bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>'
 };
 const ico=(name,extra='')=>`<span class="ico ${extra}" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||ICONS.info}</svg></span>`;
