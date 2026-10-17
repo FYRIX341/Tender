@@ -191,6 +191,7 @@ function updatePresenceMarkers(){
   const summary=onlineForGroup(c);
   el.className='tender-presence-dot '+summary.status;
   el.title=summary.online+' online · '+summary.offline+' offline';
+  const info=el.closest('.dm-row')?.querySelector('.grow p');if(info)info.textContent=summary.online+' online · '+summary.offline+' offline';
  });
 }
 
@@ -424,7 +425,7 @@ function scheduleReconcile(active=true,kind='',event=null){
    if(['messages','piece_messages','reactions','poll_votes','conversation_reads'].includes(kind)){
      if(selected&&((area==='chats')||(['pieces','discover'].includes(area)&&tab==='chat'))){
        await loadActive();
-       if(selected===state.selected&&area===state.area&&tab===state.pieceTab){syncActiveStream();if(kind==='piece_messages'&&document.visibilityState==='visible')markChannelRead().catch(console.warn)}
+       if(selected===state.selected&&area===state.area&&tab===state.pieceTab){syncActiveStream();if(kind==='piece_messages'&&document.visibilityState==='visible'){const view=document.querySelector('#main .chat-scroll');if(view&&view.scrollHeight-view.scrollTop-view.clientHeight<110)markChannelRead().catch(console.warn)}}
      }
    }else{
      await refreshData();if(active&&selected)await loadActive();
@@ -922,7 +923,7 @@ function renderMain(){const m=document.getElementById('main');if(!m)return;
  else view=renderSettings();m.innerHTML=view;
  m.dataset.settingsTab=state.area==='settings'?state.settingsTab:'';
  restoreSettingsView(m,settingsSnapshot);
- const newDraft=m.querySelector('#message-box');if(newDraft)newDraft.value=oldKey===newKey&&oldDraft?oldDraft:(localStorage.getItem('tender-draft:'+user.id+':'+newKey)||'');
+ const newDraft=m.querySelector('#message-box');if(newDraft)newDraft.value=oldKey===newKey&&oldDraft?oldDraft:(localStorage.getItem(tenderDraftKey())||'');
  renderNavBadges();m.dataset.threadKey=newKey;
  const chatScroll=m.querySelector('.chat-scroll');
  if(chatScroll)chatScroll.scrollTop=pos&&oldKey===newKey&&!pos.near?pos.top:chatScroll.scrollHeight;
@@ -958,6 +959,11 @@ function jumpToReply(id){
  if(!node){toast('The original message is outside the latest 150 messages.',true);return}
  node.scrollIntoView({behavior:'smooth',block:'center'});node.classList.add('reply-target-highlight');
  setTimeout(()=>node.classList.remove('reply-target-highlight'),1700);
+}
+function tenderDraftKey(area=state.area,selected=state.selected,tab=state.pieceTab,channelId=state.channelId){
+ const parts=[area,selected||'',tab];
+ if(['pieces','discover'].includes(area)&&tab==='chat')parts.push(channelId||'general');
+ return 'tender-draft:'+user.id+':'+parts.join(':');
 }
 function composer(kind,placeholder,extra=''){const disabled=kind==='piece'&&!inPiece(state.selected);return `<form class="composer-wrap" id="composer-form" data-kind="${kind}">${replyTo?`<div class="composer-reply"><span class="composer-reply-bar"></span><div class="composer-reply-content"><strong>Replying to ${esc(pby(replyTo.author_id).display_name)}</strong><span>${esc((replyTo.body||'Attachment').slice(0,110))}</span></div><button type="button" class="round-btn" data-action="cancel-reply" aria-label="Cancel reply" title="Cancel reply">${ico('x','icon-sm')}</button></div>`:''}<div id="composer-assist" class="composer-assist" hidden></div><div class="composer">${kind==='chat'?`<button type="button" class="round-btn" data-action="attach" title="Attach file">${ico('clip')}</button>`:''}<button type="button" class="round-btn" data-action="emoji-picker" title="Emojis">${ico('smile')}</button>${kind==='chat'?`<button type="button" class="round-btn composer-extra" data-action="gif-picker" title="GIF">GIF</button><button type="button" class="round-btn composer-extra" data-action="new-poll" title="Poll">📊</button><button type="button" class="round-btn composer-extra" data-action="record-voice" title="Voice message">🎙️</button>`:''}<textarea id="message-box" name="body" maxlength="4000" rows="1" ${disabled?'disabled':''} placeholder="${disabled?'Join this Piece to chat':esc(placeholder)}"></textarea><button class="send-btn" type="submit" ${disabled?'disabled':''} aria-label="Send">${ico('send')}</button></div><div class="composer-footer"><span id="typing-line"></span><span id="file-status" role="status" aria-live="polite"></span><span>${extra||'Enter to send · Shift+Enter for a new line'}</span></div><input type="file" id="message-file" hidden accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,audio/webm,audio/ogg,audio/mp4,audio/mpeg"></form>`}
 function renderFriends(){let pending=friendships.filter(f=>f.status==='pending');const incoming=pending.filter(f=>f.recipient===user.id),outgoing=pending.filter(f=>f.requester===user.id),accepted=myFriendIds();return header('Friends','Keep the people who matter close',`<button class="btn sm" data-action="find-friends">${ico('plus')} Add friends</button>`)+`<div class="main-body"><div class="content-pad"><h1 class="page-title">Your circle 🧡</h1><p class="page-subtitle">Your friends, friend requests, and the next great conversation.</p>${incoming.length?`<div class="section-row top-spacer"><h2 class="section-heading">Friend requests</h2></div><div class="card">${incoming.map(f=>friendItem(pby(f.requester),'incoming',f.id)).join('')}</div>`:''}${outgoing.length?`<div class="section-row top-spacer"><h2 class="section-heading">Sent requests</h2></div><div class="card">${outgoing.map(f=>friendItem(pby(f.recipient),'outgoing',f.id)).join('')}</div>`:''}<div class="section-row top-spacer"><h2 class="section-heading">Friends (${accepted.length})</h2></div><div class="card">${accepted.map(id=>friendItem(pby(id),'friend')).join('')||'<div class="notice-inline">No friends yet. Search for people by username and send them a request.</div>'}</div></div></div>`}
@@ -1072,7 +1078,7 @@ async function loadActive(){
  activeMessages=fresh;activeReactions=reactions;activePosts=posts;activeGallery=gallery;
  await Promise.all([prepareAttachmentUrls(),loadPolls()]);
 }
-async function goTo(area,id=null){state.area=area;state.selected=id;state.search='';state.mobileDetail=!!id||['discover','settings'].includes(area);if(area==='friends'&&!id)state.mobileDetail=true;if(area==='pieces'||area==='discover')state.pieceTab='chat';state.channelId=channelsFor(id).find(c=>c.is_default)?.id||channelsFor(id)[0]?.id||null;replyTo=null;if(id&&['chats','pieces','discover'].includes(area))await loadActive();if(state.area!==area||state.selected!==id)return;applyLocalAppearance();render();if(area==='chats'&&id){markRead(id);subscribeTyping().catch(console.warn)}else if(['pieces','discover'].includes(area)&&id&&state.pieceTab==='chat'){markChannelRead().catch(console.warn);subscribeTyping().catch(console.warn)}else{unsubTyping()}if(area==='friends')markRead(null,true);}
+async function goTo(area,id=null){state.area=area;state.selected=id;state.search='';state.mobileDetail=!!id||['discover','settings'].includes(area);if(area==='friends'&&!id)state.mobileDetail=true;if(area==='pieces'||area==='discover')state.pieceTab='chat';state.channelId=id&&['pieces','discover'].includes(area)?channelsFor(id).find(c=>c.is_default)?.id||channelsFor(id)[0]?.id||null:null;replyTo=null;if(id&&['chats','pieces','discover'].includes(area))await loadActive();if(state.area!==area||state.selected!==id)return;applyLocalAppearance();render();if(area==='chats'&&id){markRead(id);subscribeTyping().catch(console.warn)}else if(['pieces','discover'].includes(area)&&id&&state.pieceTab==='chat'){markChannelRead().catch(console.warn);subscribeTyping().catch(console.warn)}else{unsubTyping()}if(area==='friends')markRead(null,true);}
 let confirmationResolve=null;
 function tenderConfirm(title,description,action='Confirm',danger=true){
  if(confirmationResolve){confirmationResolve(false);confirmationResolve=null}
@@ -1217,18 +1223,18 @@ function applySlashCommand(body,kind){
  }
 }
 async function sendMessage(form){let text=String(new FormData(form).get('body')||'').trim();const command=text.startsWith('/')?applySlashCommand(text,form.dataset.kind):null;if(command?.error){toast(command.error,true);return}if(command?.handled){const field=form.querySelector('#message-box');if(field)field.value='';return}if(command?.text)text=command.text;let file=document.getElementById('message-file')?.files?.[0]||recordedVoice||null;if(!text&&!file)return;
- if(state.busy)return;const kind=form.dataset.kind,table=kind==='chat'?'messages':'piece_messages',target=state.selected,area=state.area;
- const original=text,replyId=replyTo?.id||null;const tmp=crypto.randomUUID();const pending={id:tmp,created_at:new Date().toISOString(),author_id:user.id,body:text,pending:true,conversation_id:kind==='chat'?target:null,piece_id:kind==='piece'?target:null,channel_id:kind==='piece'?state.channelId:null,attachment_path:file?file.name:null,pendingFile:file?URL.createObjectURL(file):null,reply_to:replyId};
- const field=form.querySelector('#message-box');if(field)field.value='';localStorage.removeItem('tender-draft:'+user.id+':'+[area,target,kind==='piece'?'chat':state.pieceTab].join(':'));if(form.querySelector('#message-file'))form.querySelector('#message-file').value='';recordedVoice=null;replyTo=null;updateComposerReply();
+ if(state.busy)return;const kind=form.dataset.kind,table=kind==='chat'?'messages':'piece_messages',target=state.selected,area=state.area,channelAtSend=kind==='piece'?state.channelId:null;
+ const original=text,replyId=replyTo?.id||null;const tmp=crypto.randomUUID();const pending={id:tmp,created_at:new Date().toISOString(),author_id:user.id,body:text,pending:true,conversation_id:kind==='chat'?target:null,piece_id:kind==='piece'?target:null,channel_id:kind==='piece'?channelAtSend:null,attachment_path:file?file.name:null,pendingFile:file?URL.createObjectURL(file):null,reply_to:replyId};
+ const field=form.querySelector('#message-box');if(field)field.value='';localStorage.removeItem(tenderDraftKey(area,target,kind==='piece'?'chat':state.pieceTab,channelAtSend));if(form.querySelector('#message-file'))form.querySelector('#message-file').value='';recordedVoice=null;replyTo=null;updateComposerReply();
  activeMessages.push(pending);syncActiveStream(true);document.getElementById('message-box')?.focus();
  await safe(async()=>{let attachment_path=null;try{
  if(file){const status=document.getElementById('file-status');if(status)status.textContent='Uploading attachment…';if(kind!=='chat')throw Error('Upload attachments in DMs/groups, or use the Gallery in Pieces.');if(file.size>5*1024*1024)throw Error('Maximum attachment size is 5 MB.');if(!['image/png','image/jpeg','image/webp','image/gif','application/pdf','audio/webm','audio/ogg','audio/mp4','audio/mpeg'].includes(file.type))throw Error('Unsupported file type.');attachment_path=`${target}/${user.id}/${crypto.randomUUID()}-${file.name.replace(/[^a-z0-9_.-]/gi,'_')}`;assert(await db.storage.from('tender-chat').upload(attachment_path,file,{contentType:file.type,upsert:false}));}
- const chosenChannel=kind==='piece'&&channelReady?selectedChannel(target):null;
+ const chosenChannel=kind==='piece'&&channelReady?pieceChannels.find(c=>c.id===channelAtSend&&c.piece_id===target)||channelsFor(target).find(c=>c.is_default):null;
   const record=kind==='chat'?{id:tmp,conversation_id:target,author_id:user.id,body:text,attachment_path}:{id:tmp,piece_id:target,author_id:user.id,body:text,...(chosenChannel&&!chosenChannel.id.startsWith('legacy-')?{channel_id:chosenChannel.id}:{})};
  if(replyId&&((kind==='chat'&&extendedReady)||(kind==='piece'&&pieceRepliesReady)))record.reply_to=replyId;
- const status=document.getElementById('file-status');if(status)status.textContent='Sending…';const result=assert(await q(table).insert(record).select('*').single());let pos=activeMessages.findIndex(m=>m.id===tmp);if(pos>=0)activeMessages[pos]=result;else if(state.selected===target&&state.area===area&&!activeMessages.some(m=>m.id===result.id))activeMessages.push(result);
- if(pending.pendingFile){URL.revokeObjectURL(pending.pendingFile)}if(status)status.textContent='Sent ✓';if(attachment_path)await prepareAttachmentUrls();if(state.selected===target&&state.area===area){syncActiveStream();document.getElementById('message-box')?.focus()}else scheduleReconcile(false);
- }catch(e){activeMessages=activeMessages.filter(m=>m.id!==tmp);if(pending.pendingFile)URL.revokeObjectURL(pending.pendingFile);if(state.selected===target&&state.area===area){replyTo=replyId?activeMessages.find(m=>m.id===replyId)||null:null;updateComposerReply();syncActiveStream();const field=document.getElementById('message-box');if(field)field.value=original;}throw e;}});
+ const status=document.getElementById('file-status');if(status)status.textContent='Sending…';const result=assert(await q(table).insert(record).select('*').single());let pos=activeMessages.findIndex(m=>m.id===tmp);if(pos>=0)activeMessages[pos]=result;else if(state.selected===target&&state.area===area&&(kind==='chat'||state.channelId===channelAtSend)&&!activeMessages.some(m=>m.id===result.id))activeMessages.push(result);
+ if(pending.pendingFile){URL.revokeObjectURL(pending.pendingFile)}if(status)status.textContent='Sent ✓';if(attachment_path)await prepareAttachmentUrls();if(state.selected===target&&state.area===area&&(kind==='chat'||state.channelId===channelAtSend)){syncActiveStream();document.getElementById('message-box')?.focus()}else scheduleReconcile(false);
+ }catch(e){activeMessages=activeMessages.filter(m=>m.id!==tmp);if(pending.pendingFile)URL.revokeObjectURL(pending.pendingFile);if(state.selected===target&&state.area===area&&(kind==='chat'||state.channelId===channelAtSend)){replyTo=replyId?activeMessages.find(m=>m.id===replyId)||null:null;updateComposerReply();syncActiveStream();const field=document.getElementById('message-box');if(field)field.value=original;}throw e;}});
 }
 const galleryUrl=path=>db.storage.from('tender-gallery').getPublicUrl(path).data.publicUrl;
 async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=el.dataset.tab;try{
@@ -1632,7 +1638,7 @@ document.addEventListener('dblclick',event=>{
 });
 document.addEventListener('submit',event=>{if(event.target.matches('form')){event.preventDefault();submitForm(event.target).catch(e=>{console.error(e);toast(e.message||'Error',true)})}});
 document.addEventListener('click',event=>{if(!event.target.closest?.('.sidebar-account-dock'))closeAccountMenu();let t=event.target.closest('[data-action]');if(!t)return;if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
-document.addEventListener('input',e=>{if(e.target.id==='tender-emoji-search'){renderEmojiResults();return}if(e.target.id==='message-box'&&user&&state.selected){const key='tender-draft:'+user.id+':'+[state.area,state.selected,state.pieceTab].join(':');if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
+document.addEventListener('input',e=>{if(e.target.id==='tender-emoji-search'){renderEmojiResults();return}if(e.target.id==='message-box'&&user&&state.selected){const key=tenderDraftKey();if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
 // Type-to-chat works like a desktop messenger: printable keystrokes land
 // in the current composer, never in settings or behind an open modal.
 document.addEventListener('keydown',event=>{
