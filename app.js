@@ -168,9 +168,32 @@ function invitePickerModal(){
  modal('Share a Piece invite','Pick a public Piece to include as a preview in this conversation.',`
    <div class="invite-picker-list">${available.map(piece=>`<button type="button" class="invite-picker-item" data-action="insert-piece-invite" data-id="${esc(piece.id)}">${pieceAvatar(piece)}<span><strong>${esc(piece.name)}</strong><small>Insert invitation link</small></span>${ico('plus','icon-sm')}</button>`).join('')||'<p class="hint">Join a public Piece first to share its invitation.</p>'}</div>`);
 }
-function messageText(text){if(String(text||'').startsWith('[TENDER_EMBED]'))return richEmbedHTML(text);let result=esc(text||'').replace(/(https:\/\/[^\s<]+)/g,m=>{const u=validUrl(m.replace(/&amp;/g,'&'));return u==='#'?m:`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer" class="message-link">${m}</a>`});
- result=result.replace(/:([a-z0-9_]{2,24}):/g,(whole,code)=>{const e=customEmojis.find(x=>x.shortcode===code&&(x.piece_id===null||x.piece_id===state.selected));return e?`<img class="inline-custom-emoji" src="${esc(db.storage.from('tender-emoji').getPublicUrl(e.image_path).data.publicUrl)}" alt=":${esc(code)}:" title=":${esc(code)}:">`:whole});if(/^:[a-z0-9_]{2,24}:$/.test(String(text||'').trim()))result=result.replace('class="inline-custom-emoji"','class="inline-custom-emoji sticker-emoji"');const invite=extractPublicPieceInvite(text);
- return result.replace(/\n/g,'<br>')+(invite?pieceInviteCardHTML(invite):'')}
+// Mention markup only touches ordinary escaped text, never URLs/attributes/other HTML.
+function mentionedPlainText(raw){
+ return esc(raw).replace(/(^|[^a-z0-9_@])@([a-z0-9_]{3,20})(?![a-z0-9_])/gi,(full,prefix,handle)=>{
+  const member=profiles.find(p=>p.handle?.toLowerCase()===handle.toLowerCase());
+  if(!member)return full;
+  const self=member.id===user?.id;
+  return prefix+`<button type="button" class="tender-mention ${self?'mention-self':''}" data-action="open-profile" data-id="${esc(member.id)}" title="View @${esc(member.handle)}'s profile">@${esc(handle)}</button>`;
+ });
+}
+function messageText(text){
+ if(String(text||'').startsWith('[TENDER_EMBED]'))return richEmbedHTML(text);
+ const raw=String(text||'');
+ let result=raw.split(/(https:\/\/[^\s<]+)/gi).map(part=>{
+  if(!/^https:\/\//i.test(part))return mentionedPlainText(part);
+  const url=validUrl(part);
+  return url==='#'?esc(part):`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="message-link">${esc(part)}</a>`;
+ }).join('');
+ result=result.replace(/:([a-z0-9_]{2,24}):/g,(whole,code)=>{
+  const e=customEmojis.find(x=>x.shortcode===code&&(x.piece_id===null||x.piece_id===state.selected));
+  return e?`<img class="inline-custom-emoji" src="${esc(db.storage.from('tender-emoji').getPublicUrl(e.image_path).data.publicUrl)}" alt=":${esc(code)}:" title=":${esc(code)}:">`:whole;
+ });
+ if(/^:[a-z0-9_]{2,24}:$/.test(raw.trim()))result=result.replace('class="inline-custom-emoji"','class="inline-custom-emoji sticker-emoji"');
+ const invite=extractPublicPieceInvite(text);
+ return result.replace(/\n/g,'<br>')+(invite?pieceInviteCardHTML(invite):'');
+}
+
 // Rich announcement embeds are stored as ordinary message text (no new tables needed).
 function richEmbedHTML(text){
  let p;try{p=JSON.parse(String(text).slice('[TENDER_EMBED]'.length))}catch{return esc(text)}
@@ -877,14 +900,14 @@ const tenderCommands=[
 ];
 function updateComposerAssist(field){
  let box=document.getElementById('composer-assist');if(!box||!field)return;
- const value=field.value,cmd=value.match(/^\/([a-z]*)$/i),mention=value.match(/@([a-z0-9_]*)$/i);
+ const value=field.value,cmd=value.match(/^\/([a-z]*)$/i),mention=value.match(/(?:^|\s)@([a-z0-9_]*)$/i);
  if(cmd){
   const matches=tenderCommands.filter(c=>c.name.startsWith(cmd[1].toLowerCase())).slice(0,7);
   box.innerHTML=matches.map(c=>`<button type="button" class="assist-row" data-action="insert-slash" data-command="${c.name}"><strong>/${c.name}</strong><span>${esc(c.detail)}</span><small>${esc(c.usage)}</small></button>`).join('');
  }else if(mention){
   const ids=state.area==='chats'?(getConversation(state.selected)?.conversation_members||[]).map(x=>x.user_id):memberships.filter(x=>x.piece_id===state.selected).map(x=>x.user_id);
   const people=[...new Set(ids)].map(id=>pby(id)).filter(p=>(p.handle||'').toLowerCase().startsWith(mention[1].toLowerCase())).slice(0,6);
-  box.innerHTML=people.map(p=>`<button type="button" class="assist-row" data-action="insert-mention" data-handle="${esc(p.handle)}">${avatars(p)}<strong>@${esc(p.handle)}</strong><span>${esc(p.display_name)}</span></button>`).join('');
+  box.innerHTML=people.map(p=>`<button type="button" class="assist-row mention-assist-row" data-action="insert-mention" data-handle="${esc(p.handle)}"><span class="mention-suggest-avatar">${avatars(p)}</span><span class="mention-suggest-identity"><strong>@${esc(p.handle)}</strong><small>${esc(p.display_name)}</small></span></button>`).join('');
  }else box.innerHTML='';
  box.hidden=!box.innerHTML;
 }
