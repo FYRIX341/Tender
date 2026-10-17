@@ -435,8 +435,22 @@ async function loadActive(){
  await Promise.all([prepareAttachmentUrls(),loadPolls()]);
 }
 async function goTo(area,id=null){state.area=area;state.selected=id;state.search='';state.mobileDetail=!!id||['discover','settings'].includes(area);if(area==='friends'&&!id)state.mobileDetail=true;if(area==='pieces'||area==='discover')state.pieceTab='chat';replyTo=null;if(id&&['chats','pieces','discover'].includes(area))await loadActive();if(state.area!==area||state.selected!==id)return;applyLocalAppearance();render();if(area==='chats'&&id){markRead(id);subscribeTyping().catch(console.warn)}else if(['pieces','discover'].includes(area)&&id&&state.pieceTab==='chat'){subscribeTyping().catch(console.warn)}else{unsubTyping()}if(area==='friends')markRead(null,true);}
+let confirmationResolve=null;
+function tenderConfirm(title,description,action='Confirm',danger=true){
+ if(confirmationResolve){confirmationResolve(false);confirmationResolve=null}
+ return new Promise(resolve=>{
+  confirmationResolve=resolve;
+  modal(title,description,`<div class="tender-confirm"><div class="tender-confirm-icon">${danger?'⚠️':'🍗'}</div>
+  <p>${esc(description)}</p><div class="tender-confirm-actions"><button type="button" class="btn secondary" data-action="confirm-no">Cancel</button>
+  <button type="button" class="btn ${danger?'danger':''}" data-action="confirm-yes">${esc(action)}</button></div></div>`);
+ });
+}
+function settleConfirm(value){
+ const resolver=confirmationResolve;confirmationResolve=null;
+ closeModal();if(resolver)resolver(value);
+}
 function modal(title,sub,body,footer=''){MODALS.innerHTML=`<div class="modal-outer" data-action="close-on-backdrop"><div class="modal-panel" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="modal-head"><div><h2>${esc(title)}</h2><p>${esc(sub)}</p></div><button class="round-btn" data-action="close-modal" aria-label="Close">${ico('x')}</button></div>${body}${footer}</div></div>`;const first=MODALS.querySelector('input,textarea,button');first?.focus()}
-function closeModal(){const preview=document.getElementById('piece-pfp-preview-img');if(preview?.dataset?.previewUrl)URL.revokeObjectURL(preview.dataset.previewUrl);MODALS.innerHTML=''}
+function closeModal(){if(confirmationResolve){const resolver=confirmationResolve;confirmationResolve=null;resolver(false)}const preview=document.getElementById('piece-pfp-preview-img');if(preview?.dataset?.previewUrl)URL.revokeObjectURL(preview.dataset.previewUrl);MODALS.innerHTML=''}
 function findFriendsModal(){const options=profiles.filter(p=>p.id!==user.id&&!myFriendIds().includes(p.id)).slice(0,30);modal('Find friends','Search by exact username, then send a friend request.',`<form id="friend-search-form"><div class="field"><label for="friend-handle">Username</label><input class="input" id="friend-handle" name="handle" autocomplete="off" placeholder="friend_username" required maxlength="20"></div><button class="btn full" type="submit">${ico('search')} Search</button></form><div id="friend-search-results" class="top-spacer"></div>`)}
 function newChatModal(){let options=myFriendIds().map(id=>pby(id));modal('New conversation','Choose a friend or build a squad.',`<div class="button-group"><button class="btn secondary" data-action="find-friends">${ico('users')} Find friends</button></div><div class="divider"></div><form id="group-form"><div class="field"><label>Group name</label><input name="group_name" class="input" maxlength="50" minlength="2" required placeholder="The crispy squad"></div><h3 class="section-heading">Invite friends</h3><div style="max-height:230px;overflow:auto">${options.map(p=>`<label class="member-checkbox"><input type="checkbox" name="member" value="${p.id}">${avatars(p)} ${esc(p.display_name)}</label>`).join('')||'<p class="notice-inline">Add friends before creating a group.</p>'}</div><button class="btn full top-spacer" type="submit">Create group</button></form>`)}
 function newPieceModal(p=null){
@@ -564,7 +578,9 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
   if(a==='open-profile'){await showProfile(id);return}
   if(a==='open-alerts'){alertsModal();return}
  if(a==='open-alert'){closeModal();if(el.dataset.cid)await goTo('chats',el.dataset.cid);else await goTo('friends');return}
- if(a==='settings-tab'){state.settingsTab=el.dataset.tab||'profile';renderMain();return}
+ if(a==='confirm-yes'){settleConfirm(true);return}
+  if(a==='confirm-no'){settleConfirm(false);return}
+  if(a==='settings-tab'){state.settingsTab=el.dataset.tab||'profile';renderMain();return}
   if(a==='notification-permission'){if(typeof Notification==='undefined')return toast('Unavailable in this browser',true);const perm=await Notification.requestPermission();toast(perm==='granted'?'Browser notifications enabled!':'Notification permission: '+perm);renderMain();return}
  if(a==='emoji-picker'){emojiPicker();return}
  if(a==='emoji-insert'){const val=el.dataset.emoji;closeModal();const area=document.getElementById('message-box');if(area){area.value+=val;area.focus()}return}
@@ -574,7 +590,7 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='search'){searchModal();return}
  if(a==='bookmarks'){await openBookmarks();return}
  if(a==='blocked-list'){modal('Blocked users','Blocking stops DMs from that account.',`<div class="search-results">${blockedUsers.map(b=>`<button class="saved-row" data-action="toggle-block" data-id="${b.blocked_id}">Unblock ${esc(pby(b.blocked_id).display_name)}</button>`).join('')||'<p class="hint">Nobody blocked.</p>'}</div>`);return}
- if(a==='toggle-block'){if(!extendedReady)return;await safe(async()=>{const b=blockedUsers.find(x=>x.blocked_id===id);if(b){assert(await q('user_blocks').delete().eq('blocker_id',user.id).eq('blocked_id',id));toast('User unblocked.')}else{if(!confirm('Block this person? They will not be able to DM you.'))return;assert(await q('user_blocks').insert({blocker_id:user.id,blocked_id:id}));toast('User blocked.')}await refreshExtras();closeModal();render()});return}
+ if(a==='toggle-block'){if(!extendedReady)return;await safe(async()=>{const b=blockedUsers.find(x=>x.blocked_id===id);if(b){assert(await q('user_blocks').delete().eq('blocker_id',user.id).eq('blocked_id',id));toast('User unblocked.')}else{if(!await tenderConfirm('Block this user?','They will not be able to send you direct messages.','Block user'))return;assert(await q('user_blocks').insert({blocker_id:user.id,blocked_id:id}));toast('User blocked.')}await refreshExtras();closeModal();render()});return}
  if(a==='new-event'){eventModal();return}
  if(a==='pin-post'||a==='lock-post'){if(!extendedReady)return;await safe(async()=>{const post=activePosts.find(p=>p.id===id);if(!post)return;const key=a==='pin-post'?'pinned':'locked';assert(await q('piece_posts').update({[key]:!post[key]}).eq('id',id));post[key]=!post[key];renderMain();toast('Discussion updated!')});return}
  if(a==='piece-roles'){roleModal();return}
@@ -615,13 +631,13 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='logout'){await safe(async()=>{assert(await db.auth.signOut());unsub();reset();renderAuth()});return}
  if(a==='start-dm')await safe(async()=>{let cid=assert(await db.rpc('start_dm',{other_id:id}));closeModal();await refreshData();await goTo('chats',cid)});
  if(a==='accept-friend')await safe(async()=>{assert(await q('friendships').update({status:'accepted'}).eq('id',id));await refreshData();render();toast('Friend request accepted!')});
- if(a==='remove-friend') {if(!confirm('Remove this friend?'))return;await safe(async()=>{let f=friendships.find(f=>f.status==='accepted'&&[f.requester,f.recipient].includes(id));if(f)assert(await q('friendships').delete().eq('id',f.id));await refreshData();await goTo('friends');toast('Friend removed.')})}
+ if(a==='remove-friend') {if(!await tenderConfirm('Remove friend?','They will be removed from your friends list. You can add them back later.','Remove friend'))return;await safe(async()=>{let f=friendships.find(f=>f.status==='accepted'&&[f.requester,f.recipient].includes(id));if(f)assert(await q('friendships').delete().eq('id',f.id));await refreshData();await goTo('friends');toast('Friend removed.')})}
  if(a==='join-piece')await safe(async()=>{assert(await db.rpc('join_piece',{pid:state.selected}));await refreshData();await loadActive();render();toast('Joined the Piece! 🍗')});
- if(a==='leave-piece'){if(ownPiece(state.selected)||!confirm('Leave this Piece?'))return;await safe(async()=>{assert(await db.rpc('leave_piece',{pid:state.selected}));await refreshData();render();toast('Left Piece.')})}
+ if(a==='leave-piece'){if(ownPiece(state.selected)||!await tenderConfirm('Leave this Piece?','You will stop seeing its member-only messages unless you rejoin.','Leave Piece'))return;await safe(async()=>{assert(await db.rpc('leave_piece',{pid:state.selected}));await refreshData();render();toast('Left Piece.')})}
  if(a==='react'){const type=el.dataset.type, emoji=el.dataset.emoji;let existing=activeReactions.find(r=>r.target_type===type&&r.target_id===id&&r.author_id===user.id&&r.emoji===emoji);if(existing)activeReactions=activeReactions.filter(r=>r!==existing);else activeReactions.push({id:'pending-'+crypto.randomUUID(),author_id:user.id,target_type:type,target_id:id,emoji});closeModal();renderMain();safe(async()=>{try{if(existing)assert(await q('reactions').delete().eq('id',existing.id));else assert(await q('reactions').insert({author_id:user.id,target_type:type,target_id:id,emoji}));}catch(e){await loadActive();renderMain();throw e}});return}
- if(a==='delete-message'){if(!confirm('Delete this message?'))return;await safe(async()=>{assert(await q(el.dataset.type==='message'?'messages':'piece_messages').delete().eq('id',id));await loadActive();renderMain()})}
- if(a==='delete-post'){if(!confirm('Delete this discussion and its replies?'))return;await safe(async()=>{assert(await q('piece_posts').delete().eq('id',id));await loadActive();renderMain()})}
- if(a==='delete-gallery'){if(!confirm('Remove this gallery entry?'))return;await safe(async()=>{assert(await q('piece_gallery').delete().eq('id',id));await loadActive();renderMain()})}
+ if(a==='delete-message'){if(!await tenderConfirm('Delete message?','This message will be removed for everyone who could see it. This cannot be undone.','Delete message'))return;await safe(async()=>{assert(await q(el.dataset.type==='message'?'messages':'piece_messages').delete().eq('id',id));await loadActive();renderMain()})}
+ if(a==='delete-post'){if(!await tenderConfirm('Delete discussion?','This discussion and all of its replies will be permanently removed.','Delete discussion'))return;await safe(async()=>{assert(await q('piece_posts').delete().eq('id',id));await loadActive();renderMain()})}
+ if(a==='delete-gallery'){if(!await tenderConfirm('Delete gallery image?','This entry will disappear from the Piece gallery.','Delete image'))return;await safe(async()=>{assert(await q('piece_gallery').delete().eq('id',id));await loadActive();renderMain()})}
  }catch(e){toast(e.message||'Could not complete action.',true);console.error(e)}}
 async function submitForm(form){switch(form.id){
  case'auth-form':return authSubmit(form);
