@@ -465,7 +465,62 @@ async function subscribeTyping(){if(typingChannel){db.removeChannel(typingChanne
  const prefix=state.area==='chats'?'dm':'piece';
  typingChannel=db.channel('typing-'+prefix+'-'+state.selected,{config:{broadcast:{self:false}}}).on('broadcast',{event:'typing'},payload=>{const e=payload.payload;if(e?.user_id===user.id)return;const el=document.getElementById('typing-line');if(!el)return;el.textContent=`${pby(e.user_id).display_name} is typing…`;clearTimeout(typingTimeout);typingTimeout=setTimeout(()=>{if(el)el.textContent=''},2800)}).subscribe();}
 function broadcastTyping(){if(!typingChannel||Date.now()-typingLast<1100)return;typingLast=Date.now();typingChannel.send({type:'broadcast',event:'typing',payload:{user_id:user.id}}).catch(()=>{})}
-function emojiPicker(mode='insert'){const defaults=['😀','😂','😭','❤️','🔥','👍','🥹','😎','😍','🤯','💀','🥳','🤝','😡','😴','✨','🍗','⭐','💜','🎉','👀','🙌','💯','💀','🤍','🤔','👏','💬','🙏','🥰'];modal('Emoji & stickers','Send something crispy!',`<div class="emoji-grid">${defaults.map(e=>`<button data-action="emoji-insert" data-emoji="${e}" class="emoji-option">${e}</button>`).join('')}${customEmojis.filter(x=>!x.piece_id||x.piece_id===state.selected).map(e=>`<button data-action="emoji-insert" data-emoji=":${esc(e.shortcode)}:" class="emoji-option"><img src="${esc(db.storage.from('tender-emoji').getPublicUrl(e.image_path).data.publicUrl)}" alt=":${esc(e.shortcode)}:"></button>`).join('')}</div><button class="btn secondary top-spacer" data-action="custom-emoji">${ico('plus')} Upload custom emoji</button>`) }
+// Searchable complete Unicode 17.0 emoji catalog. Render 150 items per page.
+const emojiCategories=['All','Recent','Smileys','People','Components','Nature','Food','Travel','Activities','Objects','Symbols','Flags','Custom'];
+let emojiCategory='All',emojiOffset=0,emojiComposerRange=null;
+function emojiHistory(){
+ try{const v=JSON.parse(localStorage.getItem('tender-emoji-recent:'+user.id)||'[]');
+ return Array.isArray(v)?v.filter(x=>typeof x==='string').slice(0,42):[]}
+ catch{return []}
+}
+function storeEmojiHistory(glyph){
+ if(user)localStorage.setItem('tender-emoji-recent:'+user.id,JSON.stringify([glyph,...emojiHistory().filter(x=>x!==glyph)].slice(0,42)));
+}
+function emojiResults(category,search=''){
+ const raw=window.TENDER_EMOJI_CATALOG?.items||[];
+ let items=raw;
+ if(category==='Custom')return customEmojis.filter(x=>!x.piece_id||x.piece_id===state.selected)
+  .filter(x=>!search||x.shortcode.toLowerCase().includes(search))
+  .map(x=>({glyph:':'+x.shortcode+':',name:x.shortcode,image_path:x.image_path}));
+ if(category==='Recent'){
+  items=emojiHistory().map(g=>raw.find(x=>x[0]===g)||[g,'Recently used',-1]);
+ }else if(category!=='All'){
+  const mapping={Smileys:0,People:1,Components:2,Nature:3,Food:4,Travel:5,Activities:6,Objects:7,Symbols:8,Flags:9};
+  items=items.filter(x=>x[2]===mapping[category]);
+ }
+ if(search)items=items.filter(x=>x[1].toLowerCase().includes(search)||x[0].includes(search));
+ return items.map(x=>({glyph:x[0],name:x[1]}));
+}
+function renderEmojiResults(reset=true){
+ const grid=document.getElementById('tender-emoji-results');if(!grid)return;
+ const search=String(document.getElementById('tender-emoji-search')?.value||'').trim().toLowerCase();
+ const all=emojiResults(emojiCategory,search);
+ if(reset){emojiOffset=0;grid.replaceChildren()}
+ const chunk=all.slice(emojiOffset,emojiOffset+150);
+ grid.insertAdjacentHTML('beforeend',chunk.map(e=>`<button class="tender-emoji-cell" type="button" data-action="emoji-insert" data-emoji="${esc(e.glyph)}" title="${esc(e.name)}" aria-label="${esc(e.name)}">${e.image_path?`<img src="${esc(db.storage.from('tender-emoji').getPublicUrl(e.image_path).data.publicUrl)}" alt="">`:esc(e.glyph)}</button>`).join(''));
+ emojiOffset+=chunk.length;
+ const more=document.getElementById('tender-emoji-more');if(more)more.hidden=emojiOffset>=all.length;
+ const count=document.getElementById('tender-emoji-count');if(count)count.textContent=all.length?emojiOffset+' of '+all.length:'No matching emojis';
+ document.querySelectorAll('.tender-emoji-category').forEach(el=>{const selected=el.dataset.category===emojiCategory;el.classList.toggle('active',selected);el.setAttribute('aria-pressed',String(selected))});
+}
+function emojiPicker(mode='insert'){
+ const field=document.getElementById('message-box');
+ emojiComposerRange=field?{start:field.selectionStart,end:field.selectionEnd}:null;
+ emojiCategory='All';emojiOffset=0;
+ const hasCatalog=!!window.TENDER_EMOJI_CATALOG?.items?.length;
+ modal('Emoji, GIFs & stickers',hasCatalog?'Search thousands of free Unicode 17.0 emojis.':'Complete emoji data is loading. Refresh Tender if it stays unavailable.',`
+ <div class="tender-emoji-picker">
+  <nav class="tender-emoji-switch"><button data-action="gif-picker" type="button">GIFs</button>
+   <button data-action="emoji-category" data-category="Custom" type="button">Stickers</button>
+   <span class="selected">Emoji</span></nav>
+  <label class="tender-emoji-search">${ico('search','icon-sm')}<input id="tender-emoji-search" class="input" type="search" placeholder="Search emoji, e.g. cat, rainbow, heart…" aria-label="Search emoji" autocomplete="off"></label>
+  <div class="tender-emoji-categories" role="group" aria-label="Emoji categories">${emojiCategories.map(c=>`<button class="tender-emoji-category ${c==='All'?'active':''}" data-action="emoji-category" data-category="${c}" type="button" aria-pressed="${c==='All'}">${c}</button>`).join('')}</div>
+  <div id="tender-emoji-results" class="tender-emoji-results"></div>
+  <footer class="tender-emoji-footer"><span id="tender-emoji-count" class="hint">Loading…</span><button class="btn secondary sm" id="tender-emoji-more" data-action="emoji-more" hidden type="button">More emoji</button><button class="btn secondary sm" data-action="custom-emoji" type="button">Upload sticker</button></footer>
+ </div>`);
+ renderEmojiResults();
+}
+
 function customEmojiModal(){modal('Upload an emoji','Personal emojis work in DMs; Piece emojis can be shared with their community.',`<form id="custom-emoji-form"><div class="field"><label>Shortcode (2–24 letters/numbers)</label><input class="input" name="shortcode" pattern="[a-z0-9_]{2,24}" placeholder="buffalodance" required></div><div class="field"><label>PNG/WEBP/GIF under 256 KB</label><input class="input" type="file" name="file" accept="image/png,image/webp,image/gif" required></div>${state.area==='pieces'&&ownPiece(state.selected)?'<label class="checkbox-line"><input type="checkbox" name="piece"> Share with this Piece</label>':''}<button class="btn full" type="submit">Upload emoji</button></form>`)}
 function gifModal(){modal('Share a GIF','Paste a GIPHY or Tenor media GIF link. No paid GIF API needed.',`<form id="gif-form"><div class="field"><label>Direct GIF URL</label><input class="input" name="url" type="url" required placeholder="https://media.tenor.com/.../gif.gif"></div><button type="submit" class="btn full">Insert GIF</button></form><p class="hint">Find a GIF on a provider's website and copy its media address. GIF links are hosted by their providers.</p>`)}
 function pollModal(){if(state.area!=='chats'||!state.selected)return;modal('Create a poll','Ask your chat to vote.',`<form id="poll-form"><div class="field"><label>Question</label><input class="input" name="question" minlength="3" maxlength="200" required></div>${[1,2,3,4].map((i)=>`<div class="field"><label>Option ${i}</label><input class="input" name="option${i}" maxlength="100" ${i<3?'required':''} placeholder="Answer ${i}"></div>`).join('')}<button class="btn full" type="submit">Post poll</button></form>`)}
@@ -1273,7 +1328,20 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
    toast(ok?'Test notification sent! Check your system notifications.':'Could not display a notification. Check HTTPS and browser permissions.',!ok);return;
  }
  if(a==='emoji-picker'){emojiPicker();return}
- if(a==='emoji-insert'){const val=el.dataset.emoji;closeModal();const area=document.getElementById('message-box');if(area){area.value+=val;area.focus()}return}
+ if(a==='emoji-category'){emojiCategory=String(el.dataset.category||'All');renderEmojiResults();return}
+ if(a==='emoji-more'){renderEmojiResults(false);return}
+ if(a==='emoji-insert'){
+  const val=String(el.dataset.emoji||'');if(!val)return;
+  storeEmojiHistory(val);closeModal();
+  const field=document.getElementById('message-box');
+  if(field){
+   const start=emojiComposerRange&&Number.isInteger(emojiComposerRange.start)?Math.min(field.value.length,emojiComposerRange.start):field.value.length;
+   const end=emojiComposerRange&&Number.isInteger(emojiComposerRange.end)?Math.min(field.value.length,emojiComposerRange.end):start;
+   if(typeof field.setRangeText==='function')field.setRangeText(val,start,end,'end');else field.value+=val;
+   field.focus();field.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+  emojiComposerRange=null;return;
+ }
  if(a==='custom-emoji'){customEmojiModal();return}
  if(a==='gif-picker'){gifModal();return}
  if(a==='new-poll'){if(!extendedReady)return toast('Run the 0.2 SQL migration first.',true);pollModal();return}
@@ -1564,7 +1632,7 @@ document.addEventListener('dblclick',event=>{
 });
 document.addEventListener('submit',event=>{if(event.target.matches('form')){event.preventDefault();submitForm(event.target).catch(e=>{console.error(e);toast(e.message||'Error',true)})}});
 document.addEventListener('click',event=>{if(!event.target.closest?.('.sidebar-account-dock'))closeAccountMenu();let t=event.target.closest('[data-action]');if(!t)return;if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
-document.addEventListener('input',e=>{if(e.target.id==='message-box'&&user&&state.selected){const key='tender-draft:'+user.id+':'+[state.area,state.selected,state.pieceTab].join(':');if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
+document.addEventListener('input',e=>{if(e.target.id==='tender-emoji-search'){renderEmojiResults();return}if(e.target.id==='message-box'&&user&&state.selected){const key='tender-draft:'+user.id+':'+[state.area,state.selected,state.pieceTab].join(':');if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
 // Type-to-chat works like a desktop messenger: printable keystrokes land
 // in the current composer, never in settings or behind an open modal.
 document.addEventListener('keydown',event=>{
