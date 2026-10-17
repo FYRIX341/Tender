@@ -41,7 +41,7 @@ jobs:
           def query(statement, read_only=False):
               payload=json.dumps({'query':statement,'read_only':read_only}).encode('utf-8')
               request=urllib.request.Request(endpoint,data=payload,method='POST',
-                  headers={'Authorization':'Bearer '+token,'Content-Type':'application/json','Accept':'application/json','User-Agent':'Tender-Migration/0.4'})
+                  headers={'Authorization':'Bearer '+token,'Content-Type':'application/json','Accept':'application/json','User-Agent':'Tender-Migration/0.4.1'})
               try:
                   with urllib.request.urlopen(request,timeout=140) as response:
                       text=response.read(32768).decode('utf-8','replace')
@@ -70,8 +70,8 @@ jobs:
           if not isinstance(tables,list) or not tables or not tables[0].get('sessions_ready') or not tables[0].get('signals_ready'):
               print('::error::Secure call sessions/signals tables were not created.')
               sys.exit(1)
-          funcs=query("SELECT to_regprocedure('public.tender_start_call(uuid,uuid,boolean)') IS NOT NULL AS start_ready, to_regprocedure('public.tender_answer_call(uuid,boolean)') IS NOT NULL AS answer_ready, to_regprocedure('public.tender_end_call(uuid)') IS NOT NULL AS end_ready;",read_only=True)
-          if not isinstance(funcs,list) or not funcs or not all(funcs[0].get(name) for name in ('start_ready','answer_ready','end_ready')):
+          funcs=query("SELECT to_regprocedure('public.tender_start_call(uuid,uuid,boolean)') IS NOT NULL AS start_ready, to_regprocedure('public.tender_answer_call(uuid,boolean)') IS NOT NULL AS answer_ready, to_regprocedure('public.tender_end_call(uuid)') IS NOT NULL AS end_ready, to_regprocedure('public.tender_touch_call(uuid)') IS NOT NULL AS heartbeat_ready;",read_only=True)
+          if not isinstance(funcs,list) or not funcs or not all(funcs[0].get(name) for name in ('start_ready','answer_ready','end_ready','heartbeat_ready')):
               print('::error::Calling authorization functions were not created.')
               sys.exit(1)
           print('Tender 0.4.1: private call signaling and independent name gradients verified.')
