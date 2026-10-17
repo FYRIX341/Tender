@@ -44,7 +44,7 @@ test('app and bundled Unicode emoji data parse and load before app.js',()=>{
  assert.doesNotThrow(()=>new vm.Script(emojiJs));
  assert.ok(html.indexOf('emoji-data.js')<html.indexOf('app.js'));
 });
-test('Complete Unicode 17 fully-qualified emoji: skin tones, flags, families, searchable names',()=>{
+test('Complete Unicode 18 fully-qualified emoji: skin tones, flags, families, searchable names',()=>{
  const h=harness();assert.equal(h.catalog.groups.length,10);
  assert.ok(h.catalog.items.length>=3900);
  assert.ok(h.catalog.items.some(x=>x[0]==='🥹'));
