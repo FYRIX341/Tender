@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS public.tender_call_sessions(
  status text NOT NULL DEFAULT 'ringing'
    CHECK(status IN ('ringing','active','declined','ended')),
  created_at timestamptz NOT NULL DEFAULT now(),
+ last_heartbeat_at timestamptz NOT NULL DEFAULT now(),
  answered_at timestamptz,
  ended_at timestamptz,
  CHECK(caller_id <> callee_id)
@@ -93,7 +94,13 @@ BEGIN
  -- End abandoned sessions before creating another, without touching active calls.
  UPDATE public.tender_call_sessions
  SET status='ended',ended_at=now()
- WHERE conversation_id=cid AND status='ringing' AND created_at<now()-interval '90 seconds';
+ WHERE conversation_id=cid AND (status='ringing' AND created_at<now()-interval '90 seconds'
+   OR status='active' AND last_heartbeat_at<now()-interval '45 seconds');
+ -- Clear abandoned active calls involving either member (the browser may have crashed).
+ UPDATE public.tender_call_sessions
+ SET status='ended',ended_at=now()
+ WHERE status='active' AND last_heartbeat_at<now()-interval '45 seconds'
+ AND (caller_id IN (caller,peer) OR callee_id IN (caller,peer));
  -- Rate-limit callers to one live/ringing call to avoid repeated notifications.
  IF EXISTS(SELECT 1 FROM public.tender_call_sessions
            WHERE (caller_id IN (caller,peer) OR callee_id IN (caller,peer))
@@ -123,6 +130,19 @@ BEGIN
  RETURN true;
 END $$;
 
+CREATE OR REPLACE FUNCTION public.tender_touch_call(call_uuid uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $
+DECLARE room public.tender_call_sessions%ROWTYPE;
+BEGIN
+ SELECT * INTO room FROM public.tender_call_sessions WHERE id=call_uuid;
+ IF NOT FOUND OR auth.uid() NOT IN (room.caller_id,room.callee_id)
+   OR room.status<>'active' OR NOT public.is_chat_member(room.conversation_id) THEN
+   RETURN false;
+ END IF;
+ UPDATE public.tender_call_sessions SET last_heartbeat_at=now() WHERE id=call_uuid;
+ RETURN true;
+END $;
+
 CREATE OR REPLACE FUNCTION public.tender_end_call(call_uuid uuid)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE room public.tender_call_sessions%ROWTYPE;
@@ -140,7 +160,9 @@ END $$;
 REVOKE ALL ON FUNCTION public.tender_start_call(uuid,uuid,boolean) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.tender_answer_call(uuid,boolean) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.tender_end_call(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.tender_touch_call(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.tender_start_call(uuid,uuid,boolean) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tender_answer_call(uuid,boolean) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.tender_end_call(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.tender_touch_call(uuid) TO authenticated;
 COMMIT;
