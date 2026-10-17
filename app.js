@@ -471,7 +471,7 @@ async function subscribeTyping(){if(typingChannel){db.removeChannel(typingChanne
  const prefix=state.area==='chats'?'dm':'piece';
  typingChannel=db.channel('typing-'+prefix+'-'+state.selected,{config:{broadcast:{self:false}}}).on('broadcast',{event:'typing'},payload=>{const e=payload.payload;if(e?.user_id===user.id)return;const el=document.getElementById('typing-line');if(!el)return;el.textContent=`${pby(e.user_id).display_name} is typing…`;clearTimeout(typingTimeout);typingTimeout=setTimeout(()=>{if(el)el.textContent=''},2800)}).subscribe();}
 function broadcastTyping(){if(!typingChannel||Date.now()-typingLast<1100)return;typingLast=Date.now();typingChannel.send({type:'broadcast',event:'typing',payload:{user_id:user.id}}).catch(()=>{})}
-// Searchable complete Unicode 17.0 emoji catalog. Render 150 items per page.
+// Searchable complete Unicode 18.0 emoji catalog. Render 150 items per page.
 const emojiCategories=['All','Recent','Smileys','People','Components','Nature','Food','Travel','Activities','Objects','Symbols','Flags','Custom'];
 let emojiCategory='All',emojiOffset=0,emojiComposerRange=null,emojiPickerMode='insert',emojiReactionTarget=null;
 function emojiHistory(){
@@ -515,7 +515,7 @@ function emojiPicker(mode='insert',targetType='',targetId=''){
  emojiComposerRange=field?{start:field.selectionStart,end:field.selectionEnd}:null;
  emojiCategory='All';emojiOffset=0;
  const hasCatalog=!!window.TENDER_EMOJI_CATALOG?.items?.length;
- modal(mode==='reaction'?'React with any emoji':'Emoji, GIFs & stickers',hasCatalog?'Search thousands of free Unicode 17.0 emojis.':'Complete emoji data is loading. Refresh Tender if it stays unavailable.',`
+ modal(mode==='reaction'?'React with any emoji':'Emoji, GIFs & stickers',hasCatalog?'Search thousands of free Unicode 18.0 emojis.':'Complete emoji data is loading. Refresh Tender if it stays unavailable.',`
  <div class="tender-emoji-picker">
   ${mode==='reaction'?'<div class="tender-emoji-reaction-hint">Pick any emoji to react to this message.</div>':`<nav class="tender-emoji-switch"><button data-action="gif-picker" type="button">GIFs</button><button data-action="emoji-category" data-category="Custom" type="button">Stickers</button><span class="selected">Emoji</span></nav>`}
   <label class="tender-emoji-search">${ico('search','icon-sm')}<input id="tender-emoji-search" class="input" type="search" placeholder="Search emoji, e.g. cat, rainbow, heart…" aria-label="Search emoji" autocomplete="off"></label>
