@@ -42,7 +42,7 @@ test('website keeps current public config file',()=>{
 
 
 function createTenderHarness(){
- const ui={innerHTML:'',append(){},style:{},classList:{add(){},remove(){},toggle(){}}};
+ const ui={innerHTML:'',append(){},querySelector(){return null},style:{},classList:{add(){},remove(){},toggle(){}}};
  const field={value:'',focus(){}},sent=[];
  const document={
   getElementById(id){return id==='message-box'?field:id==='message-file'?null:id==='file-status'?null:ui},
@@ -60,14 +60,17 @@ function createTenderHarness(){
   }
  };
  const window={TENDER_CONFIG:{}};
- const context={window,document,console,URL,Intl,localStorage:{getItem(){return null},setItem(){},removeItem(){}},
+ const context={window,document,console,URL,Intl,location:{origin:'https://fyrix341.github.io'},localStorage:{getItem(){return null},setItem(){},removeItem(){}},
   setTimeout(){},clearTimeout(){},crypto:{randomUUID(){return '00000000-0000-4000-8000-000000000001'}},
-  FormData:class{constructor(form){this.form=form}get(field){return field==='body'?this.form.body:null}},
+  FormData:class{constructor(form){this.form=form}get(field){return field==='body'?this.form.body:(this.form.values||{})[field]??null}},
   navigator:{}};
  const instrumented=app.replace(/boot\(\);\s*\}\)\(\);\s*$/,
  `window.__tenderHarness={
     setup(){user={id:'user-1'};my={display_name:'Tester',handle:'tester'};state.area='chats';state.selected='room-1';db=window.__mockDb;},
     send:sendMessage,load:loadActive,messages(){return activeMessages},
+    avatar:pieceAvatar,hasPhoto:pieceHasPhoto,profileName,profileFace,showProfile,
+    setPeople(list){profiles=list;friendships=[{requester:'user-1',recipient:'user-2',status:'accepted'}]},
+    editPiece(p){newPieceModal(p);return MODALS.innerHTML},
     setPiece(){state.area='pieces';state.pieceTab='chat';state.selected='piece-1';memberships=[{piece_id:'piece-1',user_id:'user-1',role:'owner'}];activeMessages=[];},
     piece(){return renderPiece({id:'piece-1',name:'Beta Piece',owner_id:'user-1',description:'Community',color:'#f47735',icon:'🍗',is_public:true})}
   };})();`);
@@ -75,7 +78,7 @@ function createTenderHarness(){
  context.window.__mockDb=db;
  vm.runInNewContext(instrumented,context,{timeout:2000});
  const h=window.__tenderHarness;h.setup();
- return {h,field,sent};
+ return {h,field,sent,ui};
 }
 
 test('a successful send has one optimistic message and one reconciled database message',async()=>{
@@ -100,4 +103,47 @@ test('Piece chat HTML contains a usable composer outside the scrolling header',(
  const top=html.indexOf('piece-top-scroll'),chat=html.indexOf('piece-chat-history');
  assert.ok(top>=0&&chat>top);
  assert.ok(html.lastIndexOf('</div></div>',chat)>0);
+});
+
+
+test('Piece image profile picture displays for uploaded HTTPS URLs and keeps old emojis',()=>{
+ const {h}=createTenderHarness();
+ const emoji=h.avatar({id:'piece-1',color:'#f47735',icon:'🍗'});
+ assert.match(emoji,/🍗/);
+ assert.doesNotMatch(emoji,/<img/);
+ const url='https://svrculrtxjudkcljhutn.supabase.co/storage/v1/object/public/tender-banners/user-1/piece-avatar.webp';
+ const photo=h.avatar({id:'piece-1',color:'#f47735',icon:url});
+ assert.match(photo,/class="piece-avatar-image"/);
+ assert.match(photo,/piece-avatar.webp/);
+ assert.doesNotMatch(photo,/&lt;img/);
+});
+
+test('Piece editor has a PFP upload, image preview, and explicit emoji fallback',()=>{
+ const {h}=createTenderHarness();
+ const content=h.editPiece({id:'piece-1',owner_id:'user-1',name:'Community',color:'#f47735',icon:'🍗',description:'',is_public:true});
+ assert.match(content,/name="piece_pfp"/);
+ assert.match(content,/id="piece-pfp-preview"/);
+ assert.match(content,/name="icon_mode"/);
+ assert.match(content,/value="piece-1"/);
+ assert.match(content,/Only the Piece owner/);
+});
+
+test('profile triggers open from avatars and names and show full profile cards',async()=>{
+ const {h,ui}=createTenderHarness();
+ h.setPeople([{id:'user-2',handle:'crispyfriend',display_name:'Crispy Friend',bio:'Love Tender',avatar_url:'https://example.com/avatar.png',banner_url:null}]);
+ const person={id:'user-2',handle:'crispyfriend',display_name:'Crispy Friend'};
+ assert.match(h.profileFace(person),/data-action="open-profile"/);
+ assert.match(h.profileName(person),/data-id="user-2"/);
+ await h.showProfile('user-2');
+ assert.match(ui.innerHTML,/Crispy Friend/);
+ assert.match(ui.innerHTML,/Love Tender/);
+ assert.match(ui.innerHTML,/data-action="start-dm"/);
+ assert.doesNotMatch(ui.innerHTML,/email/i);
+});
+
+test('Piece edit payload uploads into an already existing public bucket instead of requiring SQL changes',()=>{
+ assert.match(app,/uploadPublicAsset\(image,'tender-banners',3145728,mime,'piece-avatar-/);
+ assert.match(app,/updated\.icon=/);
+ assert.match(app,/\.eq\('owner_id',user\.id\)/);
+ assert.match(app,/name="piece_id"/);
 });
