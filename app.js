@@ -136,9 +136,12 @@ let presenceChannel=null;
 let presenceRoster=new Map();
 function activePresence(id){
  if(!id)return 'offline';
- const declared=pby(id).presence_mode||'online';
- if(declared==='invisible')return 'offline';
- if(id===user?.id)return declared;
+ if(id===user?.id){
+  const current=my?.presence_mode||'online';
+  return current==='invisible'?'offline':current;
+ }
+ // Other users' saved profile data may be stale; the live presence roster
+ // is authoritative, and Invisible users untrack themselves.
  return presenceRoster.get(id)||'offline';
 }
 function onlineForGroup(conversation){
@@ -185,6 +188,8 @@ function updatePresenceMarkers(){
   const id=el.dataset.presenceId,status=activePresence(id);
   el.className='tender-presence-dot '+(['online','idle','dnd'].includes(status)?status:'offline');
   el.title=status;
+  const info=el.closest('.dm-row')?.querySelector('.grow p');
+  if(info)info.textContent=status==='offline'?'Offline':status==='dnd'?'Do Not Disturb':status==='idle'?'Idle':'Online';
  });
  document.querySelectorAll('[data-group-presence]').forEach(el=>{
   const c=getConversation(el.dataset.groupPresence);if(!c)return;
@@ -519,6 +524,7 @@ function emojiPicker(mode='insert',targetType='',targetId=''){
   <footer class="tender-emoji-footer"><span id="tender-emoji-count" class="hint">Loading…</span><button class="btn secondary sm" id="tender-emoji-more" data-action="emoji-more" hidden type="button">More emoji</button><button class="btn secondary sm" data-action="custom-emoji" type="button">Upload sticker</button></footer>
  </div>`);
  renderEmojiResults();
+ document.getElementById('tender-emoji-search')?.focus();
 }
 
 function customEmojiModal(){modal('Upload an emoji','Personal emojis work in DMs; Piece emojis can be shared with their community.',`<form id="custom-emoji-form"><div class="field"><label>Shortcode (2–24 letters/numbers)</label><input class="input" name="shortcode" pattern="[a-z0-9_]{2,24}" placeholder="buffalodance" required></div><div class="field"><label>PNG/WEBP/GIF under 256 KB</label><input class="input" type="file" name="file" accept="image/png,image/webp,image/gif" required></div>${state.area==='pieces'&&ownPiece(state.selected)?'<label class="checkbox-line"><input type="checkbox" name="piece"> Share with this Piece</label>':''}<button class="btn full" type="submit">Upload emoji</button></form>`)}
