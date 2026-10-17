@@ -290,16 +290,18 @@ function subscribe(){
  subscribeTyping().catch(console.warn);
 }
 function navItem(area,name,label){return `<button data-action="area" data-area="${area}" class="rail-btn ${state.area===area?'active':''}" title="${label}" aria-label="${label}">${ico(name)}<span class="rail-label">${label}</span>${area==='chats'?renderBadge(notifications.filter(n=>!n.is_read&&n.kind==='message').length):area==='friends'?renderBadge(unreadFriends()):''}</button>`}
-function render(){if(!user)return renderAuth();ROOT.innerHTML=`<div class="screen ${state.mobileDetail?'in-detail':''}" id="app-screen"><nav class="rail"><div class="rail-brand" title="Tender"><img src="buffalo.webp" alt="Buffalo"></div>${navItem('chats','chat','Chats')}${navItem('friends','users','Friends')}${navItem('pieces','pieces','Pieces')}${navItem('discover','compass','Discover')}<div class="rail-bottom"><button class="rail-btn" data-action="open-alerts" title="Activity inbox">${ico('bell')}${renderBadge(unreadAll())}</button>${navItem('settings','settings','Settings')}<button type="button" class="rail-btn rail-toggle" title="Expand or collapse sidebar" data-action="toggle-rail">${ico('pieces')}<span class="rail-label">Expand rail</span></button><button type="button" class="rail-btn" title="Show or hide member panel" data-action="toggle-info">${ico('users')}<span class="rail-label">Members</span></button></div><button class="rail-btn mobile-only ${state.area==='settings'?'active':''}" data-action="area" data-area="settings" aria-label="Settings">${ico('settings')}<span class="rail-label">Settings</span></button></nav><aside class="sidebar" id="sidebar"></aside><main class="main" id="main"></main><aside class="info-panel" id="info-panel" aria-label="Conversation details"></aside></div>`;
+function render(){if(!user)return renderAuth();ROOT.innerHTML=`<div class="screen ${state.mobileDetail?'in-detail':''}" id="app-screen"><nav class="rail"><div class="rail-brand" title="Tender"><img src="buffalo.webp" alt="Buffalo"></div>${navItem('chats','chat','Chats')}${navItem('friends','users','Friends')}${navItem('pieces','pieces','Pieces')}${navItem('discover','compass','Discover')}<div class="rail-bottom"><button class="rail-btn" data-action="open-alerts" title="Activity inbox">${ico('bell')}${renderBadge(unreadAll())}</button>${navItem('settings','settings','Settings')}<button type="button" class="rail-btn rail-toggle" title="Expand or collapse sidebar" data-action="toggle-rail">${ico('pieces')}<span class="rail-label">Expand rail</span></button><button type="button" class="rail-btn" title="Show or hide member panel" data-action="toggle-info">${ico('users')}<span class="rail-label">Members</span></button></div><button class="rail-btn mobile-only ${state.area==='settings'?'active':''}" data-action="area" data-area="settings" aria-label="Settings">${ico('settings')}<span class="rail-label">Settings</span></button></nav><aside class="sidebar" id="sidebar"></aside><div class="splitter splitter-sidebar" data-split="sidebar" role="separator" aria-label="Resize conversation list" aria-orientation="vertical" aria-valuemin="210" aria-valuemax="420" tabindex="0"></div><main class="main" id="main"></main><div class="splitter splitter-info" data-split="info" role="separator" aria-label="Resize member list" aria-orientation="vertical" aria-valuemin="190" aria-valuemax="430" tabindex="0"></div><aside class="info-panel" id="info-panel" aria-label="Conversation details"></aside></div>`;
  const screen=document.getElementById('app-screen');
  screen.classList.toggle('rail-expanded',localStorage.getItem('tender-rail-expanded')==='1');
+ screen.style.setProperty('--tender-sidebar-width',readSplitWidth('sidebar')+'px');
+ screen.style.setProperty('--tender-info-width',readSplitWidth('info')+'px');
  applyLocalAppearance();renderSidebar();renderMain()}
 function renderInfoPanel(){
  const box=document.getElementById('info-panel'),screen=document.getElementById('app-screen');if(!box||!screen)return;
  const visible=!!state.selected&&(state.area==='chats'||state.area==='pieces'||state.area==='discover');
  screen.classList.toggle('has-info',visible);
  screen.classList.toggle('info-hidden',localStorage.getItem('tender-info-hidden')==='1');
- screen.style.setProperty('--tender-info-width',Math.min(380,Math.max(190,Number(localStorage.getItem('tender-info-width'))||248))+'px');
+ screen.style.setProperty('--tender-info-width',readSplitWidth('info')+'px');
  if(!visible){box.replaceChildren();return}
  let members=[],name='',description='';
  if(state.area==='chats'){
@@ -313,7 +315,7 @@ function renderInfoPanel(){
  }
  members=members.sort((a,b)=>(a.display_name||'').localeCompare(b.display_name||''));
  const rows=members.slice(0,65).map(p=>`<button type="button" class="info-member info-member-button" data-action="open-profile" data-id="${esc(p.id)}" title="View profile">${avatars(p)}<span class="info-person"><strong>${esc(p.display_name)}</strong><small>@${esc(p.handle||'member')}${p._role?' · '+esc(p._role):''}</small></span></button>`).join('');
- box.innerHTML=`<div class="info-head"><span class="info-heading">DETAILS</span><button type="button" class="round-btn" data-action="toggle-info" aria-label="Hide panel">${ico('x','icon-sm')}</button></div><div class="info-overview"><div class="info-emblem">🍗</div><h3>${esc(name)}</h3><p>${esc(description)}</p></div><div class="info-count">Members <strong>${members.length}</strong></div><div class="info-members">${rows||'<p class="hint">No members to display.</p>'}</div><label class="info-resizer">Panel width <input type="range" id="info-width" min="190" max="380" step="10" value="${Math.min(380,Math.max(190,Number(localStorage.getItem('tender-info-width'))||248))}"></label>`;
+ box.innerHTML=`<div class="info-head"><span class="info-heading">DETAILS</span><button type="button" class="round-btn" data-action="toggle-info" aria-label="Hide panel">${ico('x','icon-sm')}</button></div><div class="info-overview"><div class="info-emblem">🍗</div><h3>${esc(name)}</h3><p>${esc(description)}</p></div><div class="info-count">Members <strong>${members.length}</strong></div><div class="info-members">${rows||'<p class="hint">No members to display.</p>'}</div><div class="info-resize-hint">↔ Drag the divider to resize</div>`;
 }
 function renderSidebar(){const el=document.getElementById('sidebar');if(!el)return;const data={chats:['MESSAGES','Your chats','new-chat'],friends:['YOUR CIRCLE','Friends','find-friends'],pieces:['YOUR SPACES','Pieces','new-piece'],discover:['EXPLORE','Discover','new-piece'],settings:['TENDER','Settings','']};const [eyebrow,title,newAction]=data[state.area];let body='';
  if(state.area==='chats'){
@@ -719,10 +721,69 @@ async function submitForm(form){switch(form.id){
  case'event-form':return safe(async()=>{const d=new FormData(form);assert(await q('piece_events').insert({piece_id:state.selected,creator_id:user.id,title:String(d.get('title')).trim(),description:String(d.get('description')).trim(),starts_at:new Date(String(d.get('starts_at'))).toISOString()}));closeModal();await refreshExtras();renderMain();toast('Event created!')});
  case'role-form':return safe(async()=>{const d=new FormData(form);assert(await q('piece_roles').insert({piece_id:state.selected,name:String(d.get('name')).trim(),color:String(d.get('color'))}));closeModal();await refreshExtras();toast('Role created!')});
  }}
+// Drag either separator directly; widths persist on pointer release. Keyboard arrows supported.
+const splitterSpec={
+ sidebar:{min:210,max:420,initial:270,key:'tender-sidebar-width',property:'--tender-sidebar-width'},
+ info:{min:190,max:430,initial:248,key:'tender-info-width',property:'--tender-info-width'}
+};
+function readSplitWidth(which){
+ const spec=splitterSpec[which];if(!spec)return 270;
+ const stored=Number(localStorage.getItem(spec.key));
+ return Number.isFinite(stored)&&stored>=spec.min&&stored<=spec.max?stored:spec.initial;
+}
+function updateSplitWidth(which,value,save=false){
+ const spec=splitterSpec[which];if(!spec)return;
+ const screen=document.getElementById('app-screen');if(!screen)return;
+ const available=Math.max(spec.min,window.innerWidth-(which==='sidebar'?630:700));
+ const width=Math.round(Math.min(spec.max,available,Math.max(spec.min,value)));
+ screen.style.setProperty(spec.property,width+'px');
+ const handle=screen.querySelector('[data-split="'+which+'"]');
+ if(handle)handle.setAttribute('aria-valuenow',String(width));
+ if(save)localStorage.setItem(spec.key,String(width));
+ return width;
+}
+let dragSplit=null;
+document.addEventListener('pointerdown',event=>{
+ const handle=event.target.closest?.('[data-split]');if(!handle||event.button!==0)return;
+ const which=handle.dataset.split,screen=document.getElementById('app-screen');
+ if(!screen||window.matchMedia('(max-width:760px)').matches)return;
+ const spec=splitterSpec[which];
+ dragSplit={which,pointerId:event.pointerId,startX:event.clientX,initial:parseFloat(getComputedStyle(screen).getPropertyValue(spec.property))||readSplitWidth(which)};
+ handle.setPointerCapture?.(event.pointerId);
+ handle.classList.add('dragging');document.body.classList.add('tender-dragging');
+ event.preventDefault();
+});
+document.addEventListener('pointermove',event=>{
+ if(!dragSplit||event.pointerId!==dragSplit.pointerId)return;
+ const delta=event.clientX-dragSplit.startX;
+ updateSplitWidth(dragSplit.which,dragSplit.initial+(dragSplit.which==='info'?-delta:delta));
+});
+function endSplitDrag(event){
+ if(!dragSplit||event.pointerId!==dragSplit.pointerId)return;
+ const which=dragSplit.which,handle=document.querySelector('[data-split="'+which+'"]');
+ const screen=document.getElementById('app-screen');
+ if(screen){
+  const current=parseFloat(getComputedStyle(screen).getPropertyValue(splitterSpec[which].property));
+  updateSplitWidth(which,current,true);
+ }
+ if(handle?.hasPointerCapture?.(event.pointerId))handle.releasePointerCapture(event.pointerId);
+ handle?.classList.remove('dragging');document.body.classList.remove('tender-dragging');dragSplit=null;
+}
+document.addEventListener('pointerup',endSplitDrag);
+document.addEventListener('pointercancel',endSplitDrag);
+document.addEventListener('dblclick',event=>{
+ const handle=event.target.closest?.('[data-split]');if(handle)updateSplitWidth(handle.dataset.split,splitterSpec[handle.dataset.split].initial,true);
+});
 document.addEventListener('submit',event=>{if(event.target.matches('form')){event.preventDefault();submitForm(event.target).catch(e=>{console.error(e);toast(e.message||'Error',true)})}});
 document.addEventListener('click',event=>{let t=event.target.closest('[data-action]');if(!t)return;if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
-document.addEventListener('input',e=>{if(e.target.id==='message-box'&&user&&state.selected){const key='tender-draft:'+user.id+':'+[state.area,state.selected,state.pieceTab].join(':');if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='info-width'){document.getElementById('app-screen')?.style.setProperty('--tender-info-width',e.target.value+'px');return}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();if(e.key==='Enter'&&!e.shiftKey&&e.target.id==='message-box'){e.preventDefault();e.target.closest('form')?.requestSubmit()}if(e.key==='Enter'&&e.target.getAttribute('role')==='button')e.target.click()});
+document.addEventListener('input',e=>{if(e.target.id==='message-box'&&user&&state.selected){const key='tender-draft:'+user.id+':'+[state.area,state.selected,state.pieceTab].join(':');if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
+document.addEventListener('keydown',e=>{
+ if(e.target?.matches?.('[data-split]')&&['ArrowLeft','ArrowRight','Home'].includes(e.key)){
+   e.preventDefault();const which=e.target.dataset.split,spec=splitterSpec[which],dir=which==='info'?-1:1;
+   const value=e.key==='Home'?spec.initial:readSplitWidth(which)+dir*(e.key==='ArrowRight'?16:-16);
+   updateSplitWidth(which,value,true);return;
+ }
+ if(e.key==='Escape')closeModal();if(e.key==='Enter'&&!e.shiftKey&&e.target.id==='message-box'){e.preventDefault();e.target.closest('form')?.requestSubmit()}if(e.key==='Enter'&&e.target.getAttribute('role')==='button')e.target.click()});
 document.addEventListener('change',e=>{
   if(e.target.id==='tender-theme-import'){
     const file=e.target.files?.[0];if(!file)return;
@@ -740,7 +801,7 @@ document.addEventListener('change',e=>{
     return
   }
   if(e.target.matches('.tender-local-pref')){const p=localPrefs(),k=e.target.name;p[k]=k==='fontSize'?Number(e.target.value):k==='reduceMotion'?e.target.value==='yes':e.target.value;localStorage.setItem('tender-0.3-appearance',JSON.stringify(p));applyLocalAppearance();return}
-  if(e.target.id==='info-width'){localStorage.setItem('tender-info-width',e.target.value);document.getElementById('app-screen')?.style.setProperty('--tender-info-width',e.target.value+'px');return}
+  
  if(e.target.id==='piece-pfp-file'){
    const file=e.target.files?.[0],preview=document.getElementById('piece-pfp-preview'),image=document.getElementById('piece-pfp-preview-img');
    if(preview&&image){if(image.dataset.previewUrl)URL.revokeObjectURL(image.dataset.previewUrl);
