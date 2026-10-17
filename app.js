@@ -391,13 +391,42 @@ function render(){if(!user)return renderAuth();ROOT.innerHTML=`<div class="scree
  screen.style.setProperty('--tender-sidebar-width',readSplitWidth('sidebar')+'px');
  screen.style.setProperty('--tender-info-width',readSplitWidth('info')+'px');
  applyLocalAppearance();renderSidebar();renderMain()}
+function dmProfilePanelHTML(person){
+ const shared=sharedPublicPieces(person.id);
+ return `<div class="info-head"><span class="info-heading">USER PROFILE</span><button type="button" class="round-btn" data-action="toggle-info" aria-label="Hide profile panel" title="Hide profile panel">${ico('x','icon-sm')}</button></div>
+ <div class="dm-profile-panel">
+  <button type="button" class="dm-profile-cover" data-action="open-profile" data-id="${esc(person.id)}" aria-label="Open full profile of ${esc(person.display_name||'member')}">
+    <div class="dm-profile-banner" ${person.banner_url?`style="background-image:linear-gradient(#0c0f2055,#0c0f206a),url(&quot;${esc(validUrl(person.banner_url))}&quot;)"`:''}></div>
+    <span class="dm-profile-avatar">${avatars(person)}</span>
+  </button>
+  <div class="dm-profile-body">
+   <button type="button" class="dm-profile-name" data-action="open-profile" data-id="${esc(person.id)}">${esc(person.display_name||'Tender member')} ${ico('external','icon-sm')}</button>
+   <div class="dm-profile-handle">@${esc(person.handle||'member')}${person.pronouns?' · '+esc(person.pronouns):''}</div>
+   ${profileStatus(person)}
+   ${person.game_status?`<div class="dm-profile-status">${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</div>`:''}
+   <div class="dm-profile-actions">${profileActions(person,true)}</div>
+   <div class="dm-profile-about"><h3>ABOUT ME</h3><p>${esc(person.bio||'No bio yet. 🍗').replace(/\n/g,'<br>')}</p></div>
+   <div class="dm-profile-about"><h3>SHARED PUBLIC PIECES <span class="profile-detail-count">${shared.length}</span></h3>
+    ${shared.length?`<div class="profile-shared-pieces">${shared.slice(0,3).map(piece=>`<button type="button" class="profile-piece-row" data-action="open-profile-piece" data-id="${esc(piece.id)}">${pieceAvatar(piece)}<span><strong>${esc(piece.name)}</strong><small>Shared community</small></span>${ico('external','icon-sm')}</button>`).join('')}</div>`:'<p class="hint">No shared public Pieces yet.</p>'}</div>
+   <button type="button" class="btn secondary dm-view-full" data-action="open-profile" data-id="${esc(person.id)}">View full profile ${ico('external','icon-sm')}</button>
+  </div>
+ </div>`;
+}
 function renderInfoPanel(){
- const box=document.getElementById('info-panel'),screen=document.getElementById('app-screen');if(!box||!screen)return;
+ const box=document.getElementById('info-panel'),screen=document.getElementById('app-screen');
+ if(!box||!screen)return;
  const visible=!!state.selected&&(state.area==='chats'||state.area==='pieces'||state.area==='discover');
  screen.classList.toggle('has-info',visible);
  screen.classList.toggle('info-hidden',localStorage.getItem('tender-info-hidden')==='1');
  screen.style.setProperty('--tender-info-width',readSplitWidth('info')+'px');
  if(!visible){box.replaceChildren();return}
+ if(state.area==='chats'){
+   const c=getConversation(state.selected);if(!c){box.replaceChildren();return}
+   if(c.kind!=='group'){
+     const other=(c.conversation_members||[]).find(m=>m.user_id!==user.id);
+     if(other){box.innerHTML=dmProfilePanelHTML(pby(other.user_id));return}
+   }
+ }
  let members=[],name='',description='';
  if(state.area==='chats'){
    const c=getConversation(state.selected);if(!c)return;
@@ -692,7 +721,8 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
   if(a==='export-theme'){const p=JSON.stringify({name:'Tender 0.3 theme',appearance:localPrefs()},null,2);const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([p],{type:'application/json'}));link.download='tender-theme.json';link.click();setTimeout(()=>URL.revokeObjectURL(link.href),2500);toast('Theme saved locally!');return}
   if(a==='toggle-info'){const visible=localStorage.getItem('tender-info-hidden')==='1';localStorage.setItem('tender-info-hidden',visible?'0':'1');renderInfoPanel();return}
   if(a==='toggle-rail'){const expanded=localStorage.getItem('tender-rail-expanded')==='1';localStorage.setItem('tender-rail-expanded',expanded?'0':'1');document.getElementById('app-screen')?.classList.toggle('rail-expanded',!expanded);return}
-  if(a==='open-profile'){await showProfile(id);return}
+  if(a==='open-profile-piece'){closeModal();await goTo('pieces',id);return}
+   if(a==='open-profile'){await showProfile(id);return}
   if(a==='open-alerts'){alertsModal();return}
  if(a==='open-alert'){closeModal();if(el.dataset.cid)await goTo('chats',el.dataset.cid);else await goTo('friends');return}
  if(a==='confirm-yes'){settleConfirm(true);return}
