@@ -1,7 +1,7 @@
 name: Tender QA Checks
 on:
   push:
-    branches: [tender-0.3-private-beta, tender-0.3.2-discord-polish, tender-0.3.3-replies-profiles-invites, tender-0.3.4-settings-stability, main]
+    branches: [tender-0.3-private-beta, tender-0.3.2-discord-polish, tender-0.3.3-replies-profiles-invites, tender-0.3.4-settings-stability, tender-0.3.5-account-dock-mentions, main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,11 +23,11 @@ jobs:
           node --check config.js
           node --check tender-sw.js
       - name: Run Tender regression tests
-        run: node --test tests/tender-0.3.test.cjs tests/tender-0.3.2.test.cjs tests/tender-0.3.3.test.cjs tests/tender-0.3.4.test.cjs
+        run: node --test tests/tender-0.3.test.cjs tests/tender-0.3.2.test.cjs tests/tender-0.3.3.test.cjs tests/tender-0.3.4.test.cjs tests/tender-0.3.5.test.cjs
       - name: Package private beta for desktop testing
         uses: actions/upload-artifact@v4
         with:
-          name: Tender-0.3.4-qa
+          name: Tender-0.3.5-qa
           path: |
             index.html
             styles.css

@@ -28,6 +28,10 @@ const ICONS = {
  palette:'<circle cx="12" cy="12" r="9"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="8" r="1"/><path d="M16.4 14.1a2.4 2.4 0 0 0 0 4.8"/>',
  shield:'<path d="m12 22 1.5-.7C19 18.7 21 14 21 8V4l-9-3-9 3v4c0 6 2 10.7 7.5 13.3z"/><path d="m9 12 2 2 4-4"/>',
  accessibility:'<circle cx="12" cy="3.5" r="1.5"/><path d="M3 8h18M12 8v5m0 0-5 8m5-8 5 8"/>',
+ mic:'<rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5m-4 0h8"/>',
+ 'mic-off':'<path d="m2 2 20 20M9 9v3a3 3 0 0 0 5 2M15 9V5a3 3 0 0 0-5-2M5 10a7 7 0 0 0 12 5M19 10a7 7 0 0 1-1 4M12 17v5m-4 0h8"/>',
+ headphones:'<path d="M3 14v-3a9 9 0 0 1 18 0v3M3 14v5a2 2 0 0 0 2 2h3v-9H5a2 2 0 0 0-2 2zm18 0v5a2 2 0 0 1-2 2h-3v-9h3a2 2 0 0 1 2 2z"/>',
+ 'headphones-off':'<path d="m2 2 20 20M3 14v-3a9 9 0 0 1 2-6M10 2a9 9 0 0 1 11 9v3M3 14v5a2 2 0 0 0 2 2h3v-9H5a2 2 0 0 0-2 2zM19 12h-3v9h3a2 2 0 0 0 2-2v-5"/>',
  edit:'<path d="m16 3 5 5-12 12H4v-5zM14 5l5 5"/>', bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>'
 };
 const ico=(name,extra='')=>`<span class="ico ${extra}" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||ICONS.info}</svg></span>`;
@@ -164,9 +168,32 @@ function invitePickerModal(){
  modal('Share a Piece invite','Pick a public Piece to include as a preview in this conversation.',`
    <div class="invite-picker-list">${available.map(piece=>`<button type="button" class="invite-picker-item" data-action="insert-piece-invite" data-id="${esc(piece.id)}">${pieceAvatar(piece)}<span><strong>${esc(piece.name)}</strong><small>Insert invitation link</small></span>${ico('plus','icon-sm')}</button>`).join('')||'<p class="hint">Join a public Piece first to share its invitation.</p>'}</div>`);
 }
-function messageText(text){if(String(text||'').startsWith('[TENDER_EMBED]'))return richEmbedHTML(text);let result=esc(text||'').replace(/(https:\/\/[^\s<]+)/g,m=>{const u=validUrl(m.replace(/&amp;/g,'&'));return u==='#'?m:`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer" class="message-link">${m}</a>`});
- result=result.replace(/:([a-z0-9_]{2,24}):/g,(whole,code)=>{const e=customEmojis.find(x=>x.shortcode===code&&(x.piece_id===null||x.piece_id===state.selected));return e?`<img class="inline-custom-emoji" src="${esc(db.storage.from('tender-emoji').getPublicUrl(e.image_path).data.publicUrl)}" alt=":${esc(code)}:" title=":${esc(code)}:">`:whole});if(/^:[a-z0-9_]{2,24}:$/.test(String(text||'').trim()))result=result.replace('class="inline-custom-emoji"','class="inline-custom-emoji sticker-emoji"');const invite=extractPublicPieceInvite(text);
- return result.replace(/\n/g,'<br>')+(invite?pieceInviteCardHTML(invite):'')}
+// Mention markup only touches ordinary escaped text, never URLs/attributes/other HTML.
+function mentionedPlainText(raw){
+ return esc(raw).replace(/(^|[^a-z0-9_@])@([a-z0-9_]{3,20})(?![a-z0-9_])/gi,(full,prefix,handle)=>{
+  const member=profiles.find(p=>p.handle?.toLowerCase()===handle.toLowerCase());
+  if(!member)return full;
+  const self=member.id===user?.id;
+  return prefix+`<button type="button" class="tender-mention ${self?'mention-self':''}" data-action="open-profile" data-id="${esc(member.id)}" title="View @${esc(member.handle)}'s profile">@${esc(handle)}</button>`;
+ });
+}
+function messageText(text){
+ if(String(text||'').startsWith('[TENDER_EMBED]'))return richEmbedHTML(text);
+ const raw=String(text||'');
+ let result=raw.split(/(https:\/\/[^\s<]+)/gi).map(part=>{
+  if(!/^https:\/\//i.test(part))return mentionedPlainText(part);
+  const url=validUrl(part);
+  return url==='#'?esc(part):`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="message-link">${esc(part)}</a>`;
+ }).join('');
+ result=result.replace(/:([a-z0-9_]{2,24}):/g,(whole,code)=>{
+  const e=customEmojis.find(x=>x.shortcode===code&&(x.piece_id===null||x.piece_id===state.selected));
+  return e?`<img class="inline-custom-emoji" src="${esc(db.storage.from('tender-emoji').getPublicUrl(e.image_path).data.publicUrl)}" alt=":${esc(code)}:" title=":${esc(code)}:">`:whole;
+ });
+ if(/^:[a-z0-9_]{2,24}:$/.test(raw.trim()))result=result.replace('class="inline-custom-emoji"','class="inline-custom-emoji sticker-emoji"');
+ const invite=extractPublicPieceInvite(text);
+ return result.replace(/\n/g,'<br>')+(invite?pieceInviteCardHTML(invite):'');
+}
+
 // Rich announcement embeds are stored as ordinary message text (no new tables needed).
 function richEmbedHTML(text){
  let p;try{p=JSON.parse(String(text).slice('[TENDER_EMBED]'.length))}catch{return esc(text)}
@@ -210,7 +237,7 @@ async function markRead(cid=null,friend=false){if(!extendedReady||!user)return;t
  if(cid||friend){await db.rpc('mark_tender_notifications_read',{cid:cid||null,pid:null,include_friends:friend});notifications.forEach(n=>{if(cid&&n.conversation_id===cid||friend&&n.kind==='friend')n.is_read=true});renderSidebar();renderNavBadges();}
  }catch(e){console.warn('Read receipts:',e)}}
 function renderNavBadges(){const chatButton=document.querySelector('.rail-btn[data-area="chats"]'),friendButton=document.querySelector('.rail-btn[data-area="friends"]');for(const [el,n] of [[chatButton,notifications.filter(x=>x.kind==='message'&&!x.is_read).length],[friendButton,unreadFriends()]]){if(!el)continue;el.querySelector('.unread-badge')?.remove();if(n)el.insertAdjacentHTML('beforeend',renderBadge(n))}document.title=unreadAll()?`(${unreadAll()}) Tender 🍗`:'Tender 🍗'}
-function soundPing(){if(!my?.notification_sound||my?.presence_mode==='dnd')return;try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return;const c=new C(),o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.setValueAtTime(my.notification_tone==='soft'?480:my.notification_tone==='chime'?900:680,c.currentTime);o.frequency.exponentialRampToValueAtTime(my.notification_tone==='soft'?550:my.notification_tone==='chime'?1150:920,c.currentTime+.08);g.gain.setValueAtTime(.001,c.currentTime);g.gain.exponentialRampToValueAtTime(.04,c.currentTime+.02);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.17);o.connect(g).connect(c.destination);o.start();o.stop(c.currentTime+.2);o.onended=()=>c.close();}catch{}}
+function soundPing(){if(audioPrefs().deafened||!my?.notification_sound||my?.presence_mode==='dnd')return;try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return;const c=new C(),o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.setValueAtTime(my.notification_tone==='soft'?480:my.notification_tone==='chime'?900:680,c.currentTime);o.frequency.exponentialRampToValueAtTime(my.notification_tone==='soft'?550:my.notification_tone==='chime'?1150:920,c.currentTime+.08);g.gain.setValueAtTime(.001,c.currentTime);g.gain.exponentialRampToValueAtTime(.04,c.currentTime+.02);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.17);o.connect(g).connect(c.destination);o.start();o.stop(c.currentTime+.2);o.onended=()=>c.close();}catch{}}
 // Notifications require HTTPS and an explicit permission grant. The service worker
 // enables notifications on mobile while the Tender page is open; it is NOT a push server.
 let notificationWorkerPromise=null;
@@ -446,7 +473,7 @@ function subscribe(){
  subscribeTyping().catch(console.warn);
 }
 function navItem(area,name,label){return `<button data-action="area" data-area="${area}" class="rail-btn ${state.area===area?'active':''}" title="${label}" aria-label="${label}">${ico(name)}<span class="rail-label">${label}</span>${area==='chats'?renderBadge(notifications.filter(n=>!n.is_read&&n.kind==='message').length):area==='friends'?renderBadge(unreadFriends()):''}</button>`}
-function render(){if(!user)return renderAuth();ROOT.innerHTML=`<div class="screen ${state.mobileDetail?'in-detail':''}" id="app-screen"><nav class="rail"><div class="rail-brand" title="Tender"><img src="buffalo.webp" alt="Buffalo"></div>${navItem('chats','chat','Chats')}${navItem('friends','users','Friends')}${navItem('pieces','pieces','Pieces')}${navItem('discover','compass','Discover')}<div class="rail-bottom"><button class="rail-btn" data-action="open-alerts" title="Activity inbox">${ico('bell')}${renderBadge(unreadAll())}</button>${navItem('settings','settings','Settings')}<button type="button" class="rail-btn rail-toggle" title="Expand or collapse sidebar" data-action="toggle-rail">${ico('pieces')}<span class="rail-label">Expand rail</span></button><button type="button" class="rail-btn" title="Show or hide member panel" data-action="toggle-info">${ico('users')}<span class="rail-label">Members</span></button></div><button class="rail-btn mobile-only ${state.area==='settings'?'active':''}" data-action="area" data-area="settings" aria-label="Settings">${ico('settings')}<span class="rail-label">Settings</span></button></nav><aside class="sidebar" id="sidebar"></aside><div class="splitter splitter-sidebar" data-split="sidebar" role="separator" aria-label="Resize conversation list" aria-orientation="vertical" aria-valuemin="210" aria-valuemax="420" tabindex="0"></div><main class="main" id="main"></main><div class="splitter splitter-info" data-split="info" role="separator" aria-label="Resize member list" aria-orientation="vertical" aria-valuemin="190" aria-valuemax="430" tabindex="0"></div><aside class="info-panel" id="info-panel" aria-label="Conversation details"></aside></div>`;
+function render(){if(!user)return renderAuth();ROOT.innerHTML=`<div class="screen ${state.mobileDetail?'in-detail':''}" id="app-screen"><nav class="rail"><div class="rail-brand" title="Tender"><img src="buffalo.webp" alt="Buffalo"></div>${navItem('chats','chat','Chats')}${navItem('friends','users','Friends')}${navItem('pieces','pieces','Pieces')}${navItem('discover','compass','Discover')}<div class="rail-bottom"><button class="rail-btn" data-action="open-alerts" title="Activity inbox">${ico('bell')}${renderBadge(unreadAll())}</button><button type="button" class="rail-btn rail-toggle" title="Expand or collapse sidebar" data-action="toggle-rail">${ico('pieces')}<span class="rail-label">Expand rail</span></button><button type="button" class="rail-btn" title="Show or hide member panel" data-action="toggle-info">${ico('users')}<span class="rail-label">Members</span></button></div><button class="rail-btn mobile-only ${state.area==='settings'?'active':''}" data-action="area" data-area="settings" aria-label="Settings">${ico('settings')}<span class="rail-label">Settings</span></button></nav><aside class="sidebar" id="sidebar"></aside><div class="splitter splitter-sidebar" data-split="sidebar" role="separator" aria-label="Resize conversation list" aria-orientation="vertical" aria-valuemin="210" aria-valuemax="420" tabindex="0"></div><main class="main" id="main"></main><div class="splitter splitter-info" data-split="info" role="separator" aria-label="Resize member list" aria-orientation="vertical" aria-valuemin="190" aria-valuemax="430" tabindex="0"></div><aside class="info-panel" id="info-panel" aria-label="Conversation details"></aside></div>`;
  const screen=document.getElementById('app-screen');
  screen.classList.toggle('rail-expanded',localStorage.getItem('tender-rail-expanded')==='1');
  screen.style.setProperty('--tender-sidebar-width',readSplitWidth('sidebar')+'px');
@@ -502,21 +529,85 @@ function renderInfoPanel(){
  const rows=members.slice(0,65).map(p=>`<button type="button" class="info-member info-member-button" data-action="open-profile" data-id="${esc(p.id)}" title="View profile">${avatars(p)}<span class="info-person"><strong>${esc(p.display_name)}</strong><small>@${esc(p.handle||'member')}${p._role?' · '+esc(p._role):''}</small></span></button>`).join('');
  box.innerHTML=`<div class="info-head"><span class="info-heading">DETAILS</span><button type="button" class="round-btn" data-action="toggle-info" aria-label="Hide panel">${ico('x','icon-sm')}</button></div><div class="info-overview"><div class="info-emblem">🍗</div><h3>${esc(name)}</h3><p>${esc(description)}</p></div><div class="info-count">Members <strong>${members.length}</strong></div><div class="info-members">${rows||'<p class="hint">No members to display.</p>'}</div><div class="info-resize-hint">↔ Drag the divider to resize</div>`;
 }
-function renderSidebar(){const el=document.getElementById('sidebar');if(!el)return;const data={chats:['MESSAGES','Your chats','new-chat'],friends:['YOUR CIRCLE','Friends','find-friends'],pieces:['YOUR SPACES','Pieces','new-piece'],discover:['EXPLORE','Discover','new-piece'],settings:['TENDER','Settings','']};const [eyebrow,title,newAction]=data[state.area];let body='';
+// The dock has real local audio controls and a synced Supabase availability.
+const availability=[['online','Online','Ready to chat'],['idle','Idle','Away for a bit'],['dnd','Do Not Disturb','Quiet notifications'],['invisible','Invisible','Appear offline']];
+function audioPrefs(){if(!user)return {micMuted:false,deafened:false};try{let x=JSON.parse(localStorage.getItem('tender-audio-'+user.id)||'{}');return {micMuted:x.micMuted===true,deafened:x.deafened===true}}catch{return {micMuted:false,deafened:false}}}
+function saveAudioPrefs(p){if(user)localStorage.setItem('tender-audio-'+user.id,JSON.stringify({micMuted:!!p.micMuted,deafened:!!p.deafened}))}
+const mediaMuteState=new WeakMap();
+function syncDeafenedAudio(){
+ const mute=audioPrefs().deafened;
+ for(const media of document.querySelectorAll('audio,video')){
+  if(mute){if(!mediaMuteState.has(media))mediaMuteState.set(media,media.muted);media.muted=true}
+  else if(mediaMuteState.has(media)){media.muted=mediaMuteState.get(media);mediaMuteState.delete(media)}
+ }
+}
+function accountDockHTML(open=false){
+ if(!user||!my)return '';
+ const audio=audioPrefs(),status=availability.some(x=>x[0]===my.presence_mode)?my.presence_mode:'online';
+ return `<div class="tender-account-bar">
+  <button type="button" class="account-identity-btn" data-action="account-menu-toggle" aria-controls="tender-account-menu" aria-expanded="${open}" aria-haspopup="menu" title="Your profile and account options">
+   <span class="account-dock-avatar">${avatars(my)}<i class="account-presence-dot ${status}"></i></span>
+   <span class="account-dock-label"><strong>${esc(my.display_name)}</strong><small>@${esc(my.handle||'member')} · ${availability.find(x=>x[0]===status)[1]}</small></span></button>
+  <div class="account-audio-controls">
+   <button type="button" class="account-tool-btn ${audio.micMuted?'is-off':''}" data-action="account-mic" aria-pressed="${audio.micMuted}" title="${audio.micMuted?'Unmute':'Mute'} voice-note microphone" aria-label="${audio.micMuted?'Unmute':'Mute'} microphone">${ico(audio.micMuted?'mic-off':'mic','icon-sm')}</button>
+   <button type="button" class="account-tool-btn ${audio.deafened?'is-off':''}" data-action="account-deafen" aria-pressed="${audio.deafened}" title="${audio.deafened?'Undeafen':'Deafen'} Tender sounds" aria-label="${audio.deafened?'Undeafen':'Deafen'}">${ico(audio.deafened?'headphones-off':'headphones','icon-sm')}</button>
+   <button type="button" class="account-tool-btn" data-action="account-settings" title="Settings" aria-label="Settings">${ico('settings','icon-sm')}</button>
+  </div></div>
+ <div class="tender-account-menu" role="menu" id="tender-account-menu" aria-label="Account options" ${open?'':'hidden'}>
+   <div class="account-menu-banner"></div>
+   <div class="account-menu-profile"><span class="account-menu-avatar">${avatars(my)}</span><strong>${esc(my.display_name)}</strong><small>@${esc(my.handle||'member')}</small>${my.game_status?`<p>${esc(my.status_emoji||'🍗')} ${esc(my.game_status)}</p>`:''}</div>
+   <div class="account-menu-actions">
+    <button type="button" class="account-menu-item" data-action="account-profile">${ico('user','icon-sm')} View Full Profile</button>
+    <button type="button" class="account-menu-item" data-action="account-settings">${ico('edit','icon-sm')} Edit Profile</button>
+    <span class="account-menu-section">SET YOUR STATUS</span>
+    ${availability.map(([key,label,desc])=>`<button type="button" class="account-menu-presence ${status===key?'active':''}" data-action="account-presence" data-value="${key}" aria-pressed="${status===key}"><i class="account-presence-dot ${key}"></i><span><strong>${label}</strong><small>${desc}</small></span>${status===key?ico('check','icon-sm'):''}</button>`).join('')}
+    <div class="account-menu-separator"></div>
+    <button type="button" class="account-menu-item" data-action="account-copy-id">${ico('clip','icon-sm')} Copy User ID</button>
+    <button type="button" class="account-menu-item" data-action="account-switch">${ico('logout','icon-sm')} Switch Accounts</button>
+    <p class="account-menu-hint">Mute disables Tender voice-note recording. Deafen silences Tender sounds. Live calls aren't available yet.</p>
+   </div>
+ </div>`;
+}
+function renderAccountDock(open){
+ const el=document.getElementById('sidebar-account-dock');if(!el)return;
+ const wasOpen=!!el.querySelector('#tender-account-menu:not([hidden])');
+ el.innerHTML=accountDockHTML(typeof open==='boolean'?open:wasOpen);
+}
+function closeAccountMenu(){
+ const panel=document.getElementById('tender-account-menu');
+ if(panel&&!panel.hidden){panel.hidden=true;document.querySelector('.account-identity-btn')?.setAttribute('aria-expanded','false')}
+}
+function renderSidebar(){
+ const el=document.getElementById('sidebar');if(!el)return;
+ const data={chats:['MESSAGES','Direct Messages','new-chat'],friends:['YOUR CIRCLE','Friends','find-friends'],pieces:['YOUR SPACES','Pieces','new-piece'],discover:['EXPLORE','Discover','new-piece'],settings:['TENDER','Settings','']};
+ const [eyebrow,title,newAction]=data[state.area];let body='';
  if(state.area==='chats'){
   body=conversations.filter(c=>!state.search||namesFor(c).toLowerCase().includes(state.search.toLowerCase())).map(c=>{
-    const otherId=c.kind!=='group'?(c.conversation_members||[]).find(m=>m.user_id!==user.id)?.user_id:null;
-    const other=otherId?pby(otherId):null;
-    return `<div class="side-row ${state.selected===c.id?'selected':''}" data-action="open-chat" data-id="${c.id}">${other?profileFace(other):avatarFor(c)}<div class="grow">${other?profileName(other):`<strong>${esc(namesFor(c))}</strong>`}<p>${c.kind==='group'?'Group conversation':'Direct message'}</p></div>${renderBadge(unreadCount(c.id))}</div>`;
-   }).join('')||'<p class="hint" style="padding:18px">No conversations yet. Find a friend to start chatting.</p>';
+   const otherId=c.kind!=='group'?(c.conversation_members||[]).find(m=>m.user_id!==user.id)?.user_id:null;
+   const other=otherId?pby(otherId):null;
+   return `<div class="side-row ${state.selected===c.id?'selected':''}" data-action="open-chat" data-id="${esc(c.id)}">${other?profileFace(other):avatarFor(c)}<div class="grow">${other?profileName(other):`<strong>${esc(namesFor(c))}</strong>`}<p>${c.kind==='group'?'Group conversation':'Direct message'}</p></div>${renderBadge(unreadCount(c.id))}</div>`;
+  }).join('')||'<p class="hint" style="padding:18px">No conversations yet. Find a friend to start chatting.</p>';
  }else if(state.area==='friends'){
-  const ids=myFriendIds();body=`<div class="side-section">Friends <span>${ids.length}</span></div>${ids.map(id=>`<div class="side-row ${state.selected===id?'selected':''}" data-action="open-friend" data-id="${id}">${profileFace(pby(id))}<div class="grow">${profileName(pby(id))}<p>@${esc(pby(id).handle)}</p></div></div>`).join('')||'<p class="hint" style="padding:18px">Friends will show up here.</p>'}`;
+  const ids=myFriendIds();
+  body=`<div class="side-section">Friends <span>${ids.length}</span></div>${ids.map(id=>`<div class="side-row ${state.selected===id?'selected':''}" data-action="open-friend" data-id="${esc(id)}">${profileFace(pby(id))}<div class="grow">${profileName(pby(id))}<p>@${esc(pby(id).handle)}</p></div></div>`).join('')||'<p class="hint" style="padding:18px">Friends will show up here.</p>'}`;
  }else if(state.area==='pieces'||state.area==='discover'){
   const showing=pieces.filter(p=>(state.area==='discover'?p.is_public:inPiece(p.id))&&(!state.search||p.name.toLowerCase().includes(state.search.toLowerCase())));
-  body=showing.map(p=>`<div class="side-row ${state.selected===p.id?'selected':''}" data-action="open-piece" data-id="${p.id}">${pieceAvatar(p)}<div class="grow"><strong>${esc(p.name)}</strong><p>${esc((p.description||'A Tender Piece').slice(0,58))}</p></div></div>`).join('')||'<p class="hint" style="padding:18px">No Pieces here yet.</p>';
- }else{body=`<div class="side-row" data-action="settings-profile">${avatars(my)}<div class="grow"><strong>${esc(my.display_name)}</strong><p>@${esc(my.handle)}</p></div></div><div class="side-row" data-action="logout">${ico('logout')}<div class="grow"><strong>Log out</strong><p>See you soon!</p></div></div>`;}
- el.innerHTML=`<div class="sidebar-top"><div class="eyebrow">${eyebrow}</div><div class="sidebar-title"><h2>${title}</h2>${newAction?`<button class="plus-btn" aria-label="Create" title="Create" data-action="${newAction}">${ico('plus')}</button>`:''}</div>${state.area!=='settings'?`<label class="searchbox">${ico('search','icon-sm')}<input id="sidebar-search" value="${esc(state.search)}" placeholder="Search ${state.area==='chats'?'conversations':state.area==='friends'?'friends':'Pieces'}..." aria-label="Search"></label>`:''}</div><div class="sidebar-content">${body}</div>`;
+  body=showing.map(p=>`<div class="side-row ${state.selected===p.id?'selected':''}" data-action="open-piece" data-id="${esc(p.id)}">${pieceAvatar(p)}<div class="grow"><strong>${esc(p.name)}</strong><p>${esc((p.description||'A Tender Piece').slice(0,58))}</p></div></div>`).join('')||'<p class="hint" style="padding:18px">No Pieces here yet.</p>';
+ }else{
+  body=`<button type="button" class="side-row account-side-shortcut" data-action="settings-profile">${avatars(my)}<span class="grow"><strong>${esc(my.display_name)}</strong><p>@${esc(my.handle)}</p></span></button>`;
+ }
+ const accountMenuWasOpen=!!document.getElementById('tender-account-menu')&&!document.getElementById('tender-account-menu').hidden;
+ const savedListScroll=el.querySelector('.sidebar-content')?.scrollTop||0;
+ el.innerHTML=`<div class="sidebar-top">${state.area==='chats'?`
+   <button type="button" class="sidebar-friends-top ${state.area==='friends'?'selected':''}" data-action="area" data-area="friends">${ico('users')}<span>Friends</span>${unreadFriends()?renderBadge(unreadFriends()):''}</button>
+   <div class="sidebar-title dm-heading"><span>DIRECT MESSAGES</span><button class="plus-btn" aria-label="New direct message" title="New direct message" data-action="new-chat">${ico('plus')}</button></div>`:
+   `<div class="eyebrow">${eyebrow}</div><div class="sidebar-title"><h2>${title}</h2>${newAction?`<button class="plus-btn" aria-label="Create" title="Create" data-action="${newAction}">${ico('plus')}</button>`:''}</div>`}
+   ${state.area!=='settings'?`<label class="searchbox">${ico('search','icon-sm')}<input id="sidebar-search" value="${esc(state.search)}" placeholder="Search ${state.area==='chats'?'DMs':state.area==='friends'?'friends':'Pieces'}..." aria-label="Search"></label>`:''}
+   </div><div class="sidebar-content">${body}</div><div class="sidebar-account-dock" id="sidebar-account-dock">${accountDockHTML(accountMenuWasOpen)}</div>`;
+ const list=el.querySelector('.sidebar-content');if(list)list.scrollTop=savedListScroll;
+ syncDeafenedAudio();
 }
+
 function header(title,sub='',buttons=''){return `<header class="main-top"><div class="head-left"><button class="round-btn mobile-back" data-action="go-back" title="Back">${ico('back')}</button><div class="title-area"><h2>${esc(title)}</h2><p>${esc(sub)}</p></div></div><div class="head-actions">${buttons}</div></header>`}
 // Tender 0.3.4: background updates must not erase in-progress settings edits.
 // Capture only within the SAME section; tab changes are deliberate navigation.
@@ -598,6 +689,7 @@ function renderMain(){const m=document.getElementById('main');if(!m)return;
  renderNavBadges();m.dataset.threadKey=newKey;
  const chatScroll=m.querySelector('.chat-scroll');
  if(chatScroll)chatScroll.scrollTop=pos&&oldKey===newKey&&!pos.near?pos.top:chatScroll.scrollHeight;
+ syncDeafenedAudio();
  renderInfoPanel()
 }
 function renderChat(c){const title=namesFor(c),otherId=c.kind!=='group'?(c.conversation_members||[]).find(x=>x.user_id!==user.id)?.user_id:null;return header(title,c.kind==='group'?`${(c.conversation_members||[]).length} members`:'Private conversation',`${otherId?`<button class="round-btn" data-action="open-profile" data-id="${esc(otherId)}" title="View profile" aria-label="View profile">${ico('users')}</button>`:''}<button class="round-btn" data-action="search" title="Search messages">${ico('search')}</button><button class="round-btn" data-action="chat-info" title="Conversation info">${ico('info')}</button><button class="round-btn" data-action="toggle-info" title="Toggle member panel">${ico('users')}</button><button class="round-btn" data-action="room-appearance" title="Customize this chat">🎨</button>`)+`<div class="main-body"><div class="chat-history">${pinnedHTML()}<div class="chat-scroll" id="chat-scroll">${activeMessages.length?activeMessages.map(x=>messageHTML(x,'message')).join(''):`<div class="chat-empty"><img src="buffalo.webp" alt="Buffalo"><h3>Start the conversation</h3><p class="hint">Say hi to ${esc(title)}!</p></div>`}</div><button type="button" class="chat-jump-new" id="chat-jump-new" data-action="jump-latest" hidden>↓ New messages · Jump to latest</button>${composer('chat',`Message ${title}`)}</div></div>`}
@@ -808,14 +900,14 @@ const tenderCommands=[
 ];
 function updateComposerAssist(field){
  let box=document.getElementById('composer-assist');if(!box||!field)return;
- const value=field.value,cmd=value.match(/^\/([a-z]*)$/i),mention=value.match(/@([a-z0-9_]*)$/i);
+ const value=field.value,cmd=value.match(/^\/([a-z]*)$/i),mention=value.match(/(?:^|\s)@([a-z0-9_]*)$/i);
  if(cmd){
   const matches=tenderCommands.filter(c=>c.name.startsWith(cmd[1].toLowerCase())).slice(0,7);
   box.innerHTML=matches.map(c=>`<button type="button" class="assist-row" data-action="insert-slash" data-command="${c.name}"><strong>/${c.name}</strong><span>${esc(c.detail)}</span><small>${esc(c.usage)}</small></button>`).join('');
  }else if(mention){
   const ids=state.area==='chats'?(getConversation(state.selected)?.conversation_members||[]).map(x=>x.user_id):memberships.filter(x=>x.piece_id===state.selected).map(x=>x.user_id);
   const people=[...new Set(ids)].map(id=>pby(id)).filter(p=>(p.handle||'').toLowerCase().startsWith(mention[1].toLowerCase())).slice(0,6);
-  box.innerHTML=people.map(p=>`<button type="button" class="assist-row" data-action="insert-mention" data-handle="${esc(p.handle)}">${avatars(p)}<strong>@${esc(p.handle)}</strong><span>${esc(p.display_name)}</span></button>`).join('');
+  box.innerHTML=people.map(p=>`<button type="button" class="assist-row mention-assist-row" data-action="insert-mention" data-handle="${esc(p.handle)}"><span class="mention-suggest-avatar">${avatars(p)}</span><span class="mention-suggest-identity"><strong>@${esc(p.handle)}</strong><small>${esc(p.display_name)}</small></span></button>`).join('');
  }else box.innerHTML='';
  box.hidden=!box.innerHTML;
 }
@@ -865,6 +957,52 @@ async function sendMessage(form){let text=String(new FormData(form).get('body')|
 }
 const galleryUrl=path=>db.storage.from('tender-gallery').getPublicUrl(path).data.publicUrl;
 async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=el.dataset.tab;try{
+ if(a==='account-menu-toggle'){
+  const menu=document.getElementById('tender-account-menu');
+  if(menu){menu.hidden=!menu.hidden;el.setAttribute('aria-expanded',String(!menu.hidden));}
+  return;
+ }
+ if(a==='account-profile'){closeAccountMenu();await showProfile(user.id);return}
+ if(a==='account-settings'){closeAccountMenu();state.settingsTab='profile';await goTo('settings');return}
+ if(a==='account-copy-id'){
+  closeAccountMenu();
+  try{if(!navigator.clipboard?.writeText)throw Error('Clipboard unavailable');await navigator.clipboard.writeText(user.id);toast('Your Tender user ID was copied. 🍗')}
+  catch{modal('Copy your Tender ID','This identifies your account, not your password.',`<label class="field"><span>Your user ID</span><input class="input" id="tender-user-id-copy" readonly value="${esc(user.id)}"></label>`);document.getElementById('tender-user-id-copy')?.select();}
+  return;
+ }
+ if(a==='account-switch'){
+  closeAccountMenu();
+  if(!await tenderConfirm('Switch Tender accounts?','Your current session will end on this device. Sign in using your other account to continue.','Switch accounts',false))return;
+  await safe(async()=>{assert(await db.auth.signOut());unsub();reset();state.loginMode='login';renderAuth()});
+  return;
+ }
+ if(a==='account-presence'){
+  const value=String(el.dataset.value||'');
+  if(!availability.some(x=>x[0]===value))return;
+  if(!extendedReady)return toast('Presence settings require Tender account features.',true);
+  await safe(async()=>{
+   assert(await q('profiles').update({presence_mode:value}).eq('id',user.id));
+   cacheUpdatedProfile({presence_mode:value});
+   renderAccountDock(true);
+   toast('Status set to '+availability.find(x=>x[0]===value)[1]+'.');
+  });
+  return;
+ }
+ if(a==='account-mic'){
+  const audio=audioPrefs();
+  if(!audio.micMuted&&voiceRecorder?.state==='recording')return toast('Finish recording your voice note before muting the microphone.',true);
+  audio.micMuted=!audio.micMuted;
+  saveAudioPrefs(audio);renderAccountDock(false);
+  toast(audio.micMuted?'Tender microphone muted for voice notes.':'Tender microphone ready for voice notes.');
+  return;
+ }
+ if(a==='account-deafen'){
+  const audio=audioPrefs();
+  audio.deafened=!audio.deafened;saveAudioPrefs(audio);
+  syncDeafenedAudio();renderAccountDock(false);
+  toast(audio.deafened?'Tender sounds muted. 🔇':'Tender sounds enabled. 🔊');
+  return;
+ }
  if(a==='trivia-answer'){const box=document.getElementById('trivia-result');if(box){box.textContent=el.dataset.correct==='1'?'✅ Nice! Buffalo approves. 🍗':'Not quite! Try another round.';box.style.color=el.dataset.correct==='1'?'#70ddb6':'#ffad80';document.querySelectorAll('.trivia-answer').forEach(b=>b.disabled=true)}return}
   if(a==='insert-slash'||a==='insert-mention'){const field=document.getElementById('message-box');if(!field)return;if(a==='insert-slash')field.value='/'+el.dataset.command+' ';else field.value=field.value.replace(/@[a-z0-9_]*$/i,'@'+el.dataset.handle+' ');field.focus();updateComposerAssist(field);field.dispatchEvent(new Event('input',{bubbles:true}));return}
   if(a==='copy-piece-link'){invitePieceModal(selectedPiece());return}
@@ -1137,7 +1275,7 @@ document.addEventListener('dblclick',event=>{
  const handle=event.target.closest?.('[data-split]');if(handle)updateSplitWidth(handle.dataset.split,splitterSpec[handle.dataset.split].initial,true);
 });
 document.addEventListener('submit',event=>{if(event.target.matches('form')){event.preventDefault();submitForm(event.target).catch(e=>{console.error(e);toast(e.message||'Error',true)})}});
-document.addEventListener('click',event=>{let t=event.target.closest('[data-action]');if(!t)return;if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
+document.addEventListener('click',event=>{if(!event.target.closest?.('.sidebar-account-dock'))closeAccountMenu();let t=event.target.closest('[data-action]');if(!t)return;if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
 document.addEventListener('input',e=>{if(e.target.id==='message-box'&&user&&state.selected){const key='tender-draft:'+user.id+':'+[state.area,state.selected,state.pieceTab].join(':');if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
 // Type-to-chat works like a desktop messenger: printable keystrokes land
 // in the current composer, never in settings or behind an open modal.
@@ -1168,7 +1306,7 @@ document.addEventListener('keydown',e=>{
    const value=e.key==='Home'?spec.initial:readSplitWidth(which)+dir*(e.key==='ArrowRight'?16:-16);
    updateSplitWidth(which,value,true);return;
  }
- if(e.key==='Escape')closeModal();if(e.key==='Enter'&&!e.shiftKey&&e.target.id==='message-box'){e.preventDefault();e.target.closest('form')?.requestSubmit()}if(e.key==='Enter'&&e.target.getAttribute('role')==='button')e.target.click()});
+ if(e.key==='Escape'){closeAccountMenu();closeModal()}if(e.key==='Enter'&&!e.shiftKey&&e.target.id==='message-box'){e.preventDefault();e.target.closest('form')?.requestSubmit()}if(e.key==='Enter'&&e.target.getAttribute('role')==='button')e.target.click()});
 document.addEventListener('change',e=>{
   if(e.target.id==='tender-theme-import'){
     const file=e.target.files?.[0];if(!file)return;
@@ -1203,12 +1341,14 @@ document.addEventListener('change',e=>{
  if(e.target.matches('.role-assign')&&e.target.value){const role=e.target.dataset.role;const userId=e.target.value;safe(async()=>{assert(await q('piece_role_assignments').insert({role_id:role,user_id:userId}));toast('Role assigned!')})}
 });
 let dragDepth=0;
+document.addEventListener('play',e=>{if(audioPrefs().deafened&&e.target?.matches?.('audio,video'))syncDeafenedAudio()},true);
 document.addEventListener('scroll',e=>{if(!e.target?.matches?.('.chat-scroll'))return;const pill=document.getElementById('chat-jump-new');if(pill&&e.target.scrollHeight-e.target.scrollTop-e.target.clientHeight<55)pill.hidden=true},true);
 document.addEventListener('dragover',e=>{if(e.dataTransfer?.types?.includes('Files')&&document.querySelector('#composer-form')){e.preventDefault();document.body.classList.add('dragover')}});
 document.addEventListener('dragleave',e=>{if(e.relatedTarget===null)document.body.classList.remove('dragover')});
 document.addEventListener('drop',e=>{if(!document.querySelector('#composer-form'))return;e.preventDefault();document.body.classList.remove('dragover');const file=e.dataTransfer?.files?.[0],input=document.getElementById('message-file');if(file&&input){const transfer=new DataTransfer();transfer.items.add(file);input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}))}});
 async function toggleVoiceRecording(){
  if(voiceRecorder&&voiceRecorder.state==='recording'){voiceRecorder.stop();return}
+ if(audioPrefs().micMuted){toast('Your Tender microphone is muted. Unmute it in your account dock to record a voice note.',true);return}
  if(!navigator.mediaDevices?.getUserMedia||typeof MediaRecorder==='undefined'){toast('Voice recording unavailable in this browser.',true);return}
  try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});voiceChunks=[];const mime=['audio/webm','audio/ogg','audio/mp4'].find(t=>MediaRecorder.isTypeSupported(t));voiceRecorder=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);voiceRecorder.ondataavailable=e=>{if(e.data?.size)voiceChunks.push(e.data)};
  voiceRecorder.onstop=()=>{stream.getTracks().forEach(t=>t.stop());const type=voiceRecorder.mimeType||'audio/webm',extension=type.includes('ogg')?'ogg':type.includes('mp4')?'mp4':'webm';const blob=new Blob(voiceChunks,{type});if(blob.size>5*1024*1024){toast('Voice note too large. Maximum 5 MB.',true);return}recordedVoice=new File([blob],'Voice-message.'+extension,{type});const label=document.getElementById('file-status');if(label)label.textContent='🎙️ Voice note ready. Press Send!';toast('Voice note ready!')};voiceRecorder.start();const label=document.getElementById('file-status');if(label)label.textContent='🔴 Recording… press microphone again to stop.';
