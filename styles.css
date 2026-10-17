@@ -1082,3 +1082,12 @@ kbd{display:inline-block;background:var(--surface);border:1px solid var(--stroke
  .tender-rich-link{max-width:100%}
 }
 @media(prefers-reduced-motion:reduce){.tender-rich-link{transition:none!important;transform:none!important}}
+
+/* During presentation, show your own shared-screen thumbnail, separate from peer volume. */
+.tender-call-stage .call-stream-self[hidden]{display:none!important}
+.tender-call-stage .call-stream-self{position:absolute;left:15px;bottom:15px;width:min(220px,31%);height:120px;max-height:26%;z-index:4;border:2px solid #2fbf93;border-radius:10px;background:#07141a;box-shadow:0 8px 30px #000b;overflow:hidden}
+.tender-call-stage .call-stream-self>span{position:absolute;left:6px;top:6px;z-index:2;padding:3px 6px;border-radius:5px;background:#102d26dc;color:#c7fff0;font-size:10px}
+.tender-call-stage .call-stream-self video{height:100%;width:100%;object-fit:contain}
+.dm-profile-panel{background:linear-gradient(157deg,var(--profile-start,#21385d),var(--profile-end,#563561))!important}
+.dm-profile-panel>:not(.dm-profile-cover){background-color:#0e142276}
+@media(max-width:760px){.tender-call-stage .call-stream-self{height:72px;left:9px;bottom:9px}}
