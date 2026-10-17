@@ -102,3 +102,48 @@ test('custom confirmation Promise resolves on approve and backdrop close cancels
  api.close();
  assert.equal(await negative,false);
 });
+
+
+test('settings render actual section navigation, profile and optional pronouns input',()=>{
+ const fake={innerHTML:'',append(){},querySelector(){return null},style:{},classList:{add(){},remove(){},toggle(){}}};
+ const win={TENDER_CONFIG:{},isSecureContext:false};
+ const doc={getElementById(){return fake},addEventListener(){},documentElement:{dataset:{},style:{setProperty(){},removeProperty(){}}}};
+ const ctx={window:win,document:doc,console,URL,Intl,location:{origin:'https://example.com',href:'https://example.com/'},navigator:{},
+   setTimeout(){},clearTimeout(){},localStorage:{getItem(){return null},setItem(){},removeItem(){}}};
+ const inst=app.replace(/boot\(\);\s*\}\)\(\);\s*$/,
+   'window.__settingsTest={setup(){user={id:"u",email:"user@example.com"};my={id:"u",display_name:"Tester",handle:"tester",bio:"Bio",game_status:"Chilling",pronouns:"they/them",avatar_url:null};extendedReady=true;pronounsReady=true},render:renderSettings};})();');
+ assert.notEqual(inst,app);
+ vm.runInNewContext(inst,ctx,{timeout:2000});
+ win.__settingsTest.setup();
+ const profile=win.__settingsTest.render();
+ assert.match(profile,/data-tab="privacy"/);
+ assert.match(profile,/data-tab="appearance"/);
+ assert.match(profile,/name="pronouns"/);
+ assert.match(profile,/they\/them/);
+ assert.match(profile,/name="game_status"/);
+});
+
+test('native notifications are sent once per incoming event, and never for sender’s own messages',async()=>{
+ const fake={innerHTML:'',append(){},querySelector(){return null},style:{},classList:{add(){},remove(){},toggle(){}}};
+ const events=[];class BrowserNotification{
+  static permission='granted';
+  constructor(title,opts){events.push({title,opts})}
+  close(){}
+ }
+ const win={TENDER_CONFIG:{},isSecureContext:true};
+ const doc={getElementById(){return fake},addEventListener(){},documentElement:{dataset:{},style:{setProperty(){},removeProperty(){}}},
+   visibilityState:'hidden'};
+ const ctx={window:win,document:doc,console,URL,Intl,location:{origin:'https://example.com',href:'https://example.com/Tender/'},
+   Notification:BrowserNotification,navigator:{},setTimeout(){},clearTimeout(){},localStorage:{getItem(){return null},setItem(){},removeItem(){}}};
+ const inst=app.replace(/boot\(\);\s*\}\)\(\);\s*$/,
+  'window.__notifyTest={setup(){user={id:"u1"};my={handle:"member",notification_mode:"all",notification_sound:false,presence_mode:"online"};profiles=[{id:"u2",display_name:"Friend",handle:"friend"}]},notify:showBrowserNotification};})();');
+ assert.notEqual(inst,app);
+ vm.runInNewContext(inst,ctx,{timeout:2000});
+ win.__notifyTest.setup();
+ const n={id:'note-1',user_id:'u1',actor_id:'u2',kind:'message',body:'hey',conversation_id:'room-1'};
+ await win.__notifyTest.notify(n);await win.__notifyTest.notify(n);
+ await win.__notifyTest.notify({...n,id:'note-2',actor_id:'u1'});
+ assert.equal(events.length,1);
+ assert.match(events[0].title,/Friend/);
+ assert.equal(events[0].opts.tag,'tender-note-1');
+});
