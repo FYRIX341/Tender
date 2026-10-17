@@ -570,7 +570,7 @@ function friendItem(p,kind,fid=''){return `<div class="friend-row">${profileFace
 function renderFriend(p){return header(p.display_name,`@${p.handle}`)+`<div class="main-body"><div class="content-pad">${profileBanner(p)}<div class="profile-head"><h2>${esc(p.display_name)}</h2><p>@${esc(p.handle)}</p></div><div class="card"><h3>About me</h3><p class="page-subtitle">${esc(p.bio||'This person is keeping things mysterious. 🍗')}</p>${p.game_status?`<p class="hint top-spacer">${esc(p.status_emoji||'🍗')} ${esc(p.game_status)}</p>`:''}<div class="button-group top-spacer"><button class="btn" data-action="start-dm" data-id="${p.id}">${ico('chat')} Message</button><button class="btn secondary" data-action="remove-friend" data-id="${p.id}">${ico('x')} Remove friend</button>${extendedReady?`<button class="btn danger" data-action="toggle-block" data-id="${p.id}">${blockedUsers.some(b=>b.blocked_id===p.id)?'Unblock':'Block'}</button>`:''}</div></div></div></div>`}
 function renderPieceList(discover){const list=pieces.filter(p=>discover?p.is_public:inPiece(p.id));return header(discover?'Discover Pieces':'Your Pieces',discover?'Explore communities made by people':'All your favorite corners of Tender',`<button class="btn sm" data-action="new-piece">${ico('plus')} New Piece</button>`)+`<div class="main-body"><div class="content-pad"><div class="section-row"><div><h1 class="page-title">${discover?'Find your people 🔥':'Your Pieces 🧩'}</h1><p class="page-subtitle">Each Piece has a chat, forum, and gallery. No servers. Just shared interests.</p></div></div><div class="grid grid-3">${list.map(p=>`<article class="card piece-grid-card" tabindex="0" role="button" data-action="open-piece" data-id="${p.id}"><div class="piece-card-banner" style="background:${esc(p.color)}33">${pieceAvatar(p,'piece-icon-card')}</div><div class="piece-card-inner"><h3>${esc(p.name)}</h3><p>${esc(p.description||'A Tender community')}</p><div class="compact-stats"><span class="tag">${p.is_public?'Public':'Private'}</span></div></div></article>`).join('')}</div>${list.length?'':`<div class="notice-inline top-spacer">${discover?'No public Pieces yet. Create the first one!':'You have not joined any Pieces yet. Head to Discover to browse.'}</div>`}</div></div>`}
 function renderPiece(piece){let joined=inPiece(piece.id),own=ownPiece(piece.id);let buttons=`${joined?`<button class="btn sm secondary" data-action="leave-piece" ${own?'disabled title="Owner cannot leave"':''}>${own?'Owner':'Leave'}</button>`:`${piece.is_public?`<button class="btn sm" data-action="join-piece">Join Piece</button>`:''}`}${own?`<button class="round-btn" title="Edit Piece" data-action="edit-piece">${ico('settings')}</button><button class="round-btn" title="Custom roles" data-action="piece-roles">👑</button>`:''}`;
- buttons+=`${piece.is_public?'<button class="round-btn" data-action="copy-piece-link" title="Copy Piece invitation link">🔗</button>':''}<button class="round-btn" data-action="toggle-info" title="Members">👥</button><button class="round-btn" data-action="room-appearance" title="Customize this Piece">🎨</button>`;
+ buttons+=`${piece.is_public?'<button class="round-btn" data-action="copy-piece-link" title="Share Piece invitation card" aria-label="Share Piece invitation card">🔗</button>':''}<button class="round-btn" data-action="toggle-info" title="Members">👥</button><button class="round-btn" data-action="room-appearance" title="Customize this Piece">🎨</button>`;
   let content='';if(state.pieceTab==='chat') content=`<div class="chat-history piece-chat-history"><div class="chat-scroll">${activeMessages.length?activeMessages.map(m=>messageHTML(m,'piece_message')).join(''):`<div class="chat-empty"><img src="buffalo.webp" alt="Buffalo"><h3>${joined?'No messages yet':'Join this Piece to chat'}</h3><p>${joined?'Say hello to your Piece! 🍗':'Become a member to participate in community chat.'}</p>${!joined&&piece.is_public?'<button type="button" class="btn" data-action="join-piece">Join Piece</button>':''}</div>`}</div><button type="button" class="chat-jump-new" id="chat-jump-new" data-action="jump-latest" hidden>↓ New messages · Jump to latest</button>${composer('piece','Message this Piece')}</div>`;
  if(state.pieceTab==='forum') content=`<div class="section-row"><h2 class="section-heading">Discussions</h2>${joined?`<button class="btn sm" data-action="new-post">${ico('plus')} New post</button>`:''}</div><div class="grid">${activePosts.map(post=>`<article class="post-card" role="button" tabindex="0" data-action="open-post" data-id="${post.id}"><div class="post-meta">${profileName(pby(post.author_id))} · ${relative(post.created_at)}</div><h3>${post.pinned?'📌 ':''}${esc(post.title)}</h3>${post.tags?.length?`<div class="tagline">${post.tags.map(t=>`<span class="tag">#${esc(t)}</span>`).join('')}</div>`:''}<p class="post-body">${esc(post.body.slice(0,240))}${post.body.length>240?'...':''}</p><div class="post-footer">${ico('chat','icon-sm')} ${post.locked?'🔒 Locked':'Read discussion'} ${(own||memberships.some(m=>m.piece_id===post.piece_id&&m.user_id===user.id&&m.role==='moderator'))&&extendedReady?`<button class="emoji-inline" data-action="pin-post" data-id="${post.id}" title="Pin">📌</button><button class="emoji-inline" data-action="lock-post" data-id="${post.id}" title="Lock">🔒</button>`:''}${post.author_id===user.id||own?`<button class="emoji-inline" data-action="delete-post" data-id="${post.id}" title="Delete post">${ico('trash','icon-sm')}</button>`:''}</div></article>`).join('')||'<div class="notice-inline">No discussions yet. Be the first to post.</div>'}</div>`;
  if(state.pieceTab==='gallery')content=`<div class="section-row"><h2 class="section-heading">Gallery</h2>${joined&&piece.is_public?`<button class="btn sm" data-action="new-gallery">${ico('plus')} Upload picture</button>`:''}</div><div class="gallery-grid">${activeGallery.map(photo=>`<article class="gallery-card"><img src="${esc(galleryUrl(photo.image_path))}" alt="${esc(photo.caption||'Community image')}" data-action="enlarge" data-src="${esc(galleryUrl(photo.image_path))}"><div class="gallery-info"><p>${esc(photo.caption)}</p><div class="post-meta">${profileName(pby(photo.author_id))} · ${relative(photo.created_at)}</div><div class="bubble-actions"><button class="emoji-inline" data-action="reaction-menu" data-type="gallery" data-id="${photo.id}">${ico('smile')}</button>${own||photo.author_id===user.id?`<button class="emoji-inline" data-action="delete-gallery" data-id="${photo.id}" data-path="${esc(photo.image_path)}">${ico('trash')}</button>`:''}</div></div></article>`).join('')||'<div class="notice-inline">The gallery is waiting for its first photo.</div>'}</div>`;
@@ -715,7 +715,8 @@ const tenderCommands=[
  {name:'theme',detail:'Change current chat wallpaper',usage:'/theme'},
  {name:'who',detail:'Show conversation members',usage:'/who'},
  {name:'trivia',detail:'Play a private trivia round',usage:'/trivia'},
- {name:'embed',detail:'Build a rich announcement card',usage:'/embed'}
+ {name:'embed',detail:'Build a rich announcement card',usage:'/embed'},
+ {name:'invite',detail:'Share a public Piece with an invitation card',usage:'/invite'}
 ];
 function updateComposerAssist(field){
  let box=document.getElementById('composer-assist');if(!box||!field)return;
@@ -748,6 +749,7 @@ function applySlashCommand(body,kind){
   case'who':if(kind==='chat')chatInfo();else{const p=selectedPiece();modal('Piece members',p?.name||'Members',`<div>${memberships.filter(x=>x.piece_id===state.selected).slice(0,50).map(x=>friendItem(pby(x.user_id),'info')).join('')}</div>`)}return {handled:true};
   case'trivia':triviaModal();return {handled:true};
   case'embed':embedModal();return {handled:true};
+  case'invite':if(kind!=='chat')return {error:'Use /invite in a DM or group chat.'};invitePickerModal();return {handled:true};
   case'poll':if(kind!=='chat')return {error:'Piece polls require backend support; use a DM or group for now.'};pollModal();return {handled:true};
   case'gif':gifModal();return {handled:true};
   case'search':searchModal();return {handled:true};
@@ -777,7 +779,28 @@ const galleryUrl=path=>db.storage.from('tender-gallery').getPublicUrl(path).data
 async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=el.dataset.tab;try{
  if(a==='trivia-answer'){const box=document.getElementById('trivia-result');if(box){box.textContent=el.dataset.correct==='1'?'✅ Nice! Buffalo approves. 🍗':'Not quite! Try another round.';box.style.color=el.dataset.correct==='1'?'#70ddb6':'#ffad80';document.querySelectorAll('.trivia-answer').forEach(b=>b.disabled=true)}return}
   if(a==='insert-slash'||a==='insert-mention'){const field=document.getElementById('message-box');if(!field)return;if(a==='insert-slash')field.value='/'+el.dataset.command+' ';else field.value=field.value.replace(/@[a-z0-9_]*$/i,'@'+el.dataset.handle+' ');field.focus();updateComposerAssist(field);field.dispatchEvent(new Event('input',{bubbles:true}));return}
-  if(a==='copy-piece-link'){const p=selectedPiece();if(!p?.is_public)return toast('Private Piece invitations need additional server-side permissions.',true);const url=new URL(window.location.pathname,window.location.origin);url.searchParams.set('piece',p.id);try{await navigator.clipboard.writeText(url.href);toast('Piece invitation link copied!')}catch{modal('Invite link','Copy this public Piece link.',`<input class="input" readonly value="${esc(url.href)}">`)}return}
+  if(a==='copy-piece-link'){invitePieceModal(selectedPiece());return}
+  if(a==='copy-piece-invite'){
+    const url=String(el.dataset.url||'');
+    if(!url.startsWith('https://'))return toast('Secure HTTPS invitation links are required.',true);
+    try{await navigator.clipboard.writeText(url);toast('Invitation copied! Send it to your friends. 🍗')}
+    catch{const field=document.getElementById('invite-link');field?.focus();field?.select();toast('Select and copy the invitation link above.')}
+    return;
+  }
+  if(a==='open-piece-invite'){
+    const piece=pieces.find(p=>p.id===id&&p.is_public);
+    if(!piece)return toast('This Piece invite is no longer available.',true);
+    closeModal();await goTo(inPiece(piece.id)?'pieces':'discover',piece.id);return;
+  }
+  if(a==='insert-piece-invite'){
+    const piece=pieces.find(p=>p.id===id&&p.is_public);
+    if(!piece)return toast('This Piece invite is no longer available.',true);
+    const url=pieceInviteURL(piece);closeModal();
+    const field=document.getElementById('message-box');if(!field)return;
+    field.value=(field.value.trim()?field.value.trim()+'\n':'')+url;
+    field.focus();field.dispatchEvent(new Event('input',{bubbles:true}));
+    toast('Invite inserted into your message.');return;
+  }
   if(a==='room-appearance'){roomAppearanceModal();return}
   if(a==='export-theme'){const p=JSON.stringify({name:'Tender 0.3 theme',appearance:localPrefs()},null,2);const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([p],{type:'application/json'}));link.download='tender-theme.json';link.click();setTimeout(()=>URL.revokeObjectURL(link.href),2500);toast('Theme saved locally!');return}
   if(a==='toggle-info'){const visible=localStorage.getItem('tender-info-hidden')==='1';localStorage.setItem('tender-info-hidden',visible?'0':'1');renderInfoPanel();return}
