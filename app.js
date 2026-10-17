@@ -145,8 +145,47 @@ async function markRead(cid=null,friend=false){if(!extendedReady||!user)return;t
  }catch(e){console.warn('Read receipts:',e)}}
 function renderNavBadges(){const chatButton=document.querySelector('.rail-btn[data-area="chats"]'),friendButton=document.querySelector('.rail-btn[data-area="friends"]');for(const [el,n] of [[chatButton,notifications.filter(x=>x.kind==='message'&&!x.is_read).length],[friendButton,unreadFriends()]]){if(!el)continue;el.querySelector('.unread-badge')?.remove();if(n)el.insertAdjacentHTML('beforeend',renderBadge(n))}document.title=unreadAll()?`(${unreadAll()}) Tender 🍗`:'Tender 🍗'}
 function soundPing(){if(!my?.notification_sound||my?.presence_mode==='dnd')return;try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return;const c=new C(),o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.setValueAtTime(my.notification_tone==='soft'?480:my.notification_tone==='chime'?900:680,c.currentTime);o.frequency.exponentialRampToValueAtTime(my.notification_tone==='soft'?550:my.notification_tone==='chime'?1150:920,c.currentTime+.08);g.gain.setValueAtTime(.001,c.currentTime);g.gain.exponentialRampToValueAtTime(.04,c.currentTime+.02);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.17);o.connect(g).connect(c.destination);o.start();o.stop(c.currentTime+.2);o.onended=()=>c.close();}catch{}}
-function showBrowserNotification(n){if(n.user_id!==user?.id)return;const mode=my?.notification_mode||'all';if(mode==='none'||my?.presence_mode==='dnd'||my?.presence_mode==='invisible')return;if(mode==='mentions'&&!n.body?.toLowerCase().includes('@'+my.handle.toLowerCase())&&n.kind!=='friend')return;
- soundPing();if(document.visibilityState!=='hidden'||Notification.permission!=='granted')return;const actor=pby(n.actor_id);const title=n.kind==='friend'?'New friend request':`Message from ${actor.display_name}`;try{const pop=new Notification(title,{body:n.body?.slice(0,100)||'Open Tender',icon:'buffalo.webp',tag:'tender-'+n.id});pop.onclick=()=>{window.focus();if(n.conversation_id)goTo('chats',n.conversation_id);pop.close()}}catch(e){console.warn('Notification:',e)}}
+// Notifications require HTTPS and an explicit permission grant. The service worker
+// enables notifications on mobile while the Tender page is open; it is NOT a push server.
+let notificationWorkerPromise=null;
+const notifiedEventIds=new Set();
+function ensureNotificationWorker(){
+ if(notificationWorkerPromise)return notificationWorkerPromise;
+ if(!window.isSecureContext||!('serviceWorker' in navigator))return Promise.resolve(null);
+ notificationWorkerPromise=navigator.serviceWorker.register('./tender-sw.js',{scope:'./'})
+   .then(reg=>reg).catch(error=>{console.warn('Tender notification worker unavailable',error);return null});
+ return notificationWorkerPromise;
+}
+async function emitSystemNotification(title,body,tag='tender-test',conversationId=null){
+ if(!window.isSecureContext||typeof Notification==='undefined'||Notification.permission!=='granted')return false;
+ const opts={body,icon:new URL('buffalo.webp',location.href).href,badge:new URL('buffalo.webp',location.href).href,tag,renotify:false,data:{conversationId}};
+ // A page-owned service-worker registration can show notifications in mobile browsers.
+ let worker=null;try{worker=await ensureNotificationWorker()}catch{}
+ if(worker?.showNotification){
+   await worker.showNotification(title,opts);return true;
+ }
+ // Desktop-only fallback: the constructor isn't supported in most mobile browsers.
+ try{
+  const toastNotification=new Notification(title,opts);
+  toastNotification.onclick=()=>{window.focus();if(conversationId)goTo('chats',conversationId).catch(console.warn);toastNotification.close()};
+  return true;
+ }catch(error){console.warn('Browser notification not shown',error);return false}
+}
+async function showBrowserNotification(n){
+ if(!n||!user||n.user_id!==user.id||n.actor_id===user.id)return;
+ if(my?.notification_mode==='none'||['dnd','invisible'].includes(my?.presence_mode))return;
+ const text=String(n.body||'').toLowerCase(),handle=String(my?.handle||'').toLowerCase();
+ if(my?.notification_mode==='mentions'&&n.kind!=='friend'&&!text.includes('@'+handle))return;
+ if(notifiedEventIds.has(n.id))return;
+ notifiedEventIds.add(n.id);
+ if(notifiedEventIds.size>250)notifiedEventIds.delete(notifiedEventIds.values().next().value);
+ soundPing();
+ const actor=pby(n.actor_id);
+ const title=n.kind==='friend'?'👋 New friend request':'💬 '+(actor.display_name||'New Tender message');
+ const body=String(n.body||'Open Tender to see the activity.').slice(0,130);
+ try{await emitSystemNotification(title,body,'tender-'+n.id,n.conversation_id||null)}
+ catch(error){console.warn('Tender notification error',error)}
+}
 // 0.3: reconcile only the visible stream on realtime message events.
 let reconciling=false, reconcileAgain=false;
 function scheduleReconcile(active=true,kind='',event=null){
@@ -248,7 +287,19 @@ async function showProfile(id){
 }
 function profileBanner(p){const isSelf=p.id===user?.id;return `<div class="profile-banner crispy-profile effect-${esc(p.profile_effect||'none')}" ${p.banner_url?`style="background-image:linear-gradient(0deg,#17191d7a,transparent),url('${esc(validUrl(p.banner_url))}')"`:''}>${avatars(p)}${isSelf?'<span class="banner-hint">Your Tender profile</span>':''}</div>`}
 async function uploadPublicAsset(file,bucket,limit,mimes,prefix){if(!file||file.size>limit||!mimes.includes(file.type))throw Error('This file type or size is not supported.');const extension=({"image/png":"png","image/jpeg":"jpg","image/webp":"webp","image/gif":"gif"})[file.type];const path=`${user.id}/${prefix}-${crypto.randomUUID()}.${extension}`;assert(await db.storage.from(bucket).upload(path,file,{contentType:file.type,upsert:false}));return {url:db.storage.from(bucket).getPublicUrl(path).data.publicUrl,path}}
-function deviceNotificationsPanel(){const enabled=typeof Notification!=='undefined' && window.isSecureContext===true;return `<div class="card top-spacer"><h2 class="section-heading">Notifications</h2><p class="hint">Unread alerts show in Tender instantly. Browser notifications work while the site is open, including in background tabs. Closed-browser push requires a future secure push service.</p><div class="button-group"><button class="btn secondary" data-action="notification-permission" ${!enabled?'disabled':''}>${ico('bell')} ${enabled?(Notification.permission==='granted'?'Notifications allowed':'Allow browser notifications'):'Unavailable in this browser'}</button><button class="btn secondary" data-action="open-alerts">${ico('bell')} Inbox ${renderBadge(unreadAll())}</button></div></div>`}
+function deviceNotificationsPanel(){
+ const secure=window.isSecureContext===true,enabled=secure&&typeof Notification!=='undefined';
+ const status=!secure?'🔒 HTTPS is required for browser notifications. Open Tender on the secure GitHub Pages URL until your custom domain has HTTPS.':
+ !enabled?'This browser does not support native notifications.':
+ Notification.permission==='granted'?'✅ Browser notifications allowed. Tender can notify you while this tab is open, including when you are using another window.':
+ Notification.permission==='denied'?'Notifications are blocked by your browser. Open your browser’s site permissions to allow Tender.':
+ 'Tap Enable notifications and allow Tender to show system alerts.';
+ return `<div class="settings-card notification-settings"><div class="settings-card-title"><h3>Desktop & mobile alerts</h3><p>${esc(status)}</p></div>
+ <div class="button-group"><button type="button" class="btn" data-action="notification-permission" ${!enabled||Notification.permission==='denied'?'disabled':''}>${ico('bell','icon-sm')} ${enabled&&Notification.permission==='granted'?'Notifications enabled':'Enable notifications'}</button>
+ <button type="button" class="btn secondary" data-action="notification-test" ${!enabled||Notification.permission!=='granted'?'disabled':''}>🔔 Send test notification</button>
+ <button type="button" class="btn secondary" data-action="open-alerts">Open inbox ${renderBadge(unreadAll())}</button></div>
+ <p class="hint">Browser notifications require permission and HTTPS. Alerts work while Tender is open; closed-browser push requires a separate push backend. Each website domain needs its own permission.</p></div>`;
+}
 function alertsModal(){modal('Activity inbox','New messages and friend requests.',`<div class="notification-feed">${notifications.slice(0,70).map(n=>`<button class="activity-row ${n.is_read?'':'fresh'}" data-action="open-alert" data-id="${n.id}" data-cid="${esc(n.conversation_id||'')}"><span>${n.kind==='friend'?'👋':'💬'}</span><span><strong>${esc(pby(n.actor_id).display_name)}</strong><small>${esc(n.body?.slice(0,110)||'New activity')} · ${relative(n.created_at)}</small></span>${!n.is_read?renderBadge(1):''}</button>`).join('')||'<p class="hint">All caught up! Buffalo approves. 🍗</p>'}</div>`)}
 
 async function boot(){
@@ -258,7 +309,8 @@ async function boot(){
  try{db=window.supabase.createClient(url,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
   const got=await db.auth.getSession();if(got.error)throw got.error;session=got.data.session;user=session?.user||null;
   db.auth.onAuthStateChange((ev,newSession)=>{session=newSession;let previous=user?.id;user=newSession?.user||null;if(previous!==user?.id){if(!user){unsub();reset();renderAuth()}else setTimeout(()=>initialize(),0)}});
-  if(user)await initialize();else renderAuth();
+  if(window.isSecureContext)ensureNotificationWorker().catch(console.warn);
+   if(user)await initialize();else renderAuth();
  }catch(e){ROOT.innerHTML=empty('Could not reach Tender','Check the public Supabase URL and key in config.js.');toast(e.message||'Could not connect.',true)}
 }
 function reset(){notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];state.selected=null;state.area='chats';state.mobileDetail=false}
@@ -285,7 +337,7 @@ function subscribe(){
  .on('postgres_changes',{event:'*',schema:'public',table:'poll_votes'},e=>scheduleReconcile(true,'poll_votes',e))
  .on('postgres_changes',{event:'*',schema:'public',table:'conversation_reads'},e=>scheduleReconcile(true,'conversation_reads',e))
  .on('postgres_changes',{event:'*',schema:'public',table:'piece_events'},e=>scheduleReconcile(true))
- .on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:'user_id=eq.'+user.id},e=>{if(e.new){if(!notifications.some(n=>n.id===e.new.id))notifications.unshift(e.new);if(e.new.conversation_id===state.selected&&state.area==='chats'&&document.visibilityState==='visible'){markRead(state.selected).catch(console.warn)}else showBrowserNotification(e.new);renderNavBadges();renderSidebar()}setTimeout(()=>scheduleReconcile(false),220)})
+ .on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:'user_id=eq.'+user.id},e=>{if(e.new){if(!notifications.some(n=>n.id===e.new.id))notifications.unshift(e.new);showBrowserNotification(e.new).catch(console.warn);if(e.new.conversation_id===state.selected&&state.area==='chats'&&document.visibilityState==='visible'){markRead(state.selected).catch(console.warn)}renderNavBadges();renderSidebar()}setTimeout(()=>scheduleReconcile(false),220)})
  .subscribe();
  subscribeTyping().catch(console.warn);
 }
@@ -581,7 +633,17 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='confirm-yes'){settleConfirm(true);return}
   if(a==='confirm-no'){settleConfirm(false);return}
   if(a==='settings-tab'){state.settingsTab=el.dataset.tab||'profile';renderMain();return}
-  if(a==='notification-permission'){if(typeof Notification==='undefined')return toast('Unavailable in this browser',true);const perm=await Notification.requestPermission();toast(perm==='granted'?'Browser notifications enabled!':'Notification permission: '+perm);renderMain();return}
+  if(a==='notification-permission'){
+   if(!window.isSecureContext||typeof Notification==='undefined')return toast('HTTPS and browser notification support are required.',true);
+   const perm=await Notification.requestPermission();
+   if(perm==='granted')await ensureNotificationWorker();
+   toast(perm==='granted'?'System notifications enabled! 🍗':perm==='denied'?'Notifications blocked in browser settings.':'Permission not granted.',perm!=='granted');
+   renderMain();return;
+ }
+ if(a==='notification-test'){
+   const ok=await emitSystemNotification('🍗 Tender notifications work!','You’ll see alerts for new messages and friend requests while Tender is open.','tender-notification-test');
+   toast(ok?'Test notification sent! Check your system notifications.':'Could not display a notification. Check HTTPS and browser permissions.',!ok);return;
+ }
  if(a==='emoji-picker'){emojiPicker();return}
  if(a==='emoji-insert'){const val=el.dataset.emoji;closeModal();const area=document.getElementById('message-box');if(area){area.value+=val;area.focus()}return}
  if(a==='custom-emoji'){customEmojiModal();return}
@@ -706,7 +768,19 @@ async function submitForm(form){switch(form.id){
   assert(await q('profiles').update(upd).eq('id',user.id));
   await refreshData();renderMain();renderSidebar();toast('Profile saved! 🍗');
 });
- case'preferences-form':return safe(async()=>{if(!extendedReady)throw Error('Run the 0.2 migration first.');const d=new FormData(form),upd={chat_theme:d.get('chat_theme'),accent_color:d.get('accent_color'),profile_effect:d.get('profile_effect'),presence_mode:d.get('presence_mode'),notification_mode:d.get('notification_mode'),notification_sound:d.get('notification_sound')==='yes',notification_tone:d.get('notification_tone')||'pop'};assert(await q('profiles').update(upd).eq('id',user.id));Object.assign(my,upd);applyTheme();render();toast('Preferences saved!')});
+ case'preferences-form':
+ case'notification-preferences-form':
+ case'privacy-preferences-form':return safe(async()=>{
+   if(!extendedReady)throw Error('Notification and privacy preferences require the Tender 0.2 schema.');
+   const d=new FormData(form),upd={};
+   if(form.id==='preferences-form'){
+    upd.chat_theme=d.get('chat_theme');upd.accent_color=d.get('accent_color');upd.profile_effect=d.get('profile_effect');
+   }else if(form.id==='notification-preferences-form'){
+    upd.notification_mode=d.get('notification_mode');upd.notification_sound=d.get('notification_sound')==='yes';upd.notification_tone=d.get('notification_tone')||'pop';
+   }else{upd.presence_mode=d.get('presence_mode')}
+   assert(await q('profiles').update(upd).eq('id',user.id));
+   Object.assign(my,upd);applyTheme();renderMain();toast('Preferences saved! 🍗');
+ });
  case'edit-message-form':return safe(async()=>{const d=new FormData(form),id=String(d.get('id')),body=String(d.get('body')).trim();assert(await q('messages').update({body,edited_at:new Date().toISOString()}).eq('id',id));closeModal();await loadActive();renderMain();toast('Message edited.')});
  case'forward-form':return safe(async()=>{const d=new FormData(form),id=String(d.get('message_id')),cid=String(d.get('conversation_id'));if(!cid)throw Error('Choose a conversation');const m=activeMessages.find(x=>x.id===id);if(!m)throw Error('Message no longer available');assert(await q('messages').insert({conversation_id:cid,author_id:user.id,body:'↗ Forwarded: '+m.body}));closeModal();toast('Message forwarded!')});
  case'gif-form':{const u=String(new FormData(form).get('url')).trim();if(!giftGif(u))return toast('Use a direct media.giphy.com or media.tenor.com GIF image URL.',true);closeModal();const field=document.getElementById('message-box');if(field){field.value=(field.value?field.value+'\n':'')+u;field.focus();}return}
