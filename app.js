@@ -214,10 +214,11 @@ function callVolumes(peer){
 }
 function callMediaAttach(){
  const c=activeCall;if(!c)return;
- const own=document.getElementById('tender-call-local'),remote=document.getElementById('tender-call-remote'),screen=document.getElementById('tender-call-screen');
- if(own&&own.srcObject!==c.localStream)own.srcObject=c.localStream;
+ const own=document.getElementById('tender-call-local'),remote=document.getElementById('tender-call-remote'),screen=document.getElementById('tender-call-screen'),selfScreen=document.getElementById('tender-call-screen-self');
+ if(own&&own.srcObject!==(c.cameraExtra||c.localStream))own.srcObject=c.cameraExtra||c.localStream;
  if(remote&&remote.srcObject!==c.remoteStream)remote.srcObject=c.remoteStream;
  if(screen&&screen.srcObject!==c.remoteScreenStream)screen.srcObject=c.remoteScreenStream;
+ if(selfScreen&&selfScreen.srcObject!==c.screenStream)selfScreen.srcObject=c.screenStream;
  if(remote){remote.muted=!!audioPrefs().deafened;remote.volume=callVolumes(c.peerId).voice/100;remote.play().catch(()=>{})}
  if(screen){screen.muted=!!audioPrefs().deafened;screen.volume=callVolumes(c.peerId).stream/100;screen.play().catch(()=>{})}
 }
@@ -241,7 +242,8 @@ function showCallUI(){
   <div class="tender-call-stage">
     <div class="call-remote-scene"><video id="tender-call-remote" autoplay playsinline ${c.remoteHasVideo?'':'hidden'}></video>
     <div class="call-placeholder" ${c.remoteHasVideo?'hidden':''}>${avatars(pby(c.peerId))}<strong>${esc(name)}</strong><span>${esc(c.statusLabel||'Calling…')}</span></div></div>
-    <div class="call-stream-frame" ${c.remoteScreenStream?'':'hidden'}><span>🖥 Shared screen</span><video id="tender-call-screen" autoplay playsinline></video></div>
+    <div class="call-stream-frame" ${c.remoteScreenStream?'':'hidden'}><span>🖥 Their screen</span><video id="tender-call-screen" autoplay playsinline></video></div>
+    <div class="call-stream-self" ${c.screenStream?'':'hidden'}><span>🖥 You're sharing</span><video id="tender-call-screen-self" autoplay muted playsinline></video></div>
     <video class="tender-call-self" id="tender-call-local" autoplay muted playsinline ${c.cameraOn?'':'hidden'} aria-label="Your camera preview"></video>
   </div>
   <div class="tender-call-controls">
