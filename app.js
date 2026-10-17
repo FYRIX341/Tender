@@ -359,8 +359,13 @@ async function pollTenderCalls(){
       emitSystemNotification('📞 Incoming Tender call',callPeerName(incomingCall.caller_id)+' is calling','tender-call-'+incomingCall.id).catch(console.warn);
    }
   }else{
-   const r=await q('tender_call_sessions').select('status').eq('id',incomingCall.id).maybeSingle();
-   if(r.error||!r.data||r.data.status!=='ringing'){incomingCall=null;showCallUI()}
+   if(Date.now()-new Date(incomingCall.created_at||0).getTime()>90000){
+    try{await db.rpc('tender_end_call',{call_uuid:incomingCall.id})}catch{}
+    incomingCall=null;showCallUI();
+   }else{
+    const r=await q('tender_call_sessions').select('status').eq('id',incomingCall.id).maybeSingle();
+    if(r.error||!r.data||r.data.status!=='ringing'){incomingCall=null;showCallUI()}
+   }
   }
  }finally{callPollBusy=false}
 }
