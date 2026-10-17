@@ -224,7 +224,7 @@ function callMediaAttach(){
 function showCallUI(){
  const root=callRoot();if(!root)return;
  const c=activeCall,incoming=incomingCall;
- if(!c&&!incoming){root.replaceChildren();return}
+ if(!c&&!incoming){if(typeof root.replaceChildren==='function')root.replaceChildren();else root.innerHTML='';return}
  if(!c&&incoming){
   const caller=pby(incoming.caller_id);
   root.innerHTML=`<section class="tender-call-incoming" role="dialog" aria-label="Incoming Tender call" aria-live="polite">
@@ -275,7 +275,7 @@ function startCallInbox(){
  callInboxTimer=setInterval(()=>pollTenderCalls().catch(e=>console.warn('Tender calling poll',e)),1800);
  pollTenderCalls().catch(console.warn);
 }
-function stopCallInbox(){clearInterval(callInboxTimer);callInboxTimer=null;localCallCleanup();callReady=false;callPollBusy=false}
+function stopCallInbox(){if(callInboxTimer!==null&&typeof clearInterval==='function')clearInterval(callInboxTimer);callInboxTimer=null;localCallCleanup();callReady=false;callPollBusy=false}
 async function checkCallReady(){
  if(!user||!db)return;
  try{const r=await q('tender_call_sessions').select('id').limit(1);callReady=!r.error}catch{callReady=false}
