@@ -468,7 +468,7 @@ async function subscribeTyping(){if(typingChannel){db.removeChannel(typingChanne
 function broadcastTyping(){if(!typingChannel||Date.now()-typingLast<1100)return;typingLast=Date.now();typingChannel.send({type:'broadcast',event:'typing',payload:{user_id:user.id}}).catch(()=>{})}
 // Searchable complete Unicode 17.0 emoji catalog. Render 150 items per page.
 const emojiCategories=['All','Recent','Smileys','People','Components','Nature','Food','Travel','Activities','Objects','Symbols','Flags','Custom'];
-let emojiCategory='All',emojiOffset=0,emojiComposerRange=null;
+let emojiCategory='All',emojiOffset=0,emojiComposerRange=null,emojiPickerMode='insert',emojiReactionTarget=null;
 function emojiHistory(){
  try{const v=JSON.parse(localStorage.getItem('tender-emoji-recent:'+user.id)||'[]');
  return Array.isArray(v)?v.filter(x=>typeof x==='string').slice(0,42):[]}
@@ -504,18 +504,17 @@ function renderEmojiResults(reset=true){
  const count=document.getElementById('tender-emoji-count');if(count)count.textContent=all.length?emojiOffset+' of '+all.length:'No matching emojis';
  document.querySelectorAll('.tender-emoji-category').forEach(el=>{const selected=el.dataset.category===emojiCategory;el.classList.toggle('active',selected);el.setAttribute('aria-pressed',String(selected))});
 }
-function emojiPicker(mode='insert'){
+function emojiPicker(mode='insert',targetType='',targetId=''){
+ emojiPickerMode=mode;emojiReactionTarget=mode==='reaction'?{type:targetType,id:targetId}:null;
  const field=document.getElementById('message-box');
  emojiComposerRange=field?{start:field.selectionStart,end:field.selectionEnd}:null;
  emojiCategory='All';emojiOffset=0;
  const hasCatalog=!!window.TENDER_EMOJI_CATALOG?.items?.length;
- modal('Emoji, GIFs & stickers',hasCatalog?'Search thousands of free Unicode 17.0 emojis.':'Complete emoji data is loading. Refresh Tender if it stays unavailable.',`
+ modal(mode==='reaction'?'React with any emoji':'Emoji, GIFs & stickers',hasCatalog?'Search thousands of free Unicode 17.0 emojis.':'Complete emoji data is loading. Refresh Tender if it stays unavailable.',`
  <div class="tender-emoji-picker">
-  <nav class="tender-emoji-switch"><button data-action="gif-picker" type="button">GIFs</button>
-   <button data-action="emoji-category" data-category="Custom" type="button">Stickers</button>
-   <span class="selected">Emoji</span></nav>
+  ${mode==='reaction'?'<div class="tender-emoji-reaction-hint">Pick any emoji to react to this message.</div>':`<nav class="tender-emoji-switch"><button data-action="gif-picker" type="button">GIFs</button><button data-action="emoji-category" data-category="Custom" type="button">Stickers</button><span class="selected">Emoji</span></nav>`}
   <label class="tender-emoji-search">${ico('search','icon-sm')}<input id="tender-emoji-search" class="input" type="search" placeholder="Search emoji, e.g. cat, rainbow, heart…" aria-label="Search emoji" autocomplete="off"></label>
-  <div class="tender-emoji-categories" role="group" aria-label="Emoji categories">${emojiCategories.map(c=>`<button class="tender-emoji-category ${c==='All'?'active':''}" data-action="emoji-category" data-category="${c}" type="button" aria-pressed="${c==='All'}">${c}</button>`).join('')}</div>
+  <div class="tender-emoji-categories" role="group" aria-label="Emoji categories">${emojiCategories.filter(c=>mode!=='reaction'||c!=='Custom').map(c=>`<button class="tender-emoji-category ${c==='All'?'active':''}" data-action="emoji-category" data-category="${c}" type="button" aria-pressed="${c==='All'}">${c}</button>`).join('')}</div>
   <div id="tender-emoji-results" class="tender-emoji-results"></div>
   <footer class="tender-emoji-footer"><span id="tender-emoji-count" class="hint">Loading…</span><button class="btn secondary sm" id="tender-emoji-more" data-action="emoji-more" hidden type="button">More emoji</button><button class="btn secondary sm" data-action="custom-emoji" type="button">Upload sticker</button></footer>
  </div>`);
@@ -1159,7 +1158,7 @@ function channelEditorModal(channel=null){
 function newPostModal(){modal('New discussion','Start a topic in '+selectedPiece().name,`<form id="post-form"><div class="field"><label>Title</label><input class="input" name="title" maxlength="130" minlength="3" required placeholder="What should we discuss?"></div><div class="field"><label>Post</label><textarea class="input textarea" name="body" maxlength="8000" required placeholder="Write something interesting..."></textarea></div><div class="field"><label>Tags (comma-separated, optional)</label><input class="input" name="tags" maxlength="100" placeholder="art, help, questions"></div><button class="btn full" type="submit">Publish discussion</button></form>`)}
 function galleryModal(){modal('Add to gallery','Share something with the Piece.',`<form id="gallery-form"><div class="field"><label>Image (maximum 5 MB)</label><input class="input" name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" required></div><div class="field"><label>Caption</label><textarea class="input textarea" name="caption" maxlength="500" placeholder="What did you make?"></textarea></div><button class="btn full" type="submit">Upload image</button></form>`)}
 async function postModal(id){const post=activePosts.find(p=>p.id===id);if(!post)return;selectedPost=post;let comments=assert(await q('piece_comments').select('*').eq('post_id',id).order('created_at',{ascending:true}).limit(100))||[];modal(post.title,`Posted by ${pby(post.author_id).display_name} · ${relative(post.created_at)}`,`<div class="post-detail-body">${esc(post.body)}</div><div class="divider"></div><h3>${comments.length} replies</h3><div>${comments.map(c=>`<div class="reply-item"><div class="post-meta">${profileName(pby(c.author_id))} · ${relative(c.created_at)}</div><p>${esc(c.body)}</p></div>`).join('')||'<p class="hint top-spacer">No replies yet.</p>'}</div>${inPiece(state.selected)&&!post.locked?`<form id="reply-form" class="top-spacer"><div class="field"><label>Write a reply</label><textarea name="body" maxlength="3000" required class="input textarea" placeholder="Add to the conversation..."></textarea></div><button class="btn" type="submit">Post reply</button></form>`:'<p class="notice-inline">Join this Piece to reply.</p>'}`)}
-function reactionModal(type,id){const choices=['🍗','❤️','😂','🔥','👍','⭐','🎉','😮','🤝','😭','💀','🤩','😍','🥳','😎','😡','🤔','😴','🥹','💯','👏','🙌','👀','💜','✨','🧡','💙','✅','❌','🌈','👑','🎨'];modal('React to this','Pick an emoji! Reactions update instantly.',`<div class="emoji-grid">${choices.map(emoji=>`<button class="emoji-option" data-action="react" data-type="${type}" data-id="${id}" data-emoji="${emoji}">${emoji}</button>`).join('')}</div>`)}
+function reactionModal(type,id){emojiPicker('reaction',type,id)}
 function chatInfo(){let c=getConversation(state.selected);modal('Conversation details',c?.kind==='group'?'This is your group chat.':'Private messaging between two friends.',`<h3 class="section-heading">Members</h3><div>${(c?.conversation_members||[]).map(m=>friendItem(pby(m.user_id),'info')).join('')}</div><p class="hint top-spacer">Only conversation members can read messages and attachments.</p>`)}
 // Tender 0.3 commands are explicit opt-in shortcuts. Private utilities NEVER write chat messages.
 const tenderCommands=[
@@ -1338,7 +1337,9 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='emoji-more'){renderEmojiResults(false);return}
  if(a==='emoji-insert'){
   const val=String(el.dataset.emoji||'');if(!val)return;
+  const reaction=emojiPickerMode==='reaction'?emojiReactionTarget:null;
   storeEmojiHistory(val);closeModal();
+  if(reaction){emojiReactionTarget=null;await handleAction({dataset:{action:'react',id:reaction.id,type:reaction.type,emoji:val}});return}
   const field=document.getElementById('message-box');
   if(field){
    const start=emojiComposerRange&&Number.isInteger(emojiComposerRange.start)?Math.min(field.value.length,emojiComposerRange.start):field.value.length;
