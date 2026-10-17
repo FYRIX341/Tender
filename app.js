@@ -46,7 +46,7 @@ function styledName(person,tag='span'){
  const style=nameStyles.includes(person?.name_style)?person.name_style:'classic';
  const effect=nameEffects.includes(person?.name_effect)?person.name_effect:'solid';
  const color=tenderSafeColor(person?.name_color,'#ffffff');
- const first=tenderSafeColor(person?.profile_gradient_start,'#21385d'),second=tenderSafeColor(person?.profile_gradient_end,'#563561');
+ const first=tenderSafeColor(person?.name_gradient_start||person?.profile_gradient_start,'#21385d'),second=tenderSafeColor(person?.name_gradient_end||person?.profile_gradient_end,'#563561');
  return `<${tag} class="tender-styled-name name-font-${style} name-effect-${effect}" style="--name-color:${esc(color)};--name-gradient-a:${esc(first)};--name-gradient-b:${esc(second)}">${esc(person?.display_name||'Tender member')}</${tag}>`;
 }
 function profileGradientStyle(p){
@@ -576,7 +576,7 @@ function sharedPiecesHTML(otherId,mini=false){
 }
 function profileCardHTML(person){
  const isSelf=person.id===user?.id;
- return `<div class="tender-profile-dialog">
+ return `<div class="tender-profile-dialog" style="${profileGradientStyle(person)}">
   <section class="profile-dialog-identity">
    <div class="profile-dialog-banner" style="${profileGradientStyle(person)}${person.banner_url?`background-image:linear-gradient(#07091440,#07091499),url(&quot;${esc(validUrl(person.banner_url))}&quot;);`:''}"></div>
    <div class="profile-dialog-id">
@@ -618,7 +618,7 @@ async function showMiniProfile(id,trigger){
  if(!person)return toast('Profile unavailable.',true);
  const el=document.createElement('div');el.id='tender-mini-profile';el.className='tender-mini-profile';el.dataset.userId=id;
  el.setAttribute('role','dialog');el.setAttribute('aria-label','Profile of '+(person.display_name||'member'));
- el.innerHTML=miniProfileHTML(person);
+ el.innerHTML=miniProfileHTML(person);el.style.cssText=profileGradientStyle(person);
  document.body.appendChild(el);
  const rect=trigger?.getBoundingClientRect?.()||{left:24,right:60,top:100,bottom:125};
  const width=Math.min(320,window.innerWidth-20),height=el.offsetHeight||335;
@@ -1023,9 +1023,15 @@ function renderSettings(){
   <div class="settings-actions"><button class="btn" type="submit">Save profile</button></div></form></div>
   ${visualReady?`<div class="settings-card free-nitro-studio"><h3>✨ Free profile studio</h3><p>Gradients, name fonts and effects — free for every Tender member!</p>
  <form id="profile-style-form" class="settings-fields">
+ <div class="settings-card-title"><h4>Profile background gradient</h4><p>Colors the entire profile card and banner — separately from your name!</p></div>
  <div class="settings-two-fields">
- <div class="field"><label>Profile gradient: start</label><input class="input" type="color" name="profile_gradient_start" value="${esc(tenderSafeColor(my.profile_gradient_start,'#21385d'))}"></div>
- <div class="field"><label>Profile gradient: end</label><input class="input" type="color" name="profile_gradient_end" value="${esc(tenderSafeColor(my.profile_gradient_end,'#563561'))}"></div>
+ <div class="field"><label>Background: start</label><input class="input" type="color" name="profile_gradient_start" value="${esc(tenderSafeColor(my.profile_gradient_start,'#21385d'))}"></div>
+ <div class="field"><label>Background: end</label><input class="input" type="color" name="profile_gradient_end" value="${esc(tenderSafeColor(my.profile_gradient_end,'#563561'))}"></div></div>
+ <div class="profile-gradient-preview" style="${profileGradientStyle(my)}">Your profile background</div>
+ <div class="settings-card-title"><h4>Display name gradient</h4><p>Choose an entirely independent gradient for your username.</p></div>
+ <div class="settings-two-fields">
+ <div class="field"><label>Name gradient: start</label><input class="input" type="color" name="name_gradient_start" value="${esc(tenderSafeColor(my.name_gradient_start||my.profile_gradient_start,'#21385d'))}"></div>
+ <div class="field"><label>Name gradient: end</label><input class="input" type="color" name="name_gradient_end" value="${esc(tenderSafeColor(my.name_gradient_end||my.profile_gradient_end,'#563561'))}"></div>
  <div class="field"><label>Display name font</label><select class="input" name="name_style">${nameStyles.map(style=>`<option value="${style}" ${my.name_style===style?'selected':''}>${style[0].toUpperCase()+style.slice(1)}</option>`).join('')}</select></div>
  <div class="field"><label>Display name effect</label><select class="input" name="name_effect">${nameEffects.map(effect=>`<option value="${effect}" ${my.name_effect===effect?'selected':''}>${effect[0].toUpperCase()+effect.slice(1)}</option>`).join('')}</select></div>
  <div class="field"><label>Solid / neon text color</label><input class="input" type="color" name="name_color" value="${esc(tenderSafeColor(my.name_color,'#ffffff'))}"></div>
@@ -1525,6 +1531,8 @@ async function submitForm(form){switch(form.id){
   const d=new FormData(form),style=String(d.get('name_style')),effect=String(d.get('name_effect'));
   const updates={profile_gradient_start:tenderSafeColor(d.get('profile_gradient_start'),'#21385d'),
    profile_gradient_end:tenderSafeColor(d.get('profile_gradient_end'),'#563561'),
+   name_gradient_start:tenderSafeColor(d.get('name_gradient_start'),'#21385d'),
+   name_gradient_end:tenderSafeColor(d.get('name_gradient_end'),'#563561'),
    name_style:nameStyles.includes(style)?style:'classic',
    name_effect:nameEffects.includes(effect)?effect:'solid',
    name_color:tenderSafeColor(d.get('name_color'),'#ffffff')};
