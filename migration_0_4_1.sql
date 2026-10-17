@@ -135,7 +135,7 @@ BEGIN
 END $$;
 
 CREATE OR REPLACE FUNCTION public.tender_touch_call(call_uuid uuid)
-RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE room public.tender_call_sessions%ROWTYPE;
 BEGIN
  SELECT * INTO room FROM public.tender_call_sessions WHERE id=call_uuid;
@@ -145,7 +145,7 @@ BEGIN
  END IF;
  UPDATE public.tender_call_sessions SET last_heartbeat_at=now() WHERE id=call_uuid;
  RETURN true;
-END $;
+END $$;
 
 CREATE OR REPLACE FUNCTION public.tender_end_call(call_uuid uuid)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
