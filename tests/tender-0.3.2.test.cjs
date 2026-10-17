@@ -147,3 +147,11 @@ test('native notifications are sent once per incoming event, and never for sende
  assert.match(events[0].title,/Friend/);
  assert.equal(events[0].opts.tag,'tender-note-1');
 });
+
+test('hidden per-message controls no longer reserve height; reaction chips stay visible',()=>{
+ assert.match(app,/class="bubble-reactions"/);
+ assert.match(app,/class="bubble-actions" aria-label="Message actions"/);
+ assert.match(css,/\.chat-scroll>\.chat-bubble-wrap \.bubble-actions\{[\s\S]*?display:none!important/);
+ assert.match(css,/\.chat-scroll>\.chat-bubble-wrap:hover \.bubble-actions/);
+ assert.match(css,/\.bubble-reactions\{display:flex/);
+});
