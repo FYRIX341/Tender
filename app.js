@@ -28,6 +28,10 @@ const ICONS = {
  palette:'<circle cx="12" cy="12" r="9"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="8" r="1"/><path d="M16.4 14.1a2.4 2.4 0 0 0 0 4.8"/>',
  shield:'<path d="m12 22 1.5-.7C19 18.7 21 14 21 8V4l-9-3-9 3v4c0 6 2 10.7 7.5 13.3z"/><path d="m9 12 2 2 4-4"/>',
  accessibility:'<circle cx="12" cy="3.5" r="1.5"/><path d="M3 8h18M12 8v5m0 0-5 8m5-8 5 8"/>',
+ mic:'<rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5m-4 0h8"/>',
+ 'mic-off':'<path d="m2 2 20 20M9 9v3a3 3 0 0 0 5 2M15 9V5a3 3 0 0 0-5-2M5 10a7 7 0 0 0 12 5M19 10a7 7 0 0 1-1 4M12 17v5m-4 0h8"/>',
+ headphones:'<path d="M3 14v-3a9 9 0 0 1 18 0v3M3 14v5a2 2 0 0 0 2 2h3v-9H5a2 2 0 0 0-2 2zm18 0v5a2 2 0 0 1-2 2h-3v-9h3a2 2 0 0 1 2 2z"/>',
+ 'headphones-off':'<path d="m2 2 20 20M3 14v-3a9 9 0 0 1 2-6M10 2a9 9 0 0 1 11 9v3M3 14v5a2 2 0 0 0 2 2h3v-9H5a2 2 0 0 0-2 2zM19 12h-3v9h3a2 2 0 0 0 2-2v-5"/>',
  edit:'<path d="m16 3 5 5-12 12H4v-5zM14 5l5 5"/>', bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>'
 };
 const ico=(name,extra='')=>`<span class="ico ${extra}" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||ICONS.info}</svg></span>`;
@@ -501,6 +505,54 @@ function renderInfoPanel(){
  members=members.sort((a,b)=>(a.display_name||'').localeCompare(b.display_name||''));
  const rows=members.slice(0,65).map(p=>`<button type="button" class="info-member info-member-button" data-action="open-profile" data-id="${esc(p.id)}" title="View profile">${avatars(p)}<span class="info-person"><strong>${esc(p.display_name)}</strong><small>@${esc(p.handle||'member')}${p._role?' · '+esc(p._role):''}</small></span></button>`).join('');
  box.innerHTML=`<div class="info-head"><span class="info-heading">DETAILS</span><button type="button" class="round-btn" data-action="toggle-info" aria-label="Hide panel">${ico('x','icon-sm')}</button></div><div class="info-overview"><div class="info-emblem">🍗</div><h3>${esc(name)}</h3><p>${esc(description)}</p></div><div class="info-count">Members <strong>${members.length}</strong></div><div class="info-members">${rows||'<p class="hint">No members to display.</p>'}</div><div class="info-resize-hint">↔ Drag the divider to resize</div>`;
+}
+// The dock has real local audio controls and a synced Supabase availability.
+const availability=[['online','Online','Ready to chat'],['idle','Idle','Away for a bit'],['dnd','Do Not Disturb','Quiet notifications'],['invisible','Invisible','Appear offline']];
+function audioPrefs(){if(!user)return {micMuted:false,deafened:false};try{let x=JSON.parse(localStorage.getItem('tender-audio-'+user.id)||'{}');return {micMuted:x.micMuted===true,deafened:x.deafened===true}}catch{return {micMuted:false,deafened:false}}}
+function saveAudioPrefs(p){if(user)localStorage.setItem('tender-audio-'+user.id,JSON.stringify({micMuted:!!p.micMuted,deafened:!!p.deafened}))}
+const mediaMuteState=new WeakMap();
+function syncDeafenedAudio(){
+ const mute=audioPrefs().deafened;
+ for(const media of document.querySelectorAll('audio,video')){
+  if(mute){if(!mediaMuteState.has(media))mediaMuteState.set(media,media.muted);media.muted=true}
+  else if(mediaMuteState.has(media)){media.muted=mediaMuteState.get(media);mediaMuteState.delete(media)}
+ }
+}
+function accountDockHTML(open=false){
+ if(!user||!my)return '';
+ const audio=audioPrefs(),status=availability.some(x=>x[0]===my.presence_mode)?my.presence_mode:'online';
+ return `<div class="tender-account-bar">
+  <button type="button" class="account-identity-btn" data-action="account-menu-toggle" aria-controls="tender-account-menu" aria-expanded="${open}" aria-haspopup="menu" title="Your profile and account options">
+   <span class="account-dock-avatar">${avatars(my)}<i class="account-presence-dot ${status}"></i></span>
+   <span class="account-dock-label"><strong>${esc(my.display_name)}</strong><small>@${esc(my.handle||'member')} · ${availability.find(x=>x[0]===status)[1]}</small></span></button>
+  <div class="account-audio-controls">
+   <button type="button" class="account-tool-btn ${audio.micMuted?'is-off':''}" data-action="account-mic" aria-pressed="${audio.micMuted}" title="${audio.micMuted?'Unmute':'Mute'} voice-note microphone" aria-label="${audio.micMuted?'Unmute':'Mute'} microphone">${ico(audio.micMuted?'mic-off':'mic','icon-sm')}</button>
+   <button type="button" class="account-tool-btn ${audio.deafened?'is-off':''}" data-action="account-deafen" aria-pressed="${audio.deafened}" title="${audio.deafened?'Undeafen':'Deafen'} Tender sounds" aria-label="${audio.deafened?'Undeafen':'Deafen'}">${ico(audio.deafened?'headphones-off':'headphones','icon-sm')}</button>
+   <button type="button" class="account-tool-btn" data-action="account-settings" title="Settings" aria-label="Settings">${ico('settings','icon-sm')}</button>
+  </div></div>
+ <div class="tender-account-menu" role="menu" id="tender-account-menu" aria-label="Account options" ${open?'':'hidden'}>
+   <div class="account-menu-banner"></div>
+   <div class="account-menu-profile"><span class="account-menu-avatar">${avatars(my)}</span><strong>${esc(my.display_name)}</strong><small>@${esc(my.handle||'member')}</small>${my.game_status?`<p>${esc(my.status_emoji||'🍗')} ${esc(my.game_status)}</p>`:''}</div>
+   <div class="account-menu-actions">
+    <button type="button" class="account-menu-item" data-action="account-profile">${ico('user','icon-sm')} View Full Profile</button>
+    <button type="button" class="account-menu-item" data-action="account-settings">${ico('edit','icon-sm')} Edit Profile</button>
+    <span class="account-menu-section">SET YOUR STATUS</span>
+    ${availability.map(([key,label,desc])=>`<button type="button" class="account-menu-presence ${status===key?'active':''}" data-action="account-presence" data-value="${key}" aria-pressed="${status===key}"><i class="account-presence-dot ${key}"></i><span><strong>${label}</strong><small>${desc}</small></span>${status===key?ico('check','icon-sm'):''}</button>`).join('')}
+    <div class="account-menu-separator"></div>
+    <button type="button" class="account-menu-item" data-action="account-copy-id">${ico('clip','icon-sm')} Copy User ID</button>
+    <button type="button" class="account-menu-item" data-action="account-switch">${ico('logout','icon-sm')} Switch Accounts</button>
+    <p class="account-menu-hint">Mute disables Tender voice-note recording. Deafen silences Tender sounds. Live calls aren't available yet.</p>
+   </div>
+ </div>`;
+}
+function renderAccountDock(open){
+ const el=document.getElementById('sidebar-account-dock');if(!el)return;
+ const wasOpen=!!el.querySelector('#tender-account-menu:not([hidden])');
+ el.innerHTML=accountDockHTML(typeof open==='boolean'?open:wasOpen);
+}
+function closeAccountMenu(){
+ const panel=document.getElementById('tender-account-menu');
+ if(panel&&!panel.hidden){panel.hidden=true;document.querySelector('.account-identity-btn')?.setAttribute('aria-expanded','false')}
 }
 function renderSidebar(){
  const el=document.getElementById('sidebar');if(!el)return;
