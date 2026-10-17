@@ -995,3 +995,99 @@ kbd{display:inline-block;background:var(--surface);border:1px solid var(--stroke
 .piece-hero:has(.piece-info.theme-neon) .piece-info{background:#111822;box-shadow:inset 0 0 0 1px #7afbce50}
 .piece-hero:has(.piece-info.theme-neon) .piece-info h2{text-shadow:0 0 12px var(--orange)}
 .tender-emoji-reaction-hint{color:#afb9cc;font-size:11px;font-weight:700;padding:12px 14px 3px}
+
+
+/* ══════════ Tender 0.4.1 — free separate gradients, link embeds, real calls ══════════ */
+.profile-gradient-preview{margin:8px 0 17px;padding:36px 24px;border-radius:13px;min-height:92px;display:grid;place-items:center;
+ background:linear-gradient(125deg,var(--profile-start,#21385d),var(--profile-end,#563561));
+ border:1px solid #ffffff44;font-weight:800;letter-spacing:.02em;text-shadow:0 2px 12px #0008}
+.free-nitro-studio .settings-card-title{margin:12px 0 8px}
+.free-nitro-studio .settings-card-title h4{font-size:14px;color:var(--text)}
+.free-nitro-studio .settings-card-title p{font-size:11px;color:var(--muted);margin-top:4px}
+.tender-profile-dialog{--tender-card-gradient:linear-gradient(145deg,var(--profile-start,#21385d),var(--profile-end,#563561));
+ background:var(--tender-card-gradient)!important;border-radius:16px;overflow:hidden}
+.tender-profile-dialog .profile-dialog-identity{background:linear-gradient(180deg,#0001,#0004)!important}
+.tender-profile-dialog .profile-dialog-content{background:linear-gradient(155deg,#101525b8,#0e1322db)!important}
+.tender-profile-dialog .profile-dialog-banner{background-color:var(--profile-start)!important}
+.tender-mini-profile{background:linear-gradient(145deg,var(--profile-start,#21385d),var(--profile-end,#563561))!important}
+.tender-mini-profile .mini-profile-content{background:linear-gradient(170deg,#0a102a22,#0a132955)!important;border-radius:0 0 12px 12px}
+.mini-profile-avatar{background:var(--profile-start,#21385d)!important;border-color:var(--profile-start,#21385d)!important}
+.settings-profile-preview{background:linear-gradient(125deg,var(--profile-start,#21385d),var(--profile-end,#563561))!important}
+.settings-profile-preview .settings-preview-identity{background:#080e2038}
+.dm-profile-banner{background:linear-gradient(130deg,var(--profile-start,#21385d),var(--profile-end,#563561))}
+
+/* Link cards don't fetch arbitrary third-party HTML, execute scripts or auto-play. */
+.tender-rich-link{display:flex;flex-direction:column;gap:7px;max-width:min(465px,100%);margin:8px 0 5px;padding:13px 15px 11px;
+ border:1px solid #7489b250;border-left:4px solid #698ef4;border-radius:10px;background:linear-gradient(120deg,#232b3e,#1b2331);
+ color:#eaf1ff!important;text-decoration:none!important;overflow:hidden;box-shadow:0 3px 13px #0002}
+.tender-rich-link:hover{border-color:#92b3f4;transform:translateY(-1px);box-shadow:0 5px 18px #0005}
+.tender-rich-link-brand{font-size:10px;color:#a7bce2;font-weight:850;letter-spacing:.065em;text-transform:uppercase}
+.tender-rich-link strong{font-size:14px;line-height:1.35;overflow-wrap:anywhere;color:#91c5ff}
+.tender-rich-link-summary{font-size:12px;line-height:1.5;color:#cfdbef;overflow-wrap:anywhere}
+.tender-rich-link img{display:block;max-height:210px;width:100%;object-fit:cover;aspect-ratio:16/9;border-radius:7px}
+.tender-rich-link-domain{font-size:10px;color:#adb8c9;display:inline-flex;align-items:center;gap:4px}
+.tender-rich-link-domain .ico{width:13px;height:13px}
+.tender-rich-link-domain svg{width:13px;height:13px}
+
+/* Actual 1:1 WebRTC calling — overlay stays mounted while messages rerender. */
+#tender-call-root:empty{display:none}
+#tender-call-root{position:fixed;inset:0;z-index:1700;pointer-events:none;display:flex;align-items:center;justify-content:center;padding:18px}
+.tender-call-incoming,.tender-call-overlay{pointer-events:auto;background:linear-gradient(165deg,#202a41,#10131b 70%);border:1px solid #536984;
+ color:#eef2fc;box-shadow:0 25px 100px #000d;border-radius:18px;overflow:hidden}
+.tender-call-incoming{width:min(350px,95vw);padding:25px 22px;display:grid;gap:12px;text-align:center;justify-items:center}
+.tender-call-incoming strong{font-size:19px}
+.tender-call-incoming p{font-size:12px;color:#bac9e0}
+.tender-call-incoming .call-incoming-avatar .avatar{width:74px;height:74px;min-width:74px;min-height:74px;border-radius:50%;font-size:29px;box-shadow:0 0 0 3px #7d8af677}
+.tender-call-actions{display:flex;gap:10px;justify-content:center;margin-top:8px;flex-wrap:wrap}
+.tender-call-overlay{width:min(900px,calc(100vw - 25px));max-height:95dvh;display:flex;flex-direction:column}
+.tender-call-header{display:flex;justify-content:space-between;align-items:center;padding:12px 17px;border-bottom:1px solid #56607b60;gap:12px}
+.tender-call-header strong{font-size:14px;display:flex;align-items:center;gap:8px}
+.tender-call-header p{font-size:11px;color:#a8bad3;margin:4px 0 0}
+.tender-call-header .round-btn{color:#ffadb5}
+.tender-call-stage{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px;min-height:220px;max-height:53dvh;background:#0b0f18}
+.tender-call-stage .call-remote-scene{grid-column:1/-1;position:relative;display:grid;place-items:center;min-height:210px;overflow:hidden;border-radius:10px;background:radial-gradient(ellipse at center,#283853,#11131e)}
+.tender-call-stage:has(.call-stream-frame:not([hidden])) .call-remote-scene{grid-column:2;grid-row:1}
+.tender-call-stage .call-stream-frame:not([hidden]){grid-column:1;grid-row:1;position:relative;display:block;min-height:180px}
+.tender-call-stage video{display:block;width:100%;height:100%;max-height:48dvh;object-fit:contain;border-radius:9px;background:#080e1a}
+.tender-call-stage video[hidden],.tender-call-stage .call-stream-frame[hidden]{display:none!important}
+.tender-call-stage .call-placeholder{display:grid;gap:10px;justify-items:center;text-align:center;padding:22px}
+.tender-call-stage .call-placeholder[hidden]{display:none}
+.tender-call-stage .call-placeholder .avatar{height:70px;width:70px;border-radius:50%;font-size:28px}
+.tender-call-stage .call-placeholder strong{font-size:16px}
+.tender-call-stage .call-placeholder span{font-size:12px;color:#a4b1c7}
+.tender-call-stage .call-stream-frame>span{position:absolute;top:7px;left:8px;z-index:2;padding:5px 7px;border-radius:6px;background:#111b30dc;font-size:11px}
+.tender-call-stage .tender-call-self{position:absolute;bottom:18px;right:18px;width:148px;height:99px;max-height:125px;object-fit:cover;transform:scaleX(-1);border:2px solid #98b4e0;box-shadow:0 8px 20px #000b;z-index:3}
+.tender-call-controls{display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap;padding:12px;background:#181e2d;border-top:1px solid #39485c}
+.call-control{display:grid;justify-items:center;gap:3px;border:1px solid #535f76;border-radius:10px;min-width:76px;padding:10px 14px;color:#e8eefb;background:#2b3850;cursor:pointer;font-size:17px;font-weight:800}
+.call-control .ico svg{height:19px;width:19px}
+.call-control span:last-child{font-size:10px}
+.call-control.off{background:#503144;border-color:#8e5168}
+.call-control.sharing{background:#1d6055;border-color:#2aa386}
+.call-control.call-end{background:#b03b50;border-color:#ea6a76}
+.call-control:hover,.call-control:focus-visible{filter:brightness(1.17);outline:2px solid #8fafed;outline-offset:2px}
+.tender-call-mix{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:12px 17px;background:#1b2230}
+.tender-call-mix label{display:grid;gap:6px;font-size:11px;color:#c7d5ed}
+.tender-call-mix output{justify-self:end;font-weight:800;font-variant-numeric:tabular-nums}
+.tender-call-mix input[type=range]{width:100%;accent-color:#718fff;cursor:pointer}
+.call-security-hint{padding:5px 16px 12px;margin:0;color:#8491a8;background:#1b2230;font-size:10px;line-height:1.4}
+@media(max-width:760px){
+ #tender-call-root{padding:7px}
+ .tender-call-overlay{max-height:96dvh;width:100%;border-radius:11px}
+ .tender-call-stage{min-height:180px;max-height:45dvh}
+ .tender-call-stage .call-remote-scene{min-height:185px}
+ .tender-call-stage .tender-call-self{width:100px;height:70px;right:10px;bottom:10px}
+ .call-control{min-width:52px;padding:7px;font-size:14px}
+ .tender-call-controls{gap:5px;padding:9px}
+ .tender-call-mix{gap:10px;padding:9px}
+ .tender-rich-link{max-width:100%}
+}
+@media(prefers-reduced-motion:reduce){.tender-rich-link{transition:none!important;transform:none!important}}
+
+/* During presentation, show your own shared-screen thumbnail, separate from peer volume. */
+.tender-call-stage .call-stream-self[hidden]{display:none!important}
+.tender-call-stage .call-stream-self{position:absolute;left:15px;bottom:15px;width:min(220px,31%);height:120px;max-height:26%;z-index:4;border:2px solid #2fbf93;border-radius:10px;background:#07141a;box-shadow:0 8px 30px #000b;overflow:hidden}
+.tender-call-stage .call-stream-self>span{position:absolute;left:6px;top:6px;z-index:2;padding:3px 6px;border-radius:5px;background:#102d26dc;color:#c7fff0;font-size:10px}
+.tender-call-stage .call-stream-self video{height:100%;width:100%;object-fit:contain}
+.dm-profile-panel{background:linear-gradient(157deg,var(--profile-start,#21385d),var(--profile-end,#563561))!important}
+.dm-profile-panel>:not(.dm-profile-cover){background-color:#0e142276}
+@media(max-width:760px){.tender-call-stage .call-stream-self{height:72px;left:9px;bottom:9px}}

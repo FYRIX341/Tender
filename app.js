@@ -46,7 +46,7 @@ function styledName(person,tag='span'){
  const style=nameStyles.includes(person?.name_style)?person.name_style:'classic';
  const effect=nameEffects.includes(person?.name_effect)?person.name_effect:'solid';
  const color=tenderSafeColor(person?.name_color,'#ffffff');
- const first=tenderSafeColor(person?.profile_gradient_start,'#21385d'),second=tenderSafeColor(person?.profile_gradient_end,'#563561');
+ const first=tenderSafeColor(person?.name_gradient_start||person?.profile_gradient_start,'#21385d'),second=tenderSafeColor(person?.name_gradient_end||person?.profile_gradient_end,'#563561');
  return `<${tag} class="tender-styled-name name-font-${style} name-effect-${effect}" style="--name-color:${esc(color)};--name-gradient-a:${esc(first)};--name-gradient-b:${esc(second)}">${esc(person?.display_name||'Tender member')}</${tag}>`;
 }
 function profileGradientStyle(p){
@@ -200,6 +200,320 @@ function updatePresenceMarkers(){
  });
 }
 
+// Tender 0.4.1 — real 1:1 WebRTC media, database-authorized signaling.
+// Never store audio/video tracks in Supabase; only SDP/ICE and call state are stored.
+// No TURN infrastructure is bundled; symmetric NAT/firewalls may prevent connection.
+let callReady=false,activeCall=null,incomingCall=null,callInboxTimer=null,callPollBusy=false;
+const callRoot=()=>document.getElementById('tender-call-root');
+function secureCallingAvailable(){return !!(window.isSecureContext&&navigator.mediaDevices?.getUserMedia&&window.RTCPeerConnection)}
+function callPeerName(id){return pby(id).display_name||'Tender friend'}
+function callVolumeKey(peer){return 'tender-call-vol:'+user?.id+':'+peer}
+function callVolumes(peer){
+ try{const v=JSON.parse(localStorage.getItem(callVolumeKey(peer))||'{}');return {voice:Math.max(0,Math.min(100,Number(v.voice) || (v.voice===0?0:100))),stream:Math.max(0,Math.min(100,Number(v.stream)||(v.stream===0?0:100)))}}
+ catch{return {voice:100,stream:100}}
+}
+function callMediaAttach(){
+ const c=activeCall;if(!c)return;
+ const own=document.getElementById('tender-call-local'),remote=document.getElementById('tender-call-remote'),screen=document.getElementById('tender-call-screen'),selfScreen=document.getElementById('tender-call-screen-self');
+ if(own&&own.srcObject!==(c.cameraExtra||c.localStream))own.srcObject=c.cameraExtra||c.localStream;
+ if(remote&&remote.srcObject!==c.remoteStream)remote.srcObject=c.remoteStream;
+ if(screen&&screen.srcObject!==c.remoteScreenStream)screen.srcObject=c.remoteScreenStream;
+ if(selfScreen&&selfScreen.srcObject!==c.screenStream)selfScreen.srcObject=c.screenStream;
+ if(remote){remote.muted=!!audioPrefs().deafened;remote.volume=callVolumes(c.peerId).voice/100;remote.play().catch(()=>{})}
+ if(screen){screen.muted=!!audioPrefs().deafened;screen.volume=callVolumes(c.peerId).stream/100;screen.play().catch(()=>{})}
+}
+function showCallUI(){
+ const root=callRoot();if(!root)return;
+ const c=activeCall,incoming=incomingCall;
+ if(!c&&!incoming){if(typeof root.replaceChildren==='function')root.replaceChildren();else root.innerHTML='';return}
+ if(!c&&incoming){
+  const caller=pby(incoming.caller_id);
+  root.innerHTML=`<section class="tender-call-incoming" role="dialog" aria-label="Incoming Tender call" aria-live="polite">
+    <div class="call-incoming-avatar">${avatars(caller)}</div>
+    <strong>${esc(caller.display_name||'Tender member')}</strong>
+    <p>Incoming ${incoming.wants_video?'video':'voice'} call</p>
+    <div class="tender-call-actions"><button class="btn secondary" data-action="call-decline" aria-label="Decline call">Decline</button>
+    <button class="btn" data-action="call-accept" aria-label="Answer call">Answer ${incoming.wants_video?'with camera':'voice'}</button></div>
+   </section>`;return;
+ }
+ const name=callPeerName(c.peerId),volume=callVolumes(c.peerId);
+ root.innerHTML=`<section class="tender-call-overlay" role="dialog" aria-label="Tender ${c.video?'video':'voice'} call with ${esc(name)}">
+  <header class="tender-call-header"><div><strong>${ico('chat','icon-sm')} ${esc(name)}</strong><p aria-live="polite">${esc(c.statusLabel||'Connecting…')}</p></div><button class="round-btn" data-action="call-hangup" title="End call" aria-label="End call">✕</button></header>
+  <div class="tender-call-stage">
+    <div class="call-remote-scene"><video id="tender-call-remote" autoplay playsinline ${c.remoteHasVideo?'':'hidden'}></video>
+    <div class="call-placeholder" ${c.remoteHasVideo?'hidden':''}>${avatars(pby(c.peerId))}<strong>${esc(name)}</strong><span>${esc(c.statusLabel||'Calling…')}</span></div></div>
+    <div class="call-stream-frame" ${c.remoteScreenStream?'':'hidden'}><span>🖥 Their screen</span><video id="tender-call-screen" autoplay playsinline></video></div>
+    <div class="call-stream-self" ${c.screenStream?'':'hidden'}><span>🖥 You're sharing</span><video id="tender-call-screen-self" autoplay muted playsinline></video></div>
+    <video class="tender-call-self" id="tender-call-local" autoplay muted playsinline ${c.cameraOn?'':'hidden'} aria-label="Your camera preview"></video>
+  </div>
+  <div class="tender-call-controls">
+    <button class="call-control ${c.muted?'off':''}" data-action="call-toggle-mic" aria-pressed="${c.muted}" aria-label="${c.muted?'Unmute':'Mute'} microphone">${ico(c.muted?'mic-off':'mic','icon-sm')}<span>${c.muted?'Unmute':'Mute'}</span></button>
+    <button class="call-control ${c.deafened?'off':''}" data-action="call-toggle-deafen" aria-pressed="${c.deafened}" aria-label="${c.deafened?'Undeafen':'Deafen'}">${ico(c.deafened?'headphones-off':'headphones','icon-sm')}<span>Deafen</span></button>
+    <button class="call-control ${c.cameraOn?'':'off'}" data-action="call-toggle-video" aria-pressed="${c.cameraOn}" aria-label="Toggle camera">📹<span>Camera</span></button>
+    <button class="call-control ${c.screenStream?'sharing':''}" data-action="call-share-screen" aria-pressed="${!!c.screenStream}" aria-label="${c.screenStream?'Stop sharing screen':'Share screen'}">🖥<span>${c.screenStream?'Stop sharing':'Share screen'}</span></button>
+    <button class="call-control call-end" data-action="call-hangup" aria-label="Hang up">📞<span>Hang up</span></button>
+  </div>
+  <div class="tender-call-mix">
+   <label>🔊 ${esc(name)} voice <output id="tender-call-voice-value">${volume.voice}%</output><input type="range" min="0" max="100" step="5" value="${volume.voice}" data-action="call-voice-volume" aria-label="Person's voice volume"></label>
+   <label>🖥 Stream audio <output id="tender-call-stream-value">${volume.stream}%</output><input type="range" min="0" max="100" step="5" value="${volume.stream}" data-action="call-stream-volume" aria-label="Shared screen stream volume"></label>
+  </div>
+  <p class="call-security-hint">🔒 Peer-to-peer encrypted WebRTC media. Screen sharing requires your permission. On restrictive networks, calls may fail without a TURN server.</p>
+ </section>`;
+ callMediaAttach();
+}
+function stopTracks(stream){if(stream?.getTracks)stream.getTracks().forEach(track=>{try{track.stop()}catch{}})}
+function localCallCleanup(){
+ const c=activeCall;activeCall=null;incomingCall=null;
+ if(c){try{c.pc?.close()}catch{}stopTracks(c.localStream);stopTracks(c.cameraExtra);stopTracks(c.screenStream)}
+ showCallUI();
+}
+async function finishTenderCall(){
+ const id=activeCall?.id||incomingCall?.id;
+ localCallCleanup();
+ if(id&&callReady){try{const r=await db.rpc('tender_end_call',{call_uuid:id});if(r.error)console.warn('Call end not acknowledged',r.error)}catch(e){console.warn('Call end failed',e)}}
+}
+function startCallInbox(){
+ if(callInboxTimer!==null&&typeof clearInterval==='function')clearInterval(callInboxTimer);if(!user||!db)return;
+ callInboxTimer=setInterval(()=>pollTenderCalls().catch(e=>console.warn('Tender calling poll',e)),1800);
+ pollTenderCalls().catch(console.warn);
+}
+function stopCallInbox(){if(callInboxTimer!==null&&typeof clearInterval==='function')clearInterval(callInboxTimer);callInboxTimer=null;localCallCleanup();callReady=false;callPollBusy=false}
+async function checkCallReady(){
+ if(!user||!db)return;
+ try{const r=await q('tender_call_sessions').select('id').limit(1);callReady=!r.error}catch{callReady=false}
+ if(callReady)startCallInbox();
+}
+async function startTenderCall(video=false){
+ if(!secureCallingAvailable())return toast('Voice/video calls require HTTPS and a browser with WebRTC and microphone access.',true);
+ if(!callReady)return toast('Tender calling is waiting for the 0.4.1 database migration.',true);
+ if(activeCall||incomingCall)return toast('Finish or decline the current call first.',true);
+ const conversation=getConversation(state.selected);
+ if(state.area!=='chats'||conversation?.kind!=='dm')return toast('Calls currently work only in private 1-to-1 DMs.',true);
+ const peerId=conversation.conversation_members?.find(m=>m.user_id!==user.id)?.user_id;
+ if(!peerId)return toast('No other participant found in this DM.',true);
+ let stream=null;
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:!!video});
+  const res=await db.rpc('tender_start_call',{cid:conversation.id,peer:peerId,video:!!video});
+  const id=assert(res);
+  const a=audioPrefs();
+  activeCall={id,peerId,conversationId:conversation.id,isCaller:true,video:!!video,
+   status:'ringing',statusLabel:'Ringing…',localStream:stream,remoteStream:null,remoteScreenStream:null,
+   cameraExtra:null,pc:null,screenStream:null,screenSender:null,screenId:null,remoteScreenId:null,
+   cameraOn:!!video,remoteHasVideo:false,muted:!!a.micMuted,deafened:!!a.deafened,
+   lastSignal:0,processing:false,makingOffer:false,pendingIce:[]};
+  if(a.micMuted)stream.getAudioTracks().forEach(t=>t.enabled=false);
+  showCallUI();
+ }catch(e){stopTracks(stream);toast(e.message||'Unable to start the call.',true)}
+}
+async function answerTenderCall(accept){
+ const incoming=incomingCall;if(!incoming)return;
+ if(!accept){
+  incomingCall=null;showCallUI();
+  try{assert(await db.rpc('tender_answer_call',{call_uuid:incoming.id,accept:false}))}catch(e){console.warn(e)}
+  return;
+ }
+ if(!secureCallingAvailable())return toast('Calling requires HTTPS and WebRTC.',true);
+ let stream=null;
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:!!incoming.wants_video});
+  assert(await db.rpc('tender_answer_call',{call_uuid:incoming.id,accept:true}));
+  incomingCall=null;
+  const a=audioPrefs();
+  activeCall={id:incoming.id,peerId:incoming.caller_id,conversationId:incoming.conversation_id,
+   isCaller:false,video:!!incoming.wants_video,status:'active',statusLabel:'Connecting media…',
+   localStream:stream,remoteStream:null,remoteScreenStream:null,cameraExtra:null,pc:null,
+   screenStream:null,screenSender:null,remoteScreenId:null,cameraOn:!!incoming.wants_video,
+   remoteHasVideo:false,muted:!!a.micMuted,deafened:!!a.deafened,lastSignal:0,
+   processing:false,makingOffer:false,pendingIce:[]};
+  if(a.micMuted)stream.getAudioTracks().forEach(t=>t.enabled=false);
+  await setupTenderPeer(activeCall);showCallUI();
+ }catch(e){stopTracks(stream);incomingCall=null;showCallUI();toast(e.message||'Could not answer call',true)}
+}
+async function pollTenderCalls(){
+ if(!user||!callReady||callPollBusy)return;
+ callPollBusy=true;
+ try{
+  if(activeCall){
+   const c=activeCall;
+   const r=await q('tender_call_sessions').select('id,status,created_at').eq('id',c.id).maybeSingle();
+   if(r.error)throw r.error;
+   if(!r.data||['ended','declined'].includes(r.data.status)||r.data.status==='ringing'&&Date.now()-new Date(r.data.created_at).getTime()>90000){
+    const wasDeclined=r.data?.status==='declined';const stale=r.data?.status==='ringing';
+    if(stale)try{await db.rpc('tender_end_call',{call_uuid:c.id})}catch{}
+    localCallCleanup();toast(wasDeclined?'Call declined.':'Call ended.');return;
+   }
+   if(r.data.status==='active'&&c.status==='ringing'){
+    c.status='active';c.statusLabel='Connecting media…';await setupTenderPeer(c);
+    showCallUI();if(c.isCaller)await tenderMakeOffer(c);
+   }
+   if(c.status==='active'){
+    if(!c.lastHeartbeat||Date.now()-c.lastHeartbeat>12000){c.lastHeartbeat=Date.now();const alive=await db.rpc('tender_touch_call',{call_uuid:c.id});if(alive.error||alive.data!==true)console.warn('Call heartbeat not accepted')}
+    await pollTenderSignals(c);
+   }
+  }else if(!incomingCall){
+   const r=await q('tender_call_sessions').select('*').eq('callee_id',user.id).eq('status','ringing').gte('created_at',new Date(Date.now()-90000).toISOString()).order('created_at',{ascending:false}).limit(1);
+   if(r.error)throw r.error;
+   if(r.data?.length){incomingCall=r.data[0];showCallUI();
+    if(document.visibilityState==='hidden'&&typeof Notification!=='undefined'&&Notification.permission==='granted')
+      emitSystemNotification('📞 Incoming Tender call',callPeerName(incomingCall.caller_id)+' is calling','tender-call-'+incomingCall.id).catch(console.warn);
+   }
+  }else{
+   if(Date.now()-new Date(incomingCall.created_at||0).getTime()>90000){
+    try{await db.rpc('tender_end_call',{call_uuid:incomingCall.id})}catch{}
+    incomingCall=null;showCallUI();
+   }else{
+    const r=await q('tender_call_sessions').select('status').eq('id',incomingCall.id).maybeSingle();
+    if(r.error||!r.data||r.data.status!=='ringing'){incomingCall=null;showCallUI()}
+   }
+  }
+ }finally{callPollBusy=false}
+}
+async function setupTenderPeer(c){
+ if(c.pc)return;
+ const pc=new window.RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
+ c.pc=pc;
+ c.localStream.getTracks().forEach(track=>pc.addTrack(track,c.localStream));
+ pc.onicecandidate=event=>{if(event.candidate&&activeCall===c)tenderSignal(c,'ice',{candidate:event.candidate.toJSON()}).catch(console.warn)};
+ pc.ontrack=event=>{
+  if(activeCall!==c)return;
+  const stream=event.streams?.[0]||new MediaStream([event.track]);
+  if(c.remoteScreenId&&stream.id===c.remoteScreenId)c.remoteScreenStream=stream;
+  else{c.remoteStream=stream;if(event.track.kind==='video')c.remoteHasVideo=true}
+  showCallUI();
+ };
+ pc.onconnectionstatechange=()=>{
+  if(activeCall!==c)return;
+  const val=pc.connectionState;
+  c.statusLabel=val==='connected'?'Connected · private peer-to-peer':val==='failed'?'Connection failed · a TURN server may be needed':val==='disconnected'?'Reconnecting…': 'Connecting media…';
+  const label=document.querySelector('.tender-call-header p');if(label)label.textContent=c.statusLabel;
+  if(val==='failed')toast('Could not connect the call. Some networks require a TURN server.',true);
+ };
+}
+async function tenderSignal(c,kind,payload){
+ if(activeCall!==c||c.status!=='active')return;
+ const r=await q('tender_call_signals').insert({call_id:c.id,sender_id:user.id,recipient_id:c.peerId,kind,payload});
+ if(r.error)throw r.error;
+}
+async function tenderMakeOffer(c){
+ if(activeCall!==c||!c.pc||c.makingOffer||c.pc.signalingState!=='stable')return;
+ c.makingOffer=true;
+ try{
+  await c.pc.setLocalDescription(await c.pc.createOffer());
+  await tenderSignal(c,'offer',{sdp:c.pc.localDescription.toJSON()});
+ }finally{c.makingOffer=false}
+}
+async function tenderFlushIce(c){
+ if(!c.pc?.remoteDescription)return;
+ while(c.pendingIce.length){
+  const candidate=c.pendingIce.shift();
+  try{await c.pc.addIceCandidate(candidate)}catch(e){console.warn('ICE candidate unavailable',e)}
+ }
+}
+async function tenderHandleSignal(c,row){
+ const pc=c.pc;if(!pc)return;
+ const data=row.payload||{};
+ if(row.kind==='screen-announcement'){c.remoteScreenId=String(data.stream_id||'');return}
+ if(row.kind==='screen-stop'){c.remoteScreenStream=null;c.remoteScreenId=null;showCallUI();return}
+ if(row.kind==='ice'){
+  if(!data.candidate)return;
+  if(!pc.remoteDescription){c.pendingIce.push(data.candidate);return}
+  try{await pc.addIceCandidate(data.candidate)}catch(e){console.warn('Ignored ICE candidate',e)}
+  return;
+ }
+ if(row.kind==='offer'){
+  if(!data.sdp||data.sdp.type!=='offer')return;
+  const collision=c.makingOffer||pc.signalingState!=='stable';
+  // Callee wins a simultaneous offer collision; caller waits for the next stable state.
+  if(collision&&c.isCaller)return;
+  if(collision)await pc.setLocalDescription({type:'rollback'});
+  await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+  await tenderFlushIce(c);
+  await pc.setLocalDescription(await pc.createAnswer());
+  await tenderSignal(c,'answer',{sdp:pc.localDescription.toJSON()});return;
+ }
+ if(row.kind==='answer'&&data.sdp?.type==='answer'&&pc.signalingState==='have-local-offer'){
+  await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));await tenderFlushIce(c);
+ }
+}
+async function pollTenderSignals(c){
+ if(activeCall!==c||c.processing)return;
+ c.processing=true;
+ try{
+  const r=await q('tender_call_signals').select('id,kind,payload').eq('call_id',c.id).eq('recipient_id',user.id).gt('id',c.lastSignal).order('id',{ascending:true}).limit(80);
+  if(r.error)throw r.error;
+  for(const row of r.data||[]){
+   if(activeCall!==c)break;
+   await tenderHandleSignal(c,row);
+   c.lastSignal=Number(row.id);
+  }
+ }finally{c.processing=false}
+}
+async function toggleTenderMicrophone(){
+ const c=activeCall;if(!c)return;
+ c.muted=!c.muted;c.localStream.getAudioTracks().forEach(track=>track.enabled=!c.muted);
+ const prefs=audioPrefs();prefs.micMuted=c.muted;saveAudioPrefs(prefs);
+ renderAccountDock(false);showCallUI();
+}
+function toggleTenderDeafen(){
+ const c=activeCall;if(!c)return;c.deafened=!c.deafened;
+ const prefs=audioPrefs();prefs.deafened=c.deafened;saveAudioPrefs(prefs);
+ callMediaAttach();showCallUI();renderAccountDock(false);
+}
+async function toggleTenderCamera(){
+ const c=activeCall;if(!c)return;
+ const track=c.localStream.getVideoTracks()[0]||c.cameraExtra?.getVideoTracks()[0];
+ if(track){c.cameraOn=!c.cameraOn;track.enabled=c.cameraOn;showCallUI();return}
+ if(c.status!=='active')return toast('Wait until the call connects to add a camera.',true);
+ let extra=null;
+ try{
+  extra=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+  const cam=extra.getVideoTracks()[0];if(!cam)throw Error('Camera not available');
+  c.cameraExtra=extra;c.cameraOn=true;
+  c.pc.addTrack(cam,extra);
+  await tenderMakeOffer(c);showCallUI();
+ }catch(e){stopTracks(extra);toast('Camera unavailable: '+(e.message||'permission denied'),true)}
+}
+async function toggleTenderScreen(){
+ const c=activeCall;if(!c||c.status!=='active'||!c.pc)return toast('Connect a call before sharing your screen.',true);
+ if(c.screenStream){await stopTenderScreen(c);return}
+ if(!navigator.mediaDevices?.getDisplayMedia)return toast('This browser does not support screen sharing.',true);
+ if(c.pc.signalingState!=='stable')return toast('Wait a moment while media connects, then try sharing again.',true);
+ let stream=null;
+ try{
+  stream=await navigator.mediaDevices.getDisplayMedia({video:{cursor:'always'},audio:true});
+  if(!stream.getVideoTracks().length)throw Error('No screen video track');
+  if(activeCall!==c){stopTracks(stream);return}
+  c.screenStream=stream;
+  await tenderSignal(c,'screen-announcement',{stream_id:stream.id});
+  c.screenSender=c.pc.addTrack(stream.getVideoTracks()[0],stream);
+  // Optional screen audio uses the same stream, so the peer can set its volume separately.
+  c.screenAudioSender=stream.getAudioTracks()[0]?c.pc.addTrack(stream.getAudioTracks()[0],stream):null;
+  stream.getVideoTracks()[0].onended=()=>stopTenderScreen(c).catch(console.warn);
+  await tenderMakeOffer(c);showCallUI();
+ }catch(e){stopTracks(stream);if(c.screenStream===stream)c.screenStream=null;toast(e.message||'Screen share canceled.',true)}
+}
+async function stopTenderScreen(c){
+ if(!c||!c.screenStream)return;
+ const stream=c.screenStream;c.screenStream=null;
+ for(const sender of [c.screenSender,c.screenAudioSender])if(sender&&c.pc){try{c.pc.removeTrack(sender)}catch{}}
+ c.screenSender=null;c.screenAudioSender=null;
+ stopTracks(stream);
+ if(activeCall===c&&c.status==='active'){
+  await tenderSignal(c,'screen-stop',{});
+  if(c.pc?.signalingState==='stable')await tenderMakeOffer(c);
+  showCallUI();
+ }
+}
+function setTenderVolume(kind,value){
+ const c=activeCall;if(!c)return;
+ const values=callVolumes(c.peerId),key=kind==='stream'?'stream':'voice';
+ values[key]=Math.min(100,Math.max(0,Number(value)||0));
+ localStorage.setItem(callVolumeKey(c.peerId),JSON.stringify(values));
+ callMediaAttach();
+ const label=document.getElementById(key==='voice'?'tender-call-voice-value':'tender-call-stream-value');
+ if(label)label.textContent=values[key]+'%';
+}
 function empty(title,description,action='',label=''){return `<div class="empty-content"><img src="buffalo.webp" alt="Buffalo"><h2>${esc(title)}</h2><p>${esc(description)}</p>${action?`<button class="btn" data-action="${esc(action)}">${esc(label)}</button>`:''}</div>`}
 // Tender 0.2 helpers. Shared DB features are gated behind migration_0_2.sql.
 let extendedReady=false, pronounsReady=false, pieceRepliesReady=false, channelReady=false, visualReady=false, pieceChannels=[],channelUnread=[], notifications=[], customEmojis=[], reads=[], bookmarks=[], blockedUsers=[], pieceEvents=[], pieceRoles=[], roleAssignments=[], activePolls=[], activePollVotes=[];
@@ -326,9 +640,57 @@ function messageText(text){
  });
  if(/^:[a-z0-9_]{2,24}:$/.test(raw.trim()))result=result.replace('class="inline-custom-emoji"','class="inline-custom-emoji sticker-emoji"');
  const invite=extractPublicPieceInvite(text);
- return result.replace(/\n/g,'<br>')+(invite?pieceInviteCardHTML(invite):'');
+ return result.replace(/\n/g,'<br>')+(invite?pieceInviteCardHTML(invite):'')+richLinkCards(raw);
 }
 
+// Safe, automatic outbound link cards. No CORS-unsafe OpenGraph fetch, third-party
+// scraping proxy or secret API key: known providers get tailored metadata and every
+// other HTTPS site gets its domain and destination path. Piece invites have their own card.
+function richLinkCardData(url){
+ let u;try{u=new URL(url)}catch{return null}
+ if(u.protocol!=='https:'||u.username||u.password)return null;
+ const host=u.hostname.toLowerCase().replace(/^www\./,'');
+ const segments=u.pathname.split('/').filter(Boolean).map(s=>{try{return decodeURIComponent(s).slice(0,90)}catch{return s.slice(0,90)}});
+ if(!host||host.length>100||url.length>2048)return null;
+ if(host==='tender.oops.wtf'||host==='fyrix341.github.io'&&segments[0]?.toLowerCase()==='tender')return null;
+ const label=host;
+ const path=segments.length?segments.join(' / ').slice(0,170):'Homepage';
+ let site=host,title=path,summary=host,thumb='';
+ if(host==='github.com'&&segments.length>=2){
+  site='GitHub';title=segments[0]+' / '+segments[1];
+  if(segments[2]==='blob'&&segments.length>4){title=segments[1]+' / '+segments.slice(4).join(' / ').slice(0,160);summary='GitHub · Source file in '+segments[0]+'/'+segments[1]}
+  else if(segments[2]==='issues'){summary='GitHub · Issue tracker'}
+  else if(segments[2]==='pull'){summary='GitHub · Pull request'}
+  else summary='GitHub · Repository';
+ }else if(host==='youtube.com'||host==='m.youtube.com'||host==='youtu.be'){
+  site='YouTube';title='Watch on YouTube';summary=segments[0]==='shorts'?'YouTube Short':'YouTube video';
+  const id=host==='youtu.be'?segments[0]:segments[0]==='shorts'?segments[1]:u.searchParams.get('v');
+  if(id&&/^[a-zA-Z0-9_-]{11}$/.test(id))thumb='https://i.ytimg.com/vi/'+id+'/hqdefault.jpg';
+ }else if(host==='open.spotify.com'){
+  site='Spotify';title=segments.length>1?'Open '+segments[0]+' on Spotify':'Listen on Spotify';summary='Spotify music · External link';
+ }else if(host==='twitch.tv'){
+  site='Twitch';title=segments[0]?'Visit '+segments[0]+' on Twitch':'Open Twitch';summary='Livestream · External link';
+ }else if(host==='reddit.com'||host.endsWith('.reddit.com')){
+  site='Reddit';title=segments.length>1?segments.slice(0,4).join(' / '):'Open Reddit';summary='Reddit post or community';
+ }else if(host==='wikipedia.org'||host.endsWith('.wikipedia.org')){
+  site='Wikipedia';title=(segments[1]||segments[0]||'Wikipedia').replace(/_/g,' ');summary='Wikipedia article';
+ }
+ return {url:u.href,site,title,summary,thumb,label};
+}
+function richLinkCards(text){
+ const raw=String(text||'');if(!raw||raw.startsWith('[TENDER_EMBED]'))return '';
+ const urls=[...raw.matchAll(/https:\/\/[^\s<>"']+/gi)].map(m=>m[0].replace(/[.,!?;:]+$/,'').replace(/\)+$/,'')); 
+ const distinct=[...new Set(urls)].slice(0,2);
+ return distinct.map(url=>{
+  if(extractPublicPieceInvite(url))return '';
+  if(giftGif(url))return '';
+  const item=richLinkCardData(url);if(!item)return '';
+  return `<a class="tender-rich-link" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${esc(item.site)} link"><span class="tender-rich-link-brand">${esc(item.site)}</span>
+    <strong>${esc(item.title)}</strong><span class="tender-rich-link-summary">${esc(item.summary)}</span>
+    ${item.thumb?`<img loading="lazy" referrerpolicy="no-referrer" src="${esc(item.thumb)}" alt="YouTube video thumbnail">`:''}
+    <span class="tender-rich-link-domain">${ico('external','icon-sm')} ${esc(item.label)}</span></a>`;
+ }).join('');
+}
 // Rich announcement embeds are stored as ordinary message text (no new tables needed).
 function richEmbedHTML(text){
  let p;try{p=JSON.parse(String(text).slice('[TENDER_EMBED]'.length))}catch{return esc(text)}
@@ -576,7 +938,7 @@ function sharedPiecesHTML(otherId,mini=false){
 }
 function profileCardHTML(person){
  const isSelf=person.id===user?.id;
- return `<div class="tender-profile-dialog">
+ return `<div class="tender-profile-dialog" style="${profileGradientStyle(person)}">
   <section class="profile-dialog-identity">
    <div class="profile-dialog-banner" style="${profileGradientStyle(person)}${person.banner_url?`background-image:linear-gradient(#07091440,#07091499),url(&quot;${esc(validUrl(person.banner_url))}&quot;);`:''}"></div>
    <div class="profile-dialog-id">
@@ -618,7 +980,7 @@ async function showMiniProfile(id,trigger){
  if(!person)return toast('Profile unavailable.',true);
  const el=document.createElement('div');el.id='tender-mini-profile';el.className='tender-mini-profile';el.dataset.userId=id;
  el.setAttribute('role','dialog');el.setAttribute('aria-label','Profile of '+(person.display_name||'member'));
- el.innerHTML=miniProfileHTML(person);
+ el.innerHTML=miniProfileHTML(person);el.style.cssText=profileGradientStyle(person);
  document.body.appendChild(el);
  const rect=trigger?.getBoundingClientRect?.()||{left:24,right:60,top:100,bottom:125};
  const width=Math.min(320,window.innerWidth-20),height=el.offsetHeight||335;
@@ -672,13 +1034,13 @@ async function boot(){
    if(user)await initialize();else renderAuth();
  }catch(e){ROOT.innerHTML=empty('Could not reach Tender','Check the public Supabase URL and key in config.js.');toast(e.message||'Could not connect.',true)}
 }
-function reset(){notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;state.channelId=null;presenceRoster.clear();if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
+function reset(){stopCallInbox();notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;state.channelId=null;presenceRoster.clear();if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
 function renderSetup(){ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Your friends. Your spaces. Your flavor.</p></div><div class="login-panel"><div class="eyebrow">Tender setup</div><h2>Almost ready to connect.</h2><p>This website needs a free online Supabase project for accounts, messages and Pieces. It's not a local chat simulator.</p><div class="setup-box"><h3>🍗 Connect the shared database</h3><p>1. Create a free project at <a href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Supabase</a>.<br>2. Run <strong>schema.sql</strong> in the project's SQL editor.<br>3. Copy its Project URL and publishable (anon) key into <strong>config.js</strong> on GitHub.<br>4. Refresh this website. Everyone will connect to the same database.</p><details><summary>Important security information</summary>Only use the public publishable/anon key. Never put a service_role key or other secret in GitHub. Set URL configuration for email confirmation in Supabase Auth.</details></div><p class="hint">Your Tender HTML interface is deployed separately from the database. A GitHub Pages link alone cannot deliver live messaging.</p><a class="btn" href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Connect Supabase ${ico('external')}</a></div></div>`}
 function renderAuth(){state.mobileDetail=false;ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Stay close. Stay crispy. 🍗</p></div><div class="login-panel"><div class="eyebrow">Welcome to Tender</div><h2>${state.loginMode==='login'?'Good to have you back.':'Your people are waiting.'}</h2><p>${state.loginMode==='login'?'Sign in to catch up with your people.':'Create your account to join the conversation.'}</p><div class="login-tabs"><button class="${state.loginMode==='login'?'selected':''}" data-action="auth-tab" data-tab="login">Log in</button><button class="${state.loginMode==='signup'?'selected':''}" data-action="auth-tab" data-tab="signup">Sign up</button></div><form id="auth-form">${state.loginMode==='signup'?`<div class="field"><label for="handle">Username (3–20 letters, numbers, underscores)</label><input class="input" id="handle" name="handle" minlength="3" maxlength="20" pattern="[a-zA-Z0-9_]{3,20}" required autocomplete="username" placeholder="buffalofan"></div><div class="field"><label for="display">Display name</label><input class="input" id="display" name="display_name" maxlength="40" required placeholder="Your name"></div>`:''}<div class="field"><label for="email">Email address</label><input class="input" id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com"></div><div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" minlength="8" autocomplete="${state.loginMode==='login'?'current-password':'new-password'}" required placeholder="At least 8 characters"></div><button class="btn full top-spacer" type="submit">${state.loginMode==='login'?'Log in':'Create account'} ${ico('back')}</button></form><p class="hint top-spacer">Tender is an early beta. Please don't post private information in public Pieces.</p></div></div>`}
 async function authSubmit(form){const data=new FormData(form), email=String(data.get('email')).trim(), password=String(data.get('password'));
  await safe(async()=>{if(state.loginMode==='signup'){const handle=String(data.get('handle')).trim().toLowerCase(),display_name=String(data.get('display_name')).trim();if(!/^[a-z0-9_]{3,20}$/.test(handle))throw Error('Username needs 3–20 letters, numbers or underscores.');const r=await db.auth.signUp({email,password,options:{data:{handle,display_name},emailRedirectTo:location.origin+location.pathname}});assert(r);toast(r.data.session?'Welcome to Tender!':'Check your inbox to confirm your email, then sign in.');if(!r.data.session){state.loginMode='login';renderAuth()}}
  else{assert(await db.auth.signInWithPassword({email,password}));toast('Welcome back! 🍗')}})}
-async function initialize(){ROOT.innerHTML='<div class="loading-screen"><img src="buffalo.webp" alt="Buffalo"><h1>tender<span>.</span></h1><p>Loading your messages...</p></div>';try{await refreshData();applyTheme();render();subscribe();startPresence().catch(console.warn);if(extendedReady)renderNavBadges();
+async function initialize(){ROOT.innerHTML='<div class="loading-screen"><img src="buffalo.webp" alt="Buffalo"><h1>tender<span>.</span></h1><p>Loading your messages...</p></div>';try{await refreshData();applyTheme();render();subscribe();startPresence().catch(console.warn);checkCallReady().catch(console.warn);if(extendedReady)renderNavBadges();
   const params=new URLSearchParams(window.location.search);
    const targetChat=params.get('chat');
    if(targetChat&&conversations.some(c=>c.id===targetChat))await goTo('chats',targetChat);
@@ -714,7 +1076,7 @@ function render(){if(!user)return renderAuth();ROOT.innerHTML=`<div class="scree
 function dmProfilePanelHTML(person){
  const shared=sharedPublicPieces(person.id);
  return `<div class="info-head"><span class="info-heading">USER PROFILE</span><button type="button" class="round-btn" data-action="toggle-info" aria-label="Hide profile panel" title="Hide profile panel">${ico('x','icon-sm')}</button></div>
- <div class="dm-profile-panel">
+ <div class="dm-profile-panel" style="${profileGradientStyle(person)}">
   <button type="button" class="dm-profile-cover" data-action="open-profile" data-id="${esc(person.id)}" aria-label="Open full profile of ${esc(person.display_name||'member')}">
     <div class="dm-profile-banner" ${person.banner_url?`style="background-image:linear-gradient(#0c0f2055,#0c0f206a),url(&quot;${esc(validUrl(person.banner_url))}&quot;)"`:''}></div>
     <span class="dm-profile-avatar">${avatars(person)}</span>
@@ -935,7 +1297,7 @@ function renderMain(){const m=document.getElementById('main');if(!m)return;
  syncDeafenedAudio();
  renderInfoPanel()
 }
-function renderChat(c){const title=namesFor(c),otherId=c.kind!=='group'?(c.conversation_members||[]).find(x=>x.user_id!==user.id)?.user_id:null;return header(title,c.kind==='group'?`${(c.conversation_members||[]).length} members`:'Private conversation',`${otherId?`<button class="round-btn" data-action="open-profile" data-id="${esc(otherId)}" title="View profile" aria-label="View profile">${ico('users')}</button>`:''}<button class="round-btn" data-action="search" title="Search messages">${ico('search')}</button><button class="round-btn" data-action="chat-info" title="Conversation info">${ico('info')}</button><button class="round-btn" data-action="toggle-info" title="Toggle member panel">${ico('users')}</button><button class="round-btn" data-action="room-appearance" title="Customize this chat">🎨</button>`)+`<div class="main-body"><div class="chat-history">${pinnedHTML()}<div class="chat-scroll" id="chat-scroll">${activeMessages.length?activeMessages.map(x=>messageHTML(x,'message')).join(''):`<div class="chat-empty"><img src="buffalo.webp" alt="Buffalo"><h3>Start the conversation</h3><p class="hint">Say hi to ${esc(title)}!</p></div>`}</div><button type="button" class="chat-jump-new" id="chat-jump-new" data-action="jump-latest" hidden>↓ New messages · Jump to latest</button>${composer('chat',`Message ${title}`)}</div></div>`}
+function renderChat(c){const title=namesFor(c),otherId=c.kind!=='group'?(c.conversation_members||[]).find(x=>x.user_id!==user.id)?.user_id:null;return header(title,c.kind==='group'?`${(c.conversation_members||[]).length} members`:'Private conversation',`${otherId?`<button class="round-btn" data-action="open-profile" data-id="${esc(otherId)}" title="View profile" aria-label="View profile">${ico('users')}</button>`:''}${otherId?`<button class="round-btn" data-action="call-start-voice" data-id="${esc(c.id)}" title="Start voice call" aria-label="Start voice call">📞</button><button class="round-btn" data-action="call-start-video" data-id="${esc(c.id)}" title="Start video call" aria-label="Start video call">📹</button>`:''}<button class="round-btn" data-action="search" title="Search messages">${ico('search')}</button><button class="round-btn" data-action="chat-info" title="Conversation info">${ico('info')}</button><button class="round-btn" data-action="toggle-info" title="Toggle member panel">${ico('users')}</button><button class="round-btn" data-action="room-appearance" title="Customize this chat">🎨</button>`)+`<div class="main-body"><div class="chat-history">${pinnedHTML()}<div class="chat-scroll" id="chat-scroll">${activeMessages.length?activeMessages.map(x=>messageHTML(x,'message')).join(''):`<div class="chat-empty"><img src="buffalo.webp" alt="Buffalo"><h3>Start the conversation</h3><p class="hint">Say hi to ${esc(title)}!</p></div>`}</div><button type="button" class="chat-jump-new" id="chat-jump-new" data-action="jump-latest" hidden>↓ New messages · Jump to latest</button>${composer('chat',`Message ${title}`)}</div></div>`}
 function messageHTML(row,target_type='message'){
  const p=pby(row.author_id),mine=row.author_id===user.id;
   const previous=activeMessages[activeMessages.findIndex(x=>x.id===row.id)-1];
@@ -1012,7 +1374,7 @@ function renderSettings(){
  let content='';
  if(tab==='profile')content=`
   <div class="settings-section-head"><span class="eyebrow">PERSONAL PROFILE</span><h1>Make it yours.</h1><p>Give your Tender profile some personality.</p></div>
-  <div class="settings-profile-preview">${profileBanner(my)}<div class="settings-preview-identity"><div><h2 id="settings-preview-name">${esc(my.display_name)}</h2><p id="settings-preview-meta">@${esc(my.handle)}${my.pronouns?' · '+esc(my.pronouns):''}</p><p id="settings-preview-status" class="settings-preview-status ${my.game_status?'':'is-empty'}">${my.game_status?esc((my.status_emoji||'🍗')+' '+my.game_status):'No custom status yet'}</p></div><button class="btn secondary sm" data-action="open-profile" data-id="${esc(user.id)}">Preview profile</button></div></div>
+  <div class="settings-profile-preview" style="${profileGradientStyle(my)}">${profileBanner(my)}<div class="settings-preview-identity"><div><h2 id="settings-preview-name">${esc(my.display_name)}</h2><p id="settings-preview-meta">@${esc(my.handle)}${my.pronouns?' · '+esc(my.pronouns):''}</p><p id="settings-preview-status" class="settings-preview-status ${my.game_status?'':'is-empty'}">${my.game_status?esc((my.status_emoji||'🍗')+' '+my.game_status):'No custom status yet'}</p></div><button class="btn secondary sm" data-action="open-profile" data-id="${esc(user.id)}">Preview profile</button></div></div>
   <div class="settings-card"><div class="settings-card-title"><h3>About you</h3><p>Shown when someone clicks your profile picture or name.</p></div>
   <form id="profile-form" class="settings-fields">
   <div class="field"><label>Display name</label><input class="input" name="display_name" maxlength="40" required value="${esc(my.display_name)}"></div>
@@ -1023,9 +1385,15 @@ function renderSettings(){
   <div class="settings-actions"><button class="btn" type="submit">Save profile</button></div></form></div>
   ${visualReady?`<div class="settings-card free-nitro-studio"><h3>✨ Free profile studio</h3><p>Gradients, name fonts and effects — free for every Tender member!</p>
  <form id="profile-style-form" class="settings-fields">
+ <div class="settings-card-title"><h4>Profile background gradient</h4><p>Colors the entire profile card and banner — separately from your name!</p></div>
  <div class="settings-two-fields">
- <div class="field"><label>Profile gradient: start</label><input class="input" type="color" name="profile_gradient_start" value="${esc(tenderSafeColor(my.profile_gradient_start,'#21385d'))}"></div>
- <div class="field"><label>Profile gradient: end</label><input class="input" type="color" name="profile_gradient_end" value="${esc(tenderSafeColor(my.profile_gradient_end,'#563561'))}"></div>
+ <div class="field"><label>Background: start</label><input class="input" type="color" name="profile_gradient_start" value="${esc(tenderSafeColor(my.profile_gradient_start,'#21385d'))}"></div>
+ <div class="field"><label>Background: end</label><input class="input" type="color" name="profile_gradient_end" value="${esc(tenderSafeColor(my.profile_gradient_end,'#563561'))}"></div></div>
+ <div class="profile-gradient-preview" style="${profileGradientStyle(my)}">Your profile background</div>
+ <div class="settings-card-title"><h4>Display name gradient</h4><p>Choose an entirely independent gradient for your username.</p></div>
+ <div class="settings-two-fields">
+ <div class="field"><label>Name gradient: start</label><input class="input" type="color" name="name_gradient_start" value="${esc(tenderSafeColor(my.name_gradient_start||my.profile_gradient_start,'#21385d'))}"></div>
+ <div class="field"><label>Name gradient: end</label><input class="input" type="color" name="name_gradient_end" value="${esc(tenderSafeColor(my.name_gradient_end||my.profile_gradient_end,'#563561'))}"></div>
  <div class="field"><label>Display name font</label><select class="input" name="name_style">${nameStyles.map(style=>`<option value="${style}" ${my.name_style===style?'selected':''}>${style[0].toUpperCase()+style.slice(1)}</option>`).join('')}</select></div>
  <div class="field"><label>Display name effect</label><select class="input" name="name_effect">${nameEffects.map(effect=>`<option value="${effect}" ${my.name_effect===effect?'selected':''}>${effect[0].toUpperCase()+effect.slice(1)}</option>`).join('')}</select></div>
  <div class="field"><label>Solid / neon text color</label><input class="input" type="color" name="name_color" value="${esc(tenderSafeColor(my.name_color,'#ffffff'))}"></div>
@@ -1259,7 +1627,7 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='account-switch'){
   closeAccountMenu();
   if(!await tenderConfirm('Switch Tender accounts?','Your current session will end on this device. Sign in using your other account to continue.','Switch accounts',false))return;
-  await safe(async()=>{assert(await db.auth.signOut());unsub();reset();state.loginMode='login';renderAuth()});
+  await safe(async()=>{await finishTenderCall();assert(await db.auth.signOut());unsub();reset();state.loginMode='login';renderAuth()});
   return;
  }
  if(a==='account-presence'){
@@ -1275,18 +1643,27 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
   });
   return;
  }
- if(a==='account-mic'){
+ if(a==='call-start-voice'){await startTenderCall(false);return}
+  if(a==='call-start-video'){await startTenderCall(true);return}
+  if(a==='call-accept'){await answerTenderCall(true);return}
+  if(a==='call-decline'){await answerTenderCall(false);return}
+  if(a==='call-hangup'){await finishTenderCall();return}
+  if(a==='call-toggle-mic'){await toggleTenderMicrophone();return}
+  if(a==='call-toggle-deafen'){toggleTenderDeafen();return}
+  if(a==='call-toggle-video'){await toggleTenderCamera();return}
+  if(a==='call-share-screen'){await toggleTenderScreen();return}
+  if(a==='account-mic'){
   const audio=audioPrefs();
   if(!audio.micMuted&&voiceRecorder?.state==='recording')return toast('Finish recording your voice note before muting the microphone.',true);
   audio.micMuted=!audio.micMuted;
-  saveAudioPrefs(audio);renderAccountDock(false);
+  saveAudioPrefs(audio);if(activeCall){activeCall.muted=audio.micMuted;activeCall.localStream?.getAudioTracks().forEach(t=>t.enabled=!audio.micMuted);showCallUI()}renderAccountDock(false);
   toast(audio.micMuted?'Tender microphone muted for voice notes.':'Tender microphone ready for voice notes.');
   return;
  }
  if(a==='account-deafen'){
   const audio=audioPrefs();
   audio.deafened=!audio.deafened;saveAudioPrefs(audio);
-  syncDeafenedAudio();renderAccountDock(false);
+  syncDeafenedAudio();if(activeCall){activeCall.deafened=audio.deafened;showCallUI()}renderAccountDock(false);
   toast(audio.deafened?'Tender sounds muted. 🔇':'Tender sounds enabled. 🔊');
   return;
  }
@@ -1424,7 +1801,7 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='attach'){document.getElementById('message-file')?.click();return}
  if(a==='enlarge'){MODALS.innerHTML=`<div class="backdrop-img" data-action="close-modal"><img src="${esc(validUrl(el.dataset.src))}" alt="Gallery picture"></div>`;return}
  if(a==='open-attachment'){let url=assert(await db.storage.from('tender-chat').createSignedUrl(el.dataset.path,60)).signedUrl;window.open(validUrl(url),'_blank','noopener,noreferrer');return}
- if(a==='logout'){await safe(async()=>{assert(await db.auth.signOut());unsub();reset();renderAuth()});return}
+ if(a==='logout'){await safe(async()=>{await finishTenderCall();assert(await db.auth.signOut());unsub();reset();renderAuth()});return}
  if(a==='start-dm')await safe(async()=>{let cid=assert(await db.rpc('start_dm',{other_id:id}));closeModal();await refreshData();await goTo('chats',cid)});
  if(a==='accept-friend')await safe(async()=>{assert(await q('friendships').update({status:'accepted'}).eq('id',id));await refreshData();render();toast('Friend request accepted!')});
  if(a==='remove-friend') {if(!await tenderConfirm('Remove friend?','They will be removed from your friends list. You can add them back later.','Remove friend'))return;await safe(async()=>{let f=friendships.find(f=>f.status==='accepted'&&[f.requester,f.recipient].includes(id));if(f)assert(await q('friendships').delete().eq('id',f.id));await refreshData();await goTo('friends');toast('Friend removed.')})}
@@ -1525,6 +1902,8 @@ async function submitForm(form){switch(form.id){
   const d=new FormData(form),style=String(d.get('name_style')),effect=String(d.get('name_effect'));
   const updates={profile_gradient_start:tenderSafeColor(d.get('profile_gradient_start'),'#21385d'),
    profile_gradient_end:tenderSafeColor(d.get('profile_gradient_end'),'#563561'),
+   name_gradient_start:tenderSafeColor(d.get('name_gradient_start'),'#21385d'),
+   name_gradient_end:tenderSafeColor(d.get('name_gradient_end'),'#563561'),
    name_style:nameStyles.includes(style)?style:'classic',
    name_effect:nameEffects.includes(effect)?effect:'solid',
    name_color:tenderSafeColor(d.get('name_color'),'#ffffff')};
@@ -1646,7 +2025,20 @@ document.addEventListener('dblclick',event=>{
 });
 document.addEventListener('submit',event=>{if(event.target.matches('form')){event.preventDefault();submitForm(event.target).catch(e=>{console.error(e);toast(e.message||'Error',true)})}});
 document.addEventListener('click',event=>{if(!event.target.closest?.('.sidebar-account-dock'))closeAccountMenu();let t=event.target.closest('[data-action]');if(!t)return;if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
-document.addEventListener('input',e=>{if(e.target.id==='tender-emoji-search'){renderEmojiResults();return}if(e.target.id==='message-box'&&user&&state.selected){const key=tenderDraftKey();if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
+document.addEventListener('input',e=>{
+ if(e.target.closest?.('#profile-style-form')){
+  const form=e.target.closest('#profile-style-form');
+  const color=field=>tenderSafeColor(form.querySelector('[name="'+field+'"]')?.value);
+  const bgStart=color('profile_gradient_start'),bgEnd=color('profile_gradient_end');
+  const nameStart=color('name_gradient_start'),nameEnd=color('name_gradient_end');
+  for(const el of document.querySelectorAll('.profile-gradient-preview,.settings-profile-preview')){
+   el.style.setProperty('--profile-start',bgStart);el.style.setProperty('--profile-end',bgEnd);
+  }
+  const gradientText=document.querySelector('.profile-name-preview .tender-styled-name');
+  if(gradientText){gradientText.style.setProperty('--name-gradient-a',nameStart);gradientText.style.setProperty('--name-gradient-b',nameEnd)}
+  return;
+ }
+ if(e.target.matches?.('[data-action="call-voice-volume"],[data-action="call-stream-volume"]')){setTenderVolume(e.target.dataset.action==='call-stream-volume'?'stream':'voice',e.target.value);return}if(e.target.id==='tender-emoji-search'){renderEmojiResults();return}if(e.target.id==='message-box'&&user&&state.selected){const key=tenderDraftKey();if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
 // Type-to-chat works like a desktop messenger: printable keystrokes land
 // in the current composer, never in settings or behind an open modal.
 document.addEventListener('keydown',event=>{
