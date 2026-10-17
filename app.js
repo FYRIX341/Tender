@@ -104,8 +104,69 @@ function badgeText(n){return n>99?'99+':String(n)}
 function unreadCount(id){return notifications.filter(n=>!n.is_read&&n.kind==='message'&&n.conversation_id===id).length}
 function unreadFriends(){return notifications.filter(n=>!n.is_read&&n.kind==='friend').length}
 function unreadAll(){return notifications.filter(n=>!n.is_read).length}
+// Piece invitations are verified against an actual public Piece in Tender's data.
+// A typed URL alone is NOT sufficient to create a trusted-looking invite card.
+function pieceInviteURL(piece){
+ if(!piece?.is_public)return null;
+ const secure=location.protocol==='https:'?new URL(location.href):new URL('https://fyrix341.github.io/Tender/');
+ secure.search='';secure.hash='';secure.searchParams.set('piece',piece.id);
+ return secure.href;
+}
+function extractPublicPieceInvite(text){
+ const urls=String(text||'').match(/https?:\/\/[^\s<>"']+/gi)||[];
+ for(const raw of urls){
+  let link;try{link=new URL(raw.replace(/[.,!?;:)\]]+$/,''))}catch{continue}
+  if(!['https:','http:'].includes(link.protocol))continue;
+  const hostname=link.hostname.toLowerCase();
+  const trusted=hostname==='fyrix341.github.io'||hostname==='tender.oops.wtf'||hostname===location.hostname.toLowerCase();
+  if(!trusted||link.username||link.password||link.port&&!['80','443'].includes(link.port))continue;
+  const path=link.pathname.replace(/\/+$/,'');
+  if(hostname==='fyrix341.github.io'&&path.toLowerCase()!=='/tender')continue;
+  if(hostname!=='fyrix341.github.io'&&path!==''&&path.toLowerCase()!=='/tender')continue;
+  const id=link.searchParams.get('piece');
+  if(!id||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))continue;
+  const piece=pieces.find(p=>p.id.toLowerCase()===id.toLowerCase()&&p.is_public);
+  if(piece)return piece;
+ }
+ return null;
+}
+function pieceInviteCardHTML(piece,preview=false){
+ if(!piece?.is_public)return '';
+ const count=memberships.filter(m=>m.piece_id===piece.id).length;
+ const color=/^#[0-9a-f]{6}$/i.test(piece.color||'')?piece.color:'#f47735';
+ const banner=piece.banner_url&&/^https:\/\//i.test(piece.banner_url)&&validUrl(piece.banner_url)!=='#'
+    ?`<img class="invite-card-banner" src="${esc(validUrl(piece.banner_url))}" alt="" loading="lazy">`
+    :`<div class="invite-card-gradient" style="--invite-color:${esc(color)}"></div>`;
+ const joined=inPiece(piece.id);
+ return `<article class="tender-piece-invite ${preview?'invite-preview':''}">
+  ${banner}
+  <div class="invite-card-body"><div class="invite-card-heading">🍗 TENDER PIECE INVITE <span class="invite-card-tag">PUBLIC</span></div>
+   <div class="invite-card-community">${pieceAvatar(piece,'invite-card-icon')}
+   <div class="invite-card-details"><strong>${esc(piece.name)}</strong><span>${esc((piece.description||'Find your people and stay crispy.').slice(0,145))}</span></div></div>
+   <div class="invite-card-bottom"><span class="invite-member-count">${ico('users','icon-sm')} ${count} ${count===1?'member':'members'}</span>
+    <button type="button" class="btn sm invite-join" data-action="open-piece-invite" data-id="${esc(piece.id)}">${joined?'Open Piece':'View & Join'} ${ico('external','icon-sm')}</button></div>
+  </div>
+ </article>`;
+}
+function invitePieceModal(piece){
+ if(!piece?.is_public){toast('Only public Pieces have shareable invitation cards.',true);return}
+ const link=pieceInviteURL(piece);
+ modal('Invite to '+piece.name,'Send this link in a DM to display a preview card.',`
+  <div class="invite-share-modal">${pieceInviteCardHTML(piece,true)}
+   <label class="field"><span class="invite-field-label">Invitation link</span>
+   <input class="input" id="invite-link" value="${esc(link)}" readonly aria-label="Piece invitation link"></label>
+   <div class="button-group"><button type="button" class="btn" data-action="copy-piece-invite" data-url="${esc(link)}">${ico('clip','icon-sm')} Copy invitation link</button></div>
+   <p class="hint">Public Pieces only. The recipient must sign in and choose to join; the link doesn't bypass membership permissions.</p>
+  </div>`);
+}
+function invitePickerModal(){
+ const available=pieces.filter(p=>p.is_public&&inPiece(p.id));
+ modal('Share a Piece invite','Pick a public Piece to include as a preview in this conversation.',`
+   <div class="invite-picker-list">${available.map(piece=>`<button type="button" class="invite-picker-item" data-action="insert-piece-invite" data-id="${esc(piece.id)}">${pieceAvatar(piece)}<span><strong>${esc(piece.name)}</strong><small>Insert invitation link</small></span>${ico('plus','icon-sm')}</button>`).join('')||'<p class="hint">Join a public Piece first to share its invitation.</p>'}</div>`);
+}
 function messageText(text){if(String(text||'').startsWith('[TENDER_EMBED]'))return richEmbedHTML(text);let result=esc(text||'').replace(/(https:\/\/[^\s<]+)/g,m=>{const u=validUrl(m.replace(/&amp;/g,'&'));return u==='#'?m:`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer" class="message-link">${m}</a>`});
- result=result.replace(/:([a-z0-9_]{2,24}):/g,(whole,code)=>{const e=customEmojis.find(x=>x.shortcode===code&&(x.piece_id===null||x.piece_id===state.selected));return e?`<img class="inline-custom-emoji" src="${esc(db.storage.from('tender-emoji').getPublicUrl(e.image_path).data.publicUrl)}" alt=":${esc(code)}:" title=":${esc(code)}:">`:whole});if(/^:[a-z0-9_]{2,24}:$/.test(String(text||'').trim()))result=result.replace('class="inline-custom-emoji"','class="inline-custom-emoji sticker-emoji"');return result.replace(/\n/g,'<br>')}
+ result=result.replace(/:([a-z0-9_]{2,24}):/g,(whole,code)=>{const e=customEmojis.find(x=>x.shortcode===code&&(x.piece_id===null||x.piece_id===state.selected));return e?`<img class="inline-custom-emoji" src="${esc(db.storage.from('tender-emoji').getPublicUrl(e.image_path).data.publicUrl)}" alt=":${esc(code)}:" title=":${esc(code)}:">`:whole});if(/^:[a-z0-9_]{2,24}:$/.test(String(text||'').trim()))result=result.replace('class="inline-custom-emoji"','class="inline-custom-emoji sticker-emoji"');const invite=extractPublicPieceInvite(text);
+ return result.replace(/\n/g,'<br>')+(invite?pieceInviteCardHTML(invite):'')}
 // Rich announcement embeds are stored as ordinary message text (no new tables needed).
 function richEmbedHTML(text){
  let p;try{p=JSON.parse(String(text).slice('[TENDER_EMBED]'.length))}catch{return esc(text)}
