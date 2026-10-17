@@ -51,7 +51,7 @@ function harness(){
    setPiece(){state.area='pieces';state.selected=pieces[0].id;state.pieceTab='chat';},
    setMessages(rows){activeMessages=rows},messages(){return activeMessages},
    messageHTML,composer,selectReply,reply(){return replyTo},send:sendMessage,
-   profileCardHTML,dmProfilePanelHTML,showProfile,sharedPublicPieces,
+   profileCardHTML,dmProfilePanelHTML,showProfile,sharedPublicPieces,renderFriend,
    pieceInviteURL,extractPublicPieceInvite,pieceInviteCardHTML,messageText
  };})();`);
  assert.notEqual(exposed,app,'Harness injection anchor changed.');
@@ -157,4 +157,15 @@ test('reply and full-profile layouts render with accessible focus/touch affordan
  assert.match(css,/\.dm-profile-panel/);
  assert.match(css,/\.tender-piece-invite/);
  assert.match(css,/@media\(hover:none\)/);
+});
+
+test('Friends page uses real rich profile instead of stale 0.2 card',()=>{
+ const {h}=harness();
+ const html=h.renderFriend({id:'user-b',display_name:'Buffalo Fan',handle:'buffalo',pronouns:'they/them',bio:'Hello from Buffalo',game_status:'Chilling',status_emoji:'🍗'});
+ assert.match(html,/friend-profile-page/);
+ assert.match(html,/friend-profile-avatar/);
+ assert.match(html,/Hello from Buffalo/);
+ assert.match(html,/SHARED PIECES/);
+ assert.match(html,/View full profile/);
+ assert.doesNotMatch(html,/Hidden Place/);
 });
