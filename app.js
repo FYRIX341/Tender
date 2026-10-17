@@ -51,7 +51,7 @@ const profileFace=p=>`<button type="button" class="profile-click profile-face" d
 const profileName=p=>`<button type="button" class="profile-click profile-name" data-action="open-profile" data-id="${esc(p.id||'')}" title="View ${esc(p.display_name||'member')}'s profile">${esc(p.display_name||'Tender member')}</button>`;
 const config = window.TENDER_CONFIG || {};
 let db, session, user, my, profiles=[], friendships=[], conversations=[], pieces=[], memberships=[], activeMessages=[], activePosts=[], activeGallery=[], activeComments=[], activeReactions=[], activeMembers=[], selectedPost=null, channel=null;
-let state={area:'chats', selected:null, pieceTab:'chat', settingsTab:'profile', search:'', loginMode:'login', mobileDetail:false, setup:false, busy:false, authReady:false};
+let state={area:'chats', selected:null, channelId:null, pieceTab:'chat', settingsTab:'profile', search:'', loginMode:'login', mobileDetail:false, setup:false, busy:false, authReady:false};
 let realtimeChannel=null, realtimeRefreshTimer=null;
 function toast(message,bad=false){const div=document.createElement('div');div.className='toast';div.textContent=message;div.style.borderColor=bad?'#bb4b5f':'';TOASTER.append(div);setTimeout(()=>div.remove(),5000);}
 async function safe(work){if(state.busy)return;state.busy=true;try{await work()}catch(e){console.error('Tender:',e);toast(e.message||'Something went wrong.',true)}finally{state.busy=false}}
@@ -65,9 +65,124 @@ function avatarFor(c){return c.kind==='group'?`<span class="squad-avatar">👥</
 function inPiece(pid){return memberships.some(m=>m.piece_id===pid && m.user_id===user.id)}
 function ownPiece(pid){return pieces.some(p=>p.id===pid&&p.owner_id===user.id)}
 const selectedPiece=()=>pieces.find(x=>x.id===state.selected);
+// Tender 0.4 — membership-scoped channels, read cursors and honest live presence.
+// Legacy Piece messages (without channel_id) always belong to #general.
+function channelsFor(pid){
+ const rows=pieceChannels.filter(c=>c.piece_id===pid).sort((a,b)=>(a.position||0)-(b.position||0)||(a.created_at||'').localeCompare(b.created_at||''));
+ return rows.length?rows:[{id:'legacy-'+pid,piece_id:pid,name:'general',kind:'text',topic:'Main Piece chat',category:'TEXT CHANNELS',is_default:true}];
+}
+function selectedChannel(pid=state.selected){
+ const list=channelsFor(pid);
+ return list.find(c=>c.id===state.channelId)||list.find(c=>c.is_default)||list[0];
+}
+const channelUnreadCount=id=>channelUnread.find(x=>x.channel_id===id)?.unread_count||0;
+const pieceUnreadCount=pid=>channelsFor(pid).reduce((sum,c)=>sum+Number(channelUnreadCount(c.id)||0),0);
+function railPieceHTML(){
+ if(!user)return '';
+ const joined=pieces.filter(p=>inPiece(p.id)).slice(0,80);
+ return `<div class="rail-piece-divider" role="separator"></div><div class="rail-piece-list" aria-label="Your Pieces">
+ ${joined.map(p=>`<button type="button" class="rail-piece ${state.selected===p.id&&['pieces','discover'].includes(state.area)?'active':''}" data-action="rail-piece" data-id="${esc(p.id)}" title="${esc(p.name)}" aria-label="Open Piece ${esc(p.name)}">${pieceAvatar(p)}${pieceUnreadCount(p.id)?`<span class="rail-piece-unread" aria-label="${pieceUnreadCount(p.id)} unread Piece messages">${Math.min(99,pieceUnreadCount(p.id))}</span>`:''}</button>`).join('')}
+ </div><button type="button" class="rail-piece-add" data-action="new-piece" title="Create a Piece" aria-label="Create Piece">${ico('plus','icon-sm')}</button>`;
+}
+let unreadRefreshTimer=null;
+async function loadChannelData(){
+ if(!user||!db)return;
+ try{
+  const result=await q('piece_channels').select('*').order('position',{ascending:true}).limit(1000);
+  if(result.error){channelReady=false;pieceChannels=[];channelUnread=[];return}
+  channelReady=true;pieceChannels=result.data||[];
+  await loadChannelUnreads();
+ }catch(e){channelReady=false;pieceChannels=[];channelUnread=[];console.warn('Tender channel setup pending',e)}
+}
+async function loadChannelUnreads(){
+ if(!user||!channelReady)return;
+ try{const r=await db.rpc('tender_channel_unreads');if(!r.error)channelUnread=r.data||[]}catch(e){console.warn('Unread counts unavailable',e)}
+}
+function scheduleChannelUnreadRefresh(){
+ if(!user||!channelReady)return;
+ clearTimeout(unreadRefreshTimer);
+ unreadRefreshTimer=setTimeout(async()=>{await loadChannelUnreads();renderPieceRail();if(['pieces','discover'].includes(state.area))renderSidebar()},500);
+}
+function renderPieceRail(){
+ const rail=document.querySelector('.rail-piece-zone');if(rail)rail.innerHTML=railPieceHTML();
+ const piecesBtn=document.querySelector('.rail-btn[data-area="pieces"]');
+ if(piecesBtn){piecesBtn.querySelector('.unread-badge')?.remove();const total=pieces.filter(p=>inPiece(p.id)).reduce((n,p)=>n+pieceUnreadCount(p.id),0);if(total)piecesBtn.insertAdjacentHTML('beforeend',renderBadge(total))}
+}
+async function markChannelRead(){
+ if(!user||!channelReady||!state.selected||!['pieces','discover'].includes(state.area)||state.pieceTab!=='chat')return;
+ const c=selectedChannel();if(!c||c.id.startsWith('legacy-')||!inPiece(c.piece_id))return;
+ try{
+  const r=await q('piece_channel_reads').upsert({channel_id:c.id,user_id:user.id,last_read_at:new Date().toISOString()},{onConflict:'channel_id,user_id'});
+  if(r.error)throw r.error;
+  const row=channelUnread.find(x=>x.channel_id===c.id);if(row)row.unread_count=0;
+  renderPieceRail();
+ }catch(e){console.warn('Piece read cursor failed',e)}
+}
+let presenceChannel=null;
+let presenceRoster=new Map();
+function activePresence(id){
+ if(!id)return 'offline';
+ const declared=pby(id).presence_mode||'online';
+ if(declared==='invisible')return 'offline';
+ if(id===user?.id)return declared;
+ return presenceRoster.get(id)||'offline';
+}
+function onlineForGroup(conversation){
+ const ids=[...new Set((conversation?.conversation_members||[]).map(m=>m.user_id))];
+ const online=ids.filter(id=>activePresence(id)!=='offline').length;
+ const offline=ids.length-online;
+ return {online,offline,status:online>offline?'online':'offline'};
+}
+function presenceDotHTML(status,label=''){
+ const valid=['online','idle','dnd'].includes(status)?status:'offline';
+ return `<span class="tender-presence-dot ${valid}" aria-label="${esc(label||(valid==='offline'?'Offline':valid))}" title="${esc(label||(valid==='offline'?'Offline':valid))}"></span>`;
+}
+async function startPresence(){
+ if(!db||!user)return;
+ if(presenceChannel){await db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}
+ presenceRoster=new Map();
+ const sessionUser=user.id;
+ const channel=db.channel('tender-online-v1',{config:{presence:{key:sessionUser}}});
+ presenceChannel=channel;
+ const update=()=>{
+  const next=new Map();for(const [id,rows] of Object.entries(channel.presenceState()||{})){
+   if(id===sessionUser||!Array.isArray(rows))continue;
+   const item=rows.find(row=>row.user_id===id&&['online','idle','dnd'].includes(row.status));
+   if(item)next.set(id,item.status);
+  }
+  presenceRoster=next;
+  if(user?.id===sessionUser){updatePresenceMarkers();renderInfoPanel()}
+ };
+ channel.on('presence',{event:'sync'},update);
+ channel.subscribe(async status=>{
+  if(status==='SUBSCRIBED'&&user?.id===sessionUser){
+   if(my?.presence_mode!=='invisible')await channel.track({user_id:sessionUser,status:my?.presence_mode||'online'});
+  }
+ });
+}
+async function publishPresence(){
+ if(!presenceChannel||!user)return;
+ if(my?.presence_mode==='invisible')await presenceChannel.untrack();
+ else await presenceChannel.track({user_id:user.id,status:my?.presence_mode||'online'});
+ updatePresenceMarkers();
+}
+function updatePresenceMarkers(){
+ document.querySelectorAll('[data-presence-id]').forEach(el=>{
+  const id=el.dataset.presenceId,status=activePresence(id);
+  el.className='tender-presence-dot '+(['online','idle','dnd'].includes(status)?status:'offline');
+  el.title=status;
+ });
+ document.querySelectorAll('[data-group-presence]').forEach(el=>{
+  const c=getConversation(el.dataset.groupPresence);if(!c)return;
+  const summary=onlineForGroup(c);
+  el.className='tender-presence-dot '+summary.status;
+  el.title=summary.online+' online · '+summary.offline+' offline';
+ });
+}
+
 function empty(title,description,action='',label=''){return `<div class="empty-content"><img src="buffalo.webp" alt="Buffalo"><h2>${esc(title)}</h2><p>${esc(description)}</p>${action?`<button class="btn" data-action="${esc(action)}">${esc(label)}</button>`:''}</div>`}
 // Tender 0.2 helpers. Shared DB features are gated behind migration_0_2.sql.
-let extendedReady=false, pronounsReady=false, pieceRepliesReady=false, notifications=[], customEmojis=[], reads=[], bookmarks=[], blockedUsers=[], pieceEvents=[], pieceRoles=[], roleAssignments=[], activePolls=[], activePollVotes=[];
+let extendedReady=false, pronounsReady=false, pieceRepliesReady=false, channelReady=false, visualReady=false, pieceChannels=[],channelUnread=[], notifications=[], customEmojis=[], reads=[], bookmarks=[], blockedUsers=[], pieceEvents=[], pieceRoles=[], roleAssignments=[], activePolls=[], activePollVotes=[];
 let attachmentUrls=new Map(), replyTo=null, recordedVoice=null, voiceRecorder=null, voiceChunks=[], typingChannel=null, typingTimeout=null, typingLast=0, reconcileTimer=null, notificationReady=false;
 const chosenTheme=()=>my?.chat_theme||localStorage.getItem('tender-theme')||'dark';
 function applyTheme(){const theme=chosenTheme();document.documentElement.dataset.tenderTheme=theme;document.documentElement.style.setProperty('--personal-accent',my?.accent_color||'#f47735');applyLocalAppearance()}
@@ -441,7 +556,7 @@ async function boot(){
    if(user)await initialize();else renderAuth();
  }catch(e){ROOT.innerHTML=empty('Could not reach Tender','Check the public Supabase URL and key in config.js.');toast(e.message||'Could not connect.',true)}
 }
-function reset(){notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];state.selected=null;state.area='chats';state.mobileDetail=false}
+function reset(){notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;state.channelId=null;presenceRoster.clear();if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
 function renderSetup(){ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Your friends. Your spaces. Your flavor.</p></div><div class="login-panel"><div class="eyebrow">Tender setup</div><h2>Almost ready to connect.</h2><p>This website needs a free online Supabase project for accounts, messages and Pieces. It's not a local chat simulator.</p><div class="setup-box"><h3>🍗 Connect the shared database</h3><p>1. Create a free project at <a href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Supabase</a>.<br>2. Run <strong>schema.sql</strong> in the project's SQL editor.<br>3. Copy its Project URL and publishable (anon) key into <strong>config.js</strong> on GitHub.<br>4. Refresh this website. Everyone will connect to the same database.</p><details><summary>Important security information</summary>Only use the public publishable/anon key. Never put a service_role key or other secret in GitHub. Set URL configuration for email confirmation in Supabase Auth.</details></div><p class="hint">Your Tender HTML interface is deployed separately from the database. A GitHub Pages link alone cannot deliver live messaging.</p><a class="btn" href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Connect Supabase ${ico('external')}</a></div></div>`}
 function renderAuth(){state.mobileDetail=false;ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Stay close. Stay crispy. 🍗</p></div><div class="login-panel"><div class="eyebrow">Welcome to Tender</div><h2>${state.loginMode==='login'?'Good to have you back.':'Your people are waiting.'}</h2><p>${state.loginMode==='login'?'Sign in to catch up with your people.':'Create your account to join the conversation.'}</p><div class="login-tabs"><button class="${state.loginMode==='login'?'selected':''}" data-action="auth-tab" data-tab="login">Log in</button><button class="${state.loginMode==='signup'?'selected':''}" data-action="auth-tab" data-tab="signup">Sign up</button></div><form id="auth-form">${state.loginMode==='signup'?`<div class="field"><label for="handle">Username (3–20 letters, numbers, underscores)</label><input class="input" id="handle" name="handle" minlength="3" maxlength="20" pattern="[a-zA-Z0-9_]{3,20}" required autocomplete="username" placeholder="buffalofan"></div><div class="field"><label for="display">Display name</label><input class="input" id="display" name="display_name" maxlength="40" required placeholder="Your name"></div>`:''}<div class="field"><label for="email">Email address</label><input class="input" id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com"></div><div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" minlength="8" autocomplete="${state.loginMode==='login'?'current-password':'new-password'}" required placeholder="At least 8 characters"></div><button class="btn full top-spacer" type="submit">${state.loginMode==='login'?'Log in':'Create account'} ${ico('back')}</button></form><p class="hint top-spacer">Tender is an early beta. Please don't post private information in public Pieces.</p></div></div>`}
 async function authSubmit(form){const data=new FormData(form), email=String(data.get('email')).trim(), password=String(data.get('password'));
@@ -454,7 +569,7 @@ async function initialize(){ROOT.innerHTML='<div class="loading-screen"><img src
    const invitation=params.get('piece');
   if(invitation&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invitation)&&pieces.some(p=>p.id===invitation))await goTo('pieces',invitation);
  }catch(e){toast(e.message||'Unable to load the app',true);ROOT.innerHTML=empty('Something went wrong','Could not load Tender. Try refreshing.') }}
-async function refreshData(){if(!user)return;const [a,b,c,d,e]=await Promise.all([q('profiles').select('*').order('created_at',{ascending:false}).limit(300),q('friendships').select('*'),q('conversations').select('*,conversation_members(user_id)').order('created_at',{ascending:false}),q('pieces').select('*').order('created_at',{ascending:false}).limit(100),q('piece_members').select('*')]);profiles=assert(a)||[];my=profiles.find(x=>x.id===user.id)||{id:user.id,handle:'member',display_name:user.email||'Account'};friendships=assert(b)||[];conversations=assert(c)||[];pieces=assert(d)||[];memberships=assert(e)||[];await refreshExtras();}
+async function refreshData(){if(!user)return;const [a,b,c,d,e]=await Promise.all([q('profiles').select('*').order('created_at',{ascending:false}).limit(300),q('friendships').select('*'),q('conversations').select('*,conversation_members(user_id)').order('created_at',{ascending:false}),q('pieces').select('*').order('created_at',{ascending:false}).limit(100),q('piece_members').select('*')]);profiles=assert(a)||[];my=profiles.find(x=>x.id===user.id)||{id:user.id,handle:'member',display_name:user.email||'Account'};friendships=assert(b)||[];conversations=assert(c)||[];pieces=assert(d)||[];memberships=assert(e)||[];await refreshExtras();await loadChannelData();}
 function unsub(){unsubTyping();if(reconcileTimer)clearTimeout(reconcileTimer);if(realtimeChannel&&db)db.removeChannel(realtimeChannel);realtimeChannel=null;if(realtimeRefreshTimer)clearTimeout(realtimeRefreshTimer)}
 function subscribe(){
  unsub();if(!user)return;
