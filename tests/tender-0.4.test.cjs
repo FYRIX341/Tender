@@ -11,7 +11,7 @@ function harness(){
   getElementById(){return null},querySelector(){return null},querySelectorAll(){return []},addEventListener(){},
   documentElement:{dataset:{},style:{setProperty(){},removeProperty(){}}}
  };
- const ctx={window,document,console,URL,Intl,localStorage:{
+ const ctx={window,document,navigator:{},console,URL,Intl,localStorage:{
   getItem(k){return values.get(k)||null},setItem(k,v){values.set(k,String(v))},removeItem(k){values.delete(k)}
  },location:{origin:'https://fyrix341.github.io',hostname:'fyrix341.github.io',href:'https://fyrix341.github.io/Tender/',pathname:'/Tender/',protocol:'https:'},
   setTimeout(){},clearTimeout(){},FormData:class{}};
