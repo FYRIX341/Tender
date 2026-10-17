@@ -625,9 +625,57 @@ function messageText(text){
  });
  if(/^:[a-z0-9_]{2,24}:$/.test(raw.trim()))result=result.replace('class="inline-custom-emoji"','class="inline-custom-emoji sticker-emoji"');
  const invite=extractPublicPieceInvite(text);
- return result.replace(/\n/g,'<br>')+(invite?pieceInviteCardHTML(invite):'');
+ return result.replace(/\n/g,'<br>')+(invite?pieceInviteCardHTML(invite):'')+richLinkCards(raw);
 }
 
+// Safe, automatic outbound link cards. No CORS-unsafe OpenGraph fetch, third-party
+// scraping proxy or secret API key: known providers get tailored metadata and every
+// other HTTPS site gets its domain and destination path. Piece invites have their own card.
+function richLinkCardData(url){
+ let u;try{u=new URL(url)}catch{return null}
+ if(u.protocol!=='https:'||u.username||u.password)return null;
+ const host=u.hostname.toLowerCase().replace(/^www\./,'');
+ const segments=u.pathname.split('/').filter(Boolean).map(s=>{try{return decodeURIComponent(s).slice(0,90)}catch{return s.slice(0,90)}});
+ if(!host||host.length>100||url.length>2048)return null;
+ if(host==='tender.oops.wtf'||host==='fyrix341.github.io'&&segments[0]?.toLowerCase()==='tender')return null;
+ const label=host;
+ const path=segments.length?segments.join(' / ').slice(0,170):'Homepage';
+ let site=host,title=path,summary=host,thumb='';
+ if(host==='github.com'&&segments.length>=2){
+  site='GitHub';title=segments[0]+' / '+segments[1];
+  if(segments[2]==='blob'&&segments.length>4){title=segments[1]+' / '+segments.slice(4).join(' / ').slice(0,160);summary='GitHub · Source file in '+segments[0]+'/'+segments[1]}
+  else if(segments[2]==='issues'){summary='GitHub · Issue tracker'}
+  else if(segments[2]==='pull'){summary='GitHub · Pull request'}
+  else summary='GitHub · Repository';
+ }else if(host==='youtube.com'||host==='m.youtube.com'||host==='youtu.be'){
+  site='YouTube';title='Watch on YouTube';summary=segments[0]==='shorts'?'YouTube Short':'YouTube video';
+  const id=host==='youtu.be'?segments[0]:segments[0]==='shorts'?segments[1]:u.searchParams.get('v');
+  if(id&&/^[a-zA-Z0-9_-]{11}$/.test(id))thumb='https://i.ytimg.com/vi/'+id+'/hqdefault.jpg';
+ }else if(host==='open.spotify.com'){
+  site='Spotify';title=segments.length>1?'Open '+segments[0]+' on Spotify':'Listen on Spotify';summary='Spotify music · External link';
+ }else if(host==='twitch.tv'){
+  site='Twitch';title=segments[0]?'Visit '+segments[0]+' on Twitch':'Open Twitch';summary='Livestream · External link';
+ }else if(host==='reddit.com'||host.endsWith('.reddit.com')){
+  site='Reddit';title=segments.length>1?segments.slice(0,4).join(' / '):'Open Reddit';summary='Reddit post or community';
+ }else if(host==='wikipedia.org'||host.endsWith('.wikipedia.org')){
+  site='Wikipedia';title=(segments[1]||segments[0]||'Wikipedia').replace(/_/g,' ');summary='Wikipedia article';
+ }
+ return {url:u.href,site,title,summary,thumb,label};
+}
+function richLinkCards(text){
+ const raw=String(text||'');if(!raw||raw.startsWith('[TENDER_EMBED]'))return '';
+ const urls=[...raw.matchAll(/https:\/\/[^\s<>"']+/gi)].map(m=>m[0].replace(/[.,!?;:]+$/,'').replace(/\)+$/,'')); 
+ const distinct=[...new Set(urls)].slice(0,2);
+ return distinct.map(url=>{
+  if(extractPublicPieceInvite(url))return '';
+  if(giftGif(url))return '';
+  const item=richLinkCardData(url);if(!item)return '';
+  return `<a class="tender-rich-link" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${esc(item.site)} link"><span class="tender-rich-link-brand">${esc(item.site)}</span>
+    <strong>${esc(item.title)}</strong><span class="tender-rich-link-summary">${esc(item.summary)}</span>
+    ${item.thumb?`<img loading="lazy" referrerpolicy="no-referrer" src="${esc(item.thumb)}" alt="YouTube video thumbnail">`:''}
+    <span class="tender-rich-link-domain">${ico('external','icon-sm')} ${esc(item.label)}</span></a>`;
+ }).join('');
+}
 // Rich announcement embeds are stored as ordinary message text (no new tables needed).
 function richEmbedHTML(text){
  let p;try{p=JSON.parse(String(text).slice('[TENDER_EMBED]'.length))}catch{return esc(text)}
