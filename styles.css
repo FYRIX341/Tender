@@ -258,3 +258,27 @@ html[data-tender-theme="light"] .composer{background:#f0f2f8}
  .chat-jump-new{right:12px;bottom:77px}
 }
 @media(prefers-reduced-motion:reduce){.screen *, .screen *:before,.screen *:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* Command palette, embeds, and rich chat controls */
+.composer-assist{max-height:235px;overflow:auto;background:#1b202d;border:1px solid var(--stroke);border-radius:10px 10px 5px 5px;box-shadow:0 -8px 24px #0005;margin:0 0 5px}
+.composer-assist[hidden]{display:none}
+.assist-row{display:flex;align-items:center;gap:10px;width:100%;padding:9px 11px;border:0;background:transparent;color:var(--text);text-align:left;border-bottom:1px solid #ffffff09;font-size:12px}
+.assist-row:hover,.assist-row:focus-visible{background:#2c3344;outline:none}
+.assist-row strong{min-width:72px;font-size:12px;color:var(--orange2)}
+.assist-row span{flex:1;color:var(--muted)}
+.assist-row small{color:#748095;font-size:10px}
+.assist-row .avatar{width:23px;height:23px;border-radius:50%;font-size:11px}
+.command-list{display:grid;max-height:50vh;overflow:auto;gap:5px}
+.command-item{padding:10px 11px;border-radius:8px;display:grid;gap:4px;background:var(--panel2)}
+.command-item strong{color:var(--orange2);font-size:12px}
+.command-item small{color:var(--muted)}
+.trivia-game{display:grid;gap:18px}
+.trivia-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.rich-embed{display:flex;align-items:start;gap:12px;width:min(100%,490px);padding:13px 14px;border:1px solid var(--stroke);border-left:4px solid var(--embed-accent,var(--orange));border-radius:5px 10px 10px 5px;background:color-mix(in srgb,var(--panel2) 95%,var(--embed-accent))}
+.rich-embed-main{display:flex;flex-direction:column;gap:6px;min-width:0;flex:1}
+.rich-embed-author{font-size:11px;font-weight:700;color:var(--muted)}
+.rich-embed-title{font-size:14px;font-weight:800;color:var(--text)}
+.rich-embed-body{font-size:12px;line-height:1.6;color:var(--text);white-space:normal;overflow-wrap:anywhere}
+.rich-embed-footer{font-size:10px;color:var(--muted);padding-top:8px}
+.rich-embed-thumb{width:78px;height:78px;object-fit:cover;border-radius:7px;flex-shrink:0}
+@media(max-width:600px){.trivia-options{grid-template-columns:1fr}.rich-embed-thumb{width:58px;height:58px}.assist-row small{display:none}}
