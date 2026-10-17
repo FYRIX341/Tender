@@ -1,0 +1,37 @@
+name: Tender 0.3 Private Beta Checks
+on:
+  push:
+    branches: [tender-0.3-private-beta]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    name: Check JavaScript and chat regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check JavaScript syntax
+        run: |
+          node --check app.js
+          node --check config.js
+      - name: Run Tender regression tests
+        run: node --test tests/tender-0.3.test.cjs
+      - name: Package private beta for desktop testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tender-0.3-private-beta
+          path: |
+            index.html
+            styles.css
+            app.js
+            config.js
+            buffalo.webp
+          retention-days: 14
+          if-no-files-found: error
