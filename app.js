@@ -2020,7 +2020,20 @@ document.addEventListener('dblclick',event=>{
 });
 document.addEventListener('submit',event=>{if(event.target.matches('form')){event.preventDefault();submitForm(event.target).catch(e=>{console.error(e);toast(e.message||'Error',true)})}});
 document.addEventListener('click',event=>{if(!event.target.closest?.('.sidebar-account-dock'))closeAccountMenu();let t=event.target.closest('[data-action]');if(!t)return;if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
-document.addEventListener('input',e=>{if(e.target.matches?.('[data-action="call-voice-volume"],[data-action="call-stream-volume"]')){setTenderVolume(e.target.dataset.action==='call-stream-volume'?'stream':'voice',e.target.value);return}if(e.target.id==='tender-emoji-search'){renderEmojiResults();return}if(e.target.id==='message-box'&&user&&state.selected){const key=tenderDraftKey();if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
+document.addEventListener('input',e=>{
+ if(e.target.closest?.('#profile-style-form')){
+  const form=e.target.closest('#profile-style-form');
+  const color=field=>tenderSafeColor(form.querySelector('[name="'+field+'"]')?.value);
+  const bgStart=color('profile_gradient_start'),bgEnd=color('profile_gradient_end');
+  const nameStart=color('name_gradient_start'),nameEnd=color('name_gradient_end');
+  for(const el of document.querySelectorAll('.profile-gradient-preview,.settings-profile-preview')){
+   el.style.setProperty('--profile-start',bgStart);el.style.setProperty('--profile-end',bgEnd);
+  }
+  const gradientText=document.querySelector('.profile-name-preview .tender-styled-name');
+  if(gradientText){gradientText.style.setProperty('--name-gradient-a',nameStart);gradientText.style.setProperty('--name-gradient-b',nameEnd)}
+  return;
+ }
+ if(e.target.matches?.('[data-action="call-voice-volume"],[data-action="call-stream-volume"]')){setTenderVolume(e.target.dataset.action==='call-stream-volume'?'stream':'voice',e.target.value);return}if(e.target.id==='tender-emoji-search'){renderEmojiResults();return}if(e.target.id==='message-box'&&user&&state.selected){const key=tenderDraftKey();if(e.target.value)localStorage.setItem(key,e.target.value);else localStorage.removeItem(key);updateComposerAssist(e.target)}if(e.target.id==='message-box')broadcastTyping();if(e.target.id==='sidebar-search'){const start=e.target.selectionStart,end=e.target.selectionEnd;state.search=e.target.value;renderSidebar();const input=document.getElementById('sidebar-search');input?.focus();input?.setSelectionRange(start,end)}});
 // Type-to-chat works like a desktop messenger: printable keystrokes land
 // in the current composer, never in settings or behind an open modal.
 document.addEventListener('keydown',event=>{
