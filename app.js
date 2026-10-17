@@ -701,7 +701,10 @@ function renderSidebar(){
   body=conversations.filter(c=>!state.search||namesFor(c).toLowerCase().includes(state.search.toLowerCase())).map(c=>{
    const otherId=c.kind!=='group'?(c.conversation_members||[]).find(m=>m.user_id!==user.id)?.user_id:null;
    const other=otherId?pby(otherId):null;
-   return `<div class="side-row ${state.selected===c.id?'selected':''}" data-action="open-chat" data-id="${esc(c.id)}">${other?profileFace(other):avatarFor(c)}<div class="grow">${other?profileName(other):`<strong>${esc(namesFor(c))}</strong>`}<p>${c.kind==='group'?'Group conversation':'Direct message'}</p></div>${renderBadge(unreadCount(c.id))}</div>`;
+   const live=other?activePresence(other.id):onlineForGroup(c).status;
+   const marker=other?`data-presence-id="${esc(other.id)}"`:`data-group-presence="${esc(c.id)}"`;
+   const count=c.kind==='group'?onlineForGroup(c):null;
+   return `<div class="side-row dm-row ${state.selected===c.id?'selected':''} ${unreadCount(c.id)?'has-unread':''}" data-action="open-chat" data-id="${esc(c.id)}"><span class="dm-presence-avatar">${other?profileFace(other):avatarFor(c)}<span class="tender-presence-dot ${esc(live)}" ${marker} title="${count?count.online+' online · '+count.offline+' offline':esc(live)}"></span></span><div class="grow">${other?profileName(other):`<strong>${esc(namesFor(c))}</strong>`}<p>${c.kind==='group'?(count.online+' online · '+count.offline+' offline'):(live==='offline'?'Offline':live==='dnd'?'Do Not Disturb':live==='idle'?'Idle':'Online')}</p></div>${unreadCount(c.id)?`<span class="dm-unread-dot"></span>`:''}${renderBadge(unreadCount(c.id))}</div>`;
   }).join('')||'<p class="hint" style="padding:18px">No conversations yet. Find a friend to start chatting.</p>';
  }else if(state.area==='friends'){
   const ids=myFriendIds();
