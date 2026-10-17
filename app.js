@@ -271,7 +271,7 @@ async function finishTenderCall(){
  if(id&&callReady){try{const r=await db.rpc('tender_end_call',{call_uuid:id});if(r.error)console.warn('Call end not acknowledged',r.error)}catch(e){console.warn('Call end failed',e)}}
 }
 function startCallInbox(){
- clearInterval(callInboxTimer);if(!user||!db)return;
+ if(callInboxTimer!==null&&typeof clearInterval==='function')clearInterval(callInboxTimer);if(!user||!db)return;
  callInboxTimer=setInterval(()=>pollTenderCalls().catch(e=>console.warn('Tender calling poll',e)),1800);
  pollTenderCalls().catch(console.warn);
 }
@@ -338,14 +338,17 @@ async function pollTenderCalls(){
    if(r.error)throw r.error;
    if(!r.data||['ended','declined'].includes(r.data.status)||r.data.status==='ringing'&&Date.now()-new Date(r.data.created_at).getTime()>90000){
     const wasDeclined=r.data?.status==='declined';const stale=r.data?.status==='ringing';
-    if(stale)await db.rpc('tender_end_call',{call_uuid:c.id}).catch(()=>{});
+    if(stale)try{await db.rpc('tender_end_call',{call_uuid:c.id})}catch{}
     localCallCleanup();toast(wasDeclined?'Call declined.':'Call ended.');return;
    }
    if(r.data.status==='active'&&c.status==='ringing'){
     c.status='active';c.statusLabel='Connecting media…';await setupTenderPeer(c);
     showCallUI();if(c.isCaller)await tenderMakeOffer(c);
    }
-   if(c.status==='active')await pollTenderSignals(c);
+   if(c.status==='active'){
+    if(!c.lastHeartbeat||Date.now()-c.lastHeartbeat>12000){c.lastHeartbeat=Date.now();const alive=await db.rpc('tender_touch_call',{call_uuid:c.id});if(alive.error||alive.data!==true)console.warn('Call heartbeat not accepted')}
+    await pollTenderSignals(c);
+   }
   }else if(!incomingCall){
    const r=await q('tender_call_sessions').select('*').eq('callee_id',user.id).eq('status','ringing').gte('created_at',new Date(Date.now()-90000).toISOString()).order('created_at',{ascending:false}).limit(1);
    if(r.error)throw r.error;
@@ -1061,7 +1064,7 @@ function render(){if(!user)return renderAuth();ROOT.innerHTML=`<div class="scree
 function dmProfilePanelHTML(person){
  const shared=sharedPublicPieces(person.id);
  return `<div class="info-head"><span class="info-heading">USER PROFILE</span><button type="button" class="round-btn" data-action="toggle-info" aria-label="Hide profile panel" title="Hide profile panel">${ico('x','icon-sm')}</button></div>
- <div class="dm-profile-panel">
+ <div class="dm-profile-panel" style="${profileGradientStyle(person)}">
   <button type="button" class="dm-profile-cover" data-action="open-profile" data-id="${esc(person.id)}" aria-label="Open full profile of ${esc(person.display_name||'member')}">
     <div class="dm-profile-banner" ${person.banner_url?`style="background-image:linear-gradient(#0c0f2055,#0c0f206a),url(&quot;${esc(validUrl(person.banner_url))}&quot;)"`:''}></div>
     <span class="dm-profile-avatar">${avatars(person)}</span>
@@ -1359,7 +1362,7 @@ function renderSettings(){
  let content='';
  if(tab==='profile')content=`
   <div class="settings-section-head"><span class="eyebrow">PERSONAL PROFILE</span><h1>Make it yours.</h1><p>Give your Tender profile some personality.</p></div>
-  <div class="settings-profile-preview">${profileBanner(my)}<div class="settings-preview-identity"><div><h2 id="settings-preview-name">${esc(my.display_name)}</h2><p id="settings-preview-meta">@${esc(my.handle)}${my.pronouns?' · '+esc(my.pronouns):''}</p><p id="settings-preview-status" class="settings-preview-status ${my.game_status?'':'is-empty'}">${my.game_status?esc((my.status_emoji||'🍗')+' '+my.game_status):'No custom status yet'}</p></div><button class="btn secondary sm" data-action="open-profile" data-id="${esc(user.id)}">Preview profile</button></div></div>
+  <div class="settings-profile-preview" style="${profileGradientStyle(my)}">${profileBanner(my)}<div class="settings-preview-identity"><div><h2 id="settings-preview-name">${esc(my.display_name)}</h2><p id="settings-preview-meta">@${esc(my.handle)}${my.pronouns?' · '+esc(my.pronouns):''}</p><p id="settings-preview-status" class="settings-preview-status ${my.game_status?'':'is-empty'}">${my.game_status?esc((my.status_emoji||'🍗')+' '+my.game_status):'No custom status yet'}</p></div><button class="btn secondary sm" data-action="open-profile" data-id="${esc(user.id)}">Preview profile</button></div></div>
   <div class="settings-card"><div class="settings-card-title"><h3>About you</h3><p>Shown when someone clicks your profile picture or name.</p></div>
   <form id="profile-form" class="settings-fields">
   <div class="field"><label>Display name</label><input class="input" name="display_name" maxlength="40" required value="${esc(my.display_name)}"></div>
