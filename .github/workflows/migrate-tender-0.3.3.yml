@@ -1,0 +1,70 @@
+name: Tender 0.3.3 Piece Reply Migration
+# Additive only. Runs automatically after this migration lands in main.
+on:
+  push:
+    branches: [main]
+    paths: [migration_0_3_3.sql]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: tender-production-db-migration
+  cancel-in-progress: false
+jobs:
+  migrate:
+    name: Add Piece reply references
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout migration
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Apply additive SQL through existing Supabase HTTPS Management API
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set +x
+          python3 - <<'PY'
+          import json, os, pathlib, sys, urllib.request, urllib.error
+          token=os.environ.get('SUPABASE_ACCESS_TOKEN','').strip()
+          if not token.startswith('sbp_'):
+              print('::error::Missing scoped SUPABASE_ACCESS_TOKEN in GitHub Secrets. Migration was not run.')
+              sys.exit(1)
+          path=pathlib.Path('migration_0_3_3.sql')
+          sql=path.read_text(encoding='utf-8')
+          if not sql.startswith('-- Tender 0.3.3: non-destructive native replies inside Pieces.') or 'BEGIN;' not in sql or 'COMMIT;' not in sql:
+              print('::error::Unexpected migration content. Refusing to run.')
+              sys.exit(1)
+          endpoint='https://api.supabase.com/v1/projects/svrculrtxjudkcljhutn/database/query'
+          def query(statement, read_only=False):
+              payload=json.dumps({'query':statement,'read_only':read_only}).encode('utf-8')
+              request=urllib.request.Request(endpoint,data=payload,method='POST',
+                  headers={'Authorization':'Bearer '+token,'Content-Type':'application/json','Accept':'application/json','User-Agent':'Tender-Migration/0.3.3'})
+              try:
+                  with urllib.request.urlopen(request,timeout=140) as response:
+                      text=response.read(32768).decode('utf-8','replace')
+              except urllib.error.HTTPError as exc:
+                  message=exc.read(1200).decode('utf-8','replace').replace(token,'[REDACTED]')
+                  print('::error::Supabase returned HTTP '+str(exc.code)+': '+message)
+                  sys.exit(1)
+              except (urllib.error.URLError, TimeoutError):
+                  print('::error::Supabase query timed out or failed; verify column before retrying to avoid repeated modifications.')
+                  sys.exit(1)
+              try:result=json.loads(text) if text.strip() else None
+              except json.JSONDecodeError:
+                  print('::error::Supabase did not return valid JSON.')
+                  sys.exit(1)
+              if isinstance(result,dict) and result.get('error'):
+                  print('::error::SQL failed: '+str(result['error']).replace(token,'[REDACTED]')[:1200])
+                  sys.exit(1)
+              return result
+          query("SELECT 1 AS tender_access_check;",read_only=True)
+          query(sql)
+          verified=query("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='piece_messages' AND column_name='reply_to';",read_only=True)
+          if not isinstance(verified,list) or not any(row.get('column_name')=='reply_to' for row in verified):
+              print('::error::Migration response did not verify pronouns column. Inspect Supabase.')
+              sys.exit(1)
+          print('Tender 0.3.3: Piece reply references present. Existing messages preserved.')
+          PY
