@@ -282,3 +282,55 @@ html[data-tender-theme="light"] .composer{background:#f0f2f8}
 .rich-embed-footer{font-size:10px;color:var(--muted);padding-top:8px}
 .rich-embed-thumb{width:78px;height:78px;object-fit:cover;border-radius:7px;flex-shrink:0}
 @media(max-width:600px){.trivia-options{grid-template-columns:1fr}.rich-embed-thumb{width:58px;height:58px}.assist-row small{display:none}}
+
+
+/* Tender 0.3 release: user profile popouts and uploaded Piece pictures */
+.piece-avatar{display:inline-grid;place-items:center;flex-shrink:0;overflow:hidden;isolation:isolate;border-radius:13px}
+.piece-avatar-image{width:100%;height:100%;display:block;object-fit:cover;min-width:0;min-height:0}
+.piece-card-banner .piece-icon-card{width:62px;height:62px;border-radius:18px;font-size:30px;box-shadow:0 10px 25px #0004;border:2px solid #ffffff20}
+.piece-icon-hero{width:58px;height:58px;border-radius:18px;font-size:30px;box-shadow:0 8px 21px #0005;border:2px solid #ffffff45}
+.piece-hero-edit{position:relative;display:inline-flex;align-items:center;justify-content:center;border:0;padding:0;margin:3px;background:none;cursor:pointer;min-width:58px;min-height:58px;border-radius:18px}
+.piece-hero-edit:hover .piece-icon-hero,.piece-hero-edit:focus-visible .piece-icon-hero{outline:2px solid #fff;outline-offset:2px}
+.piece-hero-pencil{position:absolute;right:-6px;bottom:-5px;border:2px solid #1a1d25;border-radius:50%;display:grid;place-items:center;width:23px;height:23px;background:var(--orange);color:#1c140f;font-size:14px;font-weight:900;box-shadow:0 4px 11px #0007}
+.piece-editor-preview{display:flex;align-items:center;gap:15px;background:var(--panel2);border:1px solid var(--stroke);padding:15px;border-radius:12px;margin:4px 0 15px}
+.piece-editor-preview strong{font-size:14px;color:var(--text)}
+.piece-editor-preview p{margin-top:5px}
+.piece-icon-preview{width:70px;height:70px;border-radius:19px;font-size:36px;border:2px solid #ffffff2b}
+.piece-image-preview{width:100%;max-width:160px;aspect-ratio:1;margin-top:10px;overflow:hidden;border-radius:16px;border:2px solid var(--orange);box-shadow:0 8px 28px #0005}
+.piece-image-preview[hidden]{display:none}
+.piece-image-preview img{width:100%;height:100%;object-fit:cover;display:block}
+.piece-card-banner{display:flex;align-items:center;justify-content:center}
+.piece-hero .piece-banner{display:flex;align-items:center;justify-content:center;overflow:visible}
+.profile-click{padding:0;border:0;background:none;color:inherit;cursor:pointer;text-align:left;font:inherit;display:inline-flex;align-items:center;justify-content:center;vertical-align:middle}
+.profile-click:hover,.profile-click:focus-visible{outline:none}
+.profile-click:focus-visible .avatar{outline:2px solid var(--orange);outline-offset:3px}
+.profile-click.profile-name{justify-content:flex-start;font-weight:800;line-height:1.25;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.profile-name:hover,.profile-name:focus-visible{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px;color:var(--orange2)}
+.profile-face{flex-shrink:0;border-radius:13px}
+.profile-face .avatar{pointer-events:none}
+.bubble-name .profile-name{color:var(--orange2);font-size:12px}
+.friend-data .profile-name{font-size:13px}
+.side-row .profile-face .avatar.md{width:35px;height:35px}
+.side-row .profile-name{display:block;font-size:12px}
+.info-member-button{width:100%;border:0;background:transparent;text-align:left;color:var(--text);cursor:pointer;font:inherit}
+.info-member-button:hover,.info-member-button:focus-visible{background:#262c39;outline:none}
+.info-member-button:focus-visible{box-shadow:inset 2px 0 var(--orange)}
+.profile-popout{overflow:hidden;border-radius:12px;border:1px solid var(--stroke);background:var(--panel)}
+.profile-popout .profile-banner{border-radius:0;min-height:175px}
+.profile-popout .profile-banner .avatar{width:78px;height:78px;border-radius:50%;font-size:28px;box-shadow:0 8px 26px #0009}
+.profile-popout-body{display:flex;flex-direction:column;gap:14px;padding:18px 20px 22px}
+.profile-popout-head{display:flex;justify-content:space-between;gap:12px;align-items:start}
+.profile-popout-head h2{font-size:23px;overflow-wrap:anywhere;line-height:1.1}
+.profile-popout-head p{font-size:13px;color:var(--muted);margin-top:4px}
+.profile-popout-body h3{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--orange2)}
+.profile-about{color:var(--text);font-size:13px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
+.profile-status{border-radius:8px;background:var(--surface);padding:10px 12px;color:var(--text);font-size:13px}
+.profile-popout-actions{display:flex;gap:9px;flex-wrap:wrap}
+.post-meta .profile-name{font-weight:700;font-size:inherit}
+@media(max-width:760px){
+ .piece-icon-hero,.piece-hero-edit{width:44px;height:44px;min-width:44px;min-height:44px;border-radius:13px}
+ .piece-hero-pencil{right:-9px;bottom:-7px}
+ .piece-editor-preview{padding:11px}
+ .profile-popout .profile-banner{min-height:145px}
+ .profile-popout-body{padding:15px}
+}
