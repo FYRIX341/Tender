@@ -518,7 +518,70 @@ function renderSidebar(){const el=document.getElementById('sidebar');if(!el)retu
  el.innerHTML=`<div class="sidebar-top"><div class="eyebrow">${eyebrow}</div><div class="sidebar-title"><h2>${title}</h2>${newAction?`<button class="plus-btn" aria-label="Create" title="Create" data-action="${newAction}">${ico('plus')}</button>`:''}</div>${state.area!=='settings'?`<label class="searchbox">${ico('search','icon-sm')}<input id="sidebar-search" value="${esc(state.search)}" placeholder="Search ${state.area==='chats'?'conversations':state.area==='friends'?'friends':'Pieces'}..." aria-label="Search"></label>`:''}</div><div class="sidebar-content">${body}</div>`;
 }
 function header(title,sub='',buttons=''){return `<header class="main-top"><div class="head-left"><button class="round-btn mobile-back" data-action="go-back" title="Back">${ico('back')}</button><div class="title-area"><h2>${esc(title)}</h2><p>${esc(sub)}</p></div></div><div class="head-actions">${buttons}</div></header>`}
+// Tender 0.3.4: background updates must not erase in-progress settings edits.
+// Capture only within the SAME section; tab changes are deliberate navigation.
+function captureSettingsView(main){
+ const panel=main.querySelector?.('.settings-content');
+ if(!panel||!user||state.area!=='settings'||main.dataset.settingsTab!==state.settingsTab)return null;
+ const navigation=main.querySelector('.settings-navigation');
+ const inputs=[...panel.querySelectorAll('input,textarea,select')];
+ const focused=document.activeElement;
+ const focusIndex=inputs.indexOf(focused);
+ return {
+  top:panel.scrollTop,left:panel.scrollLeft,navLeft:navigation?.scrollLeft||0,
+  values:inputs.map(el=>({
+   id:el.id||'',name:el.name||'',formId:el.form?.id||'',
+   type:el.type||'',value:el.type==='file'?null:el.value,
+   checked:el.type==='checkbox'||el.type==='radio'?el.checked:null
+  })),
+  focusIndex,selection:focusIndex>=0&&typeof focused.selectionStart==='number'
+   ?{start:focused.selectionStart,end:focused.selectionEnd}:null
+ };
+}
+function restoreSettingsView(main,snapshot){
+ if(!snapshot)return;
+ const panel=main.querySelector('.settings-content');if(!panel)return;
+ const inputs=[...panel.querySelectorAll('input,textarea,select')];
+ for(let i=0;i<snapshot.values.length;i++){
+  const before=snapshot.values[i],el=inputs[i];
+  if(!el||before.type==='file'||el.disabled||
+     (el.id||'')!==before.id||(el.name||'')!==before.name||(el.form?.id||'')!==before.formId
+     ||el.type!==before.type)continue;
+  if(before.checked!==null)el.checked=before.checked;
+  else if(before.value!==null)el.value=before.value;
+ }
+ const focus=snapshot.focusIndex>=0?inputs[snapshot.focusIndex]:null;
+ if(focus&&!focus.disabled){
+  try{focus.focus({preventScroll:true})}catch{}
+  if(snapshot.selection&&typeof focus.setSelectionRange==='function'){
+   try{focus.setSelectionRange(snapshot.selection.start,snapshot.selection.end)}catch{}
+  }
+ }
+ panel.scrollTop=snapshot.top;panel.scrollLeft=snapshot.left;
+ const navigation=main.querySelector('.settings-navigation');
+ if(navigation)navigation.scrollLeft=snapshot.navLeft;
+}
+function updateSavedProfilePreview(){
+ if(state.area!=='settings'||state.settingsTab!=='profile')return;
+ const name=document.getElementById('settings-preview-name');
+ const meta=document.getElementById('settings-preview-meta');
+ const status=document.getElementById('settings-preview-status');
+ if(name)name.textContent=my.display_name||'Tender member';
+ if(meta)meta.textContent='@'+(my.handle||'member')+(my.pronouns?' · '+my.pronouns:'');
+ if(status){
+  status.textContent=my.game_status?(my.status_emoji||'🍗')+' '+my.game_status:'No custom status yet';
+  status.classList.toggle('is-empty',!my.game_status);
+ }
+}
+function cacheUpdatedProfile(saved){
+ if(!saved||!user)return;
+ const current=profiles.find(p=>p.id===user.id);
+ if(current)Object.assign(current,saved);
+ if(my?.id===user.id)Object.assign(my,saved);
+ else my={...(my||{}),...saved,id:user.id};
+}
 function renderMain(){const m=document.getElementById('main');if(!m)return;
+ const settingsSnapshot=captureSettingsView(m);
  const oldDraft=m.querySelector('#message-box')?.value||'';
  const oldKey=m.dataset.threadKey, newKey=[state.area,state.selected||'',state.pieceTab].join(':');
  if(oldKey&&oldKey!==newKey&&oldDraft&&user)localStorage.setItem('tender-draft:'+user.id+':'+oldKey,oldDraft);
@@ -528,7 +591,10 @@ function renderMain(){const m=document.getElementById('main');if(!m)return;
  if(state.area==='chats'){let c=getConversation(state.selected);view=c?renderChat(c):header('Your conversations','Welcome to Tender!')+`<div class="main-body">${empty('Stay close. Stay crispy.','Find your people, start a DM or create a group chat. Buffalo will be here cheering for you.','find-friends','Find friends')}</div>`;}
  else if(state.area==='friends'){view=state.selected&&pby(state.selected).id?renderFriend(pby(state.selected)):renderFriends()}
  else if(state.area==='pieces'||state.area==='discover'){view=selectedPiece()?renderPiece(selectedPiece()):renderPieceList(state.area==='discover')}
- else view=renderSettings();m.innerHTML=view;const newDraft=m.querySelector('#message-box');if(newDraft)newDraft.value=oldKey===newKey&&oldDraft?oldDraft:(localStorage.getItem('tender-draft:'+user.id+':'+newKey)||'');
+ else view=renderSettings();m.innerHTML=view;
+ m.dataset.settingsTab=state.area==='settings'?state.settingsTab:'';
+ restoreSettingsView(m,settingsSnapshot);
+ const newDraft=m.querySelector('#message-box');if(newDraft)newDraft.value=oldKey===newKey&&oldDraft?oldDraft:(localStorage.getItem('tender-draft:'+user.id+':'+newKey)||'');
  renderNavBadges();m.dataset.threadKey=newKey;
  const chatScroll=m.querySelector('.chat-scroll');
  if(chatScroll)chatScroll.scrollTop=pos&&oldKey===newKey&&!pos.near?pos.top:chatScroll.scrollHeight;
@@ -606,7 +672,7 @@ function renderSettings(){
  let content='';
  if(tab==='profile')content=`
   <div class="settings-section-head"><span class="eyebrow">PERSONAL PROFILE</span><h1>Make it yours.</h1><p>Give your Tender profile some personality.</p></div>
-  <div class="settings-profile-preview">${profileBanner(my)}<div class="settings-preview-identity"><div><h2>${esc(my.display_name)}</h2><p>@${esc(my.handle)} ${my.pronouns?'· '+esc(my.pronouns):''}</p></div><button class="btn secondary sm" data-action="open-profile" data-id="${esc(user.id)}">Preview profile</button></div></div>
+  <div class="settings-profile-preview">${profileBanner(my)}<div class="settings-preview-identity"><div><h2 id="settings-preview-name">${esc(my.display_name)}</h2><p id="settings-preview-meta">@${esc(my.handle)}${my.pronouns?' · '+esc(my.pronouns):''}</p><p id="settings-preview-status" class="settings-preview-status ${my.game_status?'':'is-empty'}">${my.game_status?esc((my.status_emoji||'🍗')+' '+my.game_status):'No custom status yet'}</p></div><button class="btn secondary sm" data-action="open-profile" data-id="${esc(user.id)}">Preview profile</button></div></div>
   <div class="settings-card"><div class="settings-card-title"><h3>About you</h3><p>Shown when someone clicks your profile picture or name.</p></div>
   <form id="profile-form" class="settings-fields">
   <div class="field"><label>Display name</label><input class="input" name="display_name" maxlength="40" required value="${esc(my.display_name)}"></div>
@@ -637,7 +703,7 @@ function renderSettings(){
  if(tab==='accessibility')content=`<div class="settings-section-head"><span class="eyebrow">COMFORT</span><h1>Accessibility</h1><p>Adjust readability and motion to suit you.</p></div>
   <div class="settings-card"><h3>Readability & motion</h3><p class="hint">Find font size, density, and reduced-motion controls in Appearance Studio.</p><button class="btn secondary" data-action="settings-tab" data-tab="appearance">Open Appearance Studio</button></div>
   <div class="settings-card"><h3>Keyboard shortcuts</h3><div class="shortcut-row"><kbd>Any letter</kbd><span>Start typing into the current chat</span></div><div class="shortcut-row"><kbd>Enter</kbd><span>Send message while composing</span></div><div class="shortcut-row"><kbd>Shift + Enter</kbd><span>New line</span></div><div class="shortcut-row"><kbd>Esc</kbd><span>Close an open dialog</span></div><div class="shortcut-row"><kbd>Tab</kbd><span>Navigate buttons and inputs</span></div></div>`;
- return header('User Settings','Your space, your rules')+`<div class="main-body settings-page"><div class="settings-layout"><nav class="settings-navigation" aria-label="Settings categories"><div class="settings-nav-label">USER SETTINGS</div>${nav}</nav><section class="settings-content">${content}<div class="settings-footer">Tender 0.3.2 · Stay close. Stay crispy. 🍗</div></section></div></div>`;
+ return header('User Settings','Your space, your rules')+`<div class="main-body settings-page"><div class="settings-layout"><nav class="settings-navigation" aria-label="Settings categories"><div class="settings-nav-label">USER SETTINGS</div>${nav}</nav><section class="settings-content">${content}<div class="settings-footer">Tender 0.3.4 · Stay close. Stay crispy. 🍗</div></section></div></div>`;
 }
 
 let activeLoadVersion=0;
@@ -966,8 +1032,13 @@ async function submitForm(form){switch(form.id){
   if(!upd.display_name)throw Error('Please enter a display name.');
   if(extendedReady)upd.status_emoji=String(d.get('status_emoji')||'🍗').slice(0,12);
   if(pronounsReady)upd.pronouns=String(d.get('pronouns')||'').trim().slice(0,40);
-  assert(await q('profiles').update(upd).eq('id',user.id));
-  await refreshData();renderMain();renderSidebar();toast('Profile saved! 🍗');
+  const saved=assert(await q('profiles').update(upd).eq('id',user.id).select('*').single());
+   if(!saved)throw Error('Unable to verify the saved profile. Please try again.');
+   cacheUpdatedProfile(saved);
+   // Keep the live form, caret, settings section and scroll position intact.
+   updateSavedProfilePreview();
+   renderSidebar();
+   toast('Profile saved! 🍗');
 });
  case'preferences-form':
  case'notification-preferences-form':
@@ -980,7 +1051,7 @@ async function submitForm(form){switch(form.id){
     upd.notification_mode=d.get('notification_mode');upd.notification_sound=d.get('notification_sound')==='yes';upd.notification_tone=d.get('notification_tone')||'pop';
    }else{upd.presence_mode=d.get('presence_mode')}
    assert(await q('profiles').update(upd).eq('id',user.id));
-   Object.assign(my,upd);applyTheme();renderMain();toast('Preferences saved! 🍗');
+   cacheUpdatedProfile(upd);applyTheme();toast('Preferences saved! 🍗');
  });
  case'edit-message-form':return safe(async()=>{const d=new FormData(form),id=String(d.get('id')),body=String(d.get('body')).trim();assert(await q('messages').update({body,edited_at:new Date().toISOString()}).eq('id',id));closeModal();await loadActive();renderMain();toast('Message edited.')});
  case'forward-form':return safe(async()=>{const d=new FormData(form),id=String(d.get('message_id')),cid=String(d.get('conversation_id'));if(!cid)throw Error('Choose a conversation');const m=activeMessages.find(x=>x.id===id);if(!m)throw Error('Message no longer available');assert(await q('messages').insert({conversation_id:cid,author_id:user.id,body:'↗ Forwarded: '+m.body}));closeModal();toast('Message forwarded!')});
