@@ -2162,11 +2162,57 @@ function tenderInboxBadgeCount(){
 }
 function tenderInboxNewsCard(post,isUpdate=false){
  const kind=String(post.kind||'NEWS');
- return `<article class="tender-inbox-release">
+ return `<button type="button" class="tender-inbox-release" data-action="tender-inbox-article" data-kind="${isUpdate?'update':'news'}" data-id="${esc(isUpdate?post.version:post.id)}" aria-label="Read full ${isUpdate?'changelog':'article'}: ${esc(post.title)}">
    <div class="tender-inbox-release-art tender-inbox-art-${esc(post.art||'content')}"><img src="${esc(post.image||'buffalo.webp')}" alt="Tender update artwork" loading="lazy"><span>tender<span class="tender-inbox-art-dot">.</span></span></div>
    <div class="tender-inbox-release-copy">${isUpdate?`<span class="tender-inbox-release-type tender-inbox-type-${esc(kind.toLowerCase().replace(/\s+/g,'-'))}">${esc(kind)}</span>`:'<span class="tender-inbox-release-type">TENDER NEWS</span>'}
     <small>${esc(post.date||'')}</small><h3>${esc(post.title)}</h3><p>${esc(post.desc)}</p>${post.version?`<div class="tender-inbox-release-version">Version ${esc(post.version)}</div>`:''}
-   </div></article>`;
+   </div></button>`;
+}
+function tenderInboxArticleHost(){
+ let host=document.getElementById('tender-inbox-article-root');
+ if(!host){host=document.createElement('div');host.id='tender-inbox-article-root';host.className='tender-inbox-article-root';host.hidden=true;document.body.append(host)}
+ return host;
+}
+function tenderInboxOpenArticle(kind,id){
+ const catalog=window.Tender053;
+ if(!catalog)return toast('Tender update articles are temporarily unavailable.',true);
+ const item=kind==='update'?catalog.updates.find(x=>x.version===id):catalog.news.find(x=>x.id===id);
+ if(!item)return toast('That Tender article was not found.',true);
+ const details=catalog.articles?.[id];
+ const host=tenderInboxArticleHost();
+ host.hidden=false;
+ const sections=details?.sections?.length?details.sections:[{title:'About this announcement',body:[item.desc]}];
+ host.innerHTML=`<div class="tender-inbox-article-backdrop" data-action="tender-inbox-article-close"></div>
+  <section class="tender-inbox-article-panel" role="dialog" aria-modal="true" aria-labelledby="tender-inbox-article-title" tabindex="-1">
+   <button type="button" class="tender-inbox-article-close" data-action="tender-inbox-article-close" aria-label="Close article">✕</button>
+   <div class="tender-inbox-article-scroll">
+    <header class="tender-inbox-article-hero tender-inbox-art-${esc(item.art||'content')}">
+      <div class="tender-inbox-article-hero-brand">tender<span>.</span> <small>OFFICIAL</small></div>
+      <img src="${esc(item.image||'buffalo.webp')}" alt="Buffalo, Tender's mascot" loading="lazy">
+      <div class="tender-inbox-article-hero-copy"><span class="tender-inbox-article-category">${esc(kind==='update'?item.kind:'TENDER NEWS')}</span>
+      <h1 id="tender-inbox-article-title">${esc(item.title)}</h1>
+      <div class="tender-inbox-article-meta">${esc(item.date)}${item.version?' · Version '+esc(item.version):''}</div></div>
+    </header>
+    <main class="tender-inbox-article-body">
+     <p class="tender-inbox-article-intro">${esc(details?.intro||item.desc)}</p>
+     ${sections.map((s,i)=>`<section class="tender-inbox-article-section">
+       <div class="tender-inbox-article-chapter">0${i+1} / ${esc(kind==='update'?'RELEASE NOTES':'TENDER NEWS')}</div>
+       <h2>${esc(s.title||'Details')}</h2>
+       ${(s.body||[]).map(p=>`<p>${esc(p)}</p>`).join('')}
+       ${s.items?.length?`<ul>${s.items.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}
+      </section>`).join('')}
+     <div class="tender-inbox-article-end">🍗 END OF ${esc(kind==='update'?'CHANGELOG':'ARTICLE')} · Stay close. Stay crispy.</div>
+    </main>
+   </div>
+   <footer class="tender-inbox-article-bottom"><span>${esc(kind==='update'?'Tender update history':'Tender newsroom')}</span><button type="button" class="btn sm" data-action="tender-inbox-article-close">← Back to Inbox</button></footer>
+  </section>`;
+ host.querySelector('.tender-inbox-article-panel')?.focus();
+}
+function tenderInboxCloseArticle(){
+ const host=document.getElementById('tender-inbox-article-root');
+ if(!host)return;
+ host.hidden=true;host.innerHTML='';
+ document.querySelector('.tender-inbox-top-button')?.focus({preventScroll:true});
 }
 function tenderInboxContent(){
  const tab=tenderInbox.tab;
@@ -2255,7 +2301,7 @@ async function tenderInboxOpen(){
  await tenderInboxLoad();if(tenderInbox.open)tenderInboxRender();
 }
 function tenderInboxClose(){
- tenderInbox.open=false;const host=document.getElementById('tender-inbox-host');if(host){host.hidden=true;host.innerHTML=''}
+ tenderInboxCloseArticle();tenderInbox.open=false;const host=document.getElementById('tender-inbox-host');if(host){host.hidden=true;host.innerHTML=''}
 }
 function tenderInboxSetTab(tab){
  if(!['unread','mentions','bookmarks','reminders','updates','news'].includes(tab))return;
@@ -2708,6 +2754,8 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='tender-inbox-close'){tenderInboxClose();return}
  if(a==='tender-inbox-tab'){tenderInboxSetTab(id);return}
  if(a==='tender-inbox-filter'){tenderInbox.filter=id;tenderInboxRender();return}
+ if(a==='tender-inbox-article'){tenderInboxOpenArticle(el.dataset.kind,id);return}
+ if(a==='tender-inbox-article-close'){tenderInboxCloseArticle();return}
  if(a==='tender-inbox-mark-read'){await safe(()=>tenderInboxMarkRead());return}
  if(a==='tender-inbox-jump'){await safe(()=>tenderInboxJumpTo(el.dataset.type,id,el.dataset.cid,el.dataset.pid,el.dataset.channel));return}
  if(a==='tender-inbox-save'){tenderInboxCloseContext();await safe(()=>tenderInboxSaveMessage(el.dataset.type,id));return}
@@ -3290,7 +3338,7 @@ document.addEventListener('keydown',event=>{
   event.target.closest('form')?.requestSubmit();
  }
 },true);
-document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches?.('[data-tender-spoiler]')){e.preventDefault();e.target.classList.toggle('revealed');return}if(e.key==='Escape'){tenderInboxCloseContext();if(tenderInbox.open)tenderInboxClose();const m=document.getElementById('tender-v53-plus-menu');if(m)m.hidden=true}});
+document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches?.('[data-tender-spoiler]')){e.preventDefault();e.target.classList.toggle('revealed');return}if(e.key==='Escape'){if(document.getElementById('tender-inbox-article-root')?.hidden===false){tenderInboxCloseArticle();return}tenderInboxCloseContext();if(tenderInbox.open)tenderInboxClose();const m=document.getElementById('tender-v53-plus-menu');if(m)m.hidden=true}});
 document.addEventListener('input',e=>{
  if(e.target.matches?.('#tender-inline-edit-textarea')&&tenderInlineEdit){tenderInlineEdit.draft=e.target.value;return}
  if(e.target.closest?.('.tender-studio-v3')){tenderStudioPreviewRefresh();return}
