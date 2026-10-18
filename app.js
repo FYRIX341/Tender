@@ -375,6 +375,49 @@ async function tender05TranslateOnDevice(id,source,target){
  if(box){box.hidden=false;box.innerHTML='<strong>Translated</strong><p>'+esc(output)+'</p>'}
  if(typeof translator.destroy==='function')translator.destroy();
 }
+
+/* 0.5.2 — Equip Piece Tags from YOUR profile rather than visiting a Piece. */
+function tenderAvailableTags(){
+ if(!user)return [];
+ const joined=new Set(memberships.filter(m=>m.user_id===user.id).map(m=>m.piece_id));
+ return tender05PieceTags.filter(tag=>joined.has(tag.piece_id))
+  .map(tag=>({tag,piece:pieces.find(p=>p.id===tag.piece_id)}))
+  .filter(item=>item.piece)
+  .sort((a,b)=>a.piece.name.localeCompare(b.piece.name));
+}
+async function tenderTagPickerModal(){
+ if(!tender05Ready)return toast('Piece Tags require Tender 0.5 Supabase setup.',true);
+ const joined=memberships.filter(m=>m.user_id===user.id).map(m=>m.piece_id);
+ if(joined.length){
+  const fresh=await q('tender_piece_tags').select('*').in('piece_id',joined.slice(0,100));
+  if(fresh.error)console.warn('Piece Tag lookup:',fresh.error);
+  else{
+   tender05PieceTags=[...tender05PieceTags.filter(t=>!joined.includes(t.piece_id)),...(fresh.data||[])];
+  }
+ }
+ const tags=tenderAvailableTags();
+ const current=my?.equipped_piece_id||null;
+ modal('🏷 Equip a Piece Tag','Choose a tag from any Piece you have joined. Your selection appears next to your name throughout Tender.',`
+  <div class="tender-tag-choice-list">
+   ${tags.map(({tag,piece})=>`<button type="button" class="tender-tag-choice ${current===tag.piece_id?'is-equipped':''}" data-action="tender-v3-tag-equip" data-id="${esc(tag.piece_id)}">
+     <span class="tender-tag-choice-icon" style="--tag-color:${esc(tag.color||'#f47735')}">${esc(tag.emoji||'🍗')} ${esc(tag.tag)}</span>
+     <span class="tender-tag-choice-name"><strong>${esc(piece.name)}</strong><small>${current===tag.piece_id?'✓ Currently equipped':'Tap to equip this Piece Tag'}</small></span>
+     <span aria-hidden="true">${current===tag.piece_id?'✓':'→'}</span>
+   </button>`).join('')||'<div class="notice-inline">No available tags yet. Join a Piece whose owner has created a Piece Tag!</div>'}
+  </div>
+  <button type="button" class="btn secondary full" data-action="tender-v3-tag-equip" data-id="" ${!current?'disabled':''}>Remove equipped tag</button>
+ `);
+}
+async function tenderEquipTagFromProfile(pid){
+ if(!tender05Ready)throw Error('Piece Tag database migration is not ready.');
+ if(pid&&!tenderAvailableTags().some(x=>x.tag.piece_id===pid))throw Error('Choose a tag from a Piece you have joined.');
+ assert(await db.rpc('tender_equip_piece_tag',{pid:pid||null}));
+ cacheUpdatedProfile({equipped_piece_id:pid||null});
+ closeModal();
+ renderSidebar();renderMain();
+ toast(pid?'Piece Tag equipped! 🍗':'Piece Tag removed.');
+}
+
 function tender05TagHTML(p){
  if(!tender05Ready||!p?.equipped_piece_id)return '';
  const tag=tender05PieceTags.find(x=>x.piece_id===p.equipped_piece_id);
@@ -1314,7 +1357,7 @@ function profileStatus(p){
 }
 function profileActions(person,compact=false){
  const isSelf=person.id===user?.id;
- if(isSelf)return `<button type="button" class="btn ${compact?'sm':''}" data-action="settings-profile">${ico('edit','icon-sm')} Edit profile</button>`;
+ if(isSelf)return `<button type="button" class="btn ${compact?'sm':''}" data-action="settings-profile">${ico('edit','icon-sm')} Edit profile</button>${tender05Ready?`<button type="button" class="btn secondary ${compact?'sm':''}" data-action="tender-v3-tag-picker">🏷 Equip Piece Tag</button>`:''}`;
  const relationship=friendships.find(f=>(f.requester===user.id&&f.recipient===person.id)||(f.recipient===user.id&&f.requester===person.id));
  const dm=`<button type="button" class="btn ${compact?'sm':''}" data-action="start-dm" data-id="${esc(person.id)}">${ico('chat','icon-sm')} Message</button>`;
  const secondary=relationship?.status==='accepted'
@@ -1451,9 +1494,64 @@ async function initialize(){ROOT.innerHTML='<div class="loading-screen"><img src
   if(invitation&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invitation)&&pieces.some(p=>p.id===invitation))await goTo('pieces',invitation);
  }catch(e){toast(e.message||'Unable to load the app',true);ROOT.innerHTML=empty('Something went wrong','Could not load Tender. Try refreshing.') }}
 async function refreshData(){if(!user)return;const [a,b,c,d,e]=await Promise.all([q('profiles').select('*').order('created_at',{ascending:false}).limit(300),q('friendships').select('*'),q('conversations').select('*,conversation_members(user_id)').order('created_at',{ascending:false}),q('pieces').select('*').order('created_at',{ascending:false}).limit(100),q('piece_members').select('*')]);profiles=assert(a)||[];my=profiles.find(x=>x.id===user.id)||{id:user.id,handle:'member',display_name:user.email||'Account'};friendships=assert(b)||[];conversations=assert(c)||[];pieces=assert(d)||[];memberships=assert(e)||[];await refreshExtras();await loadChannelData();await tender05LoadData();}
-function unsub(){unsubTyping();if(reconcileTimer)clearTimeout(reconcileTimer);if(realtimeChannel&&db)db.removeChannel(realtimeChannel);realtimeChannel=null;if(realtimeRefreshTimer)clearTimeout(realtimeRefreshTimer)}
+function unsub(){unsubTyping();tenderStopChatSync();if(reconcileTimer)clearTimeout(reconcileTimer);if(realtimeChannel&&db)db.removeChannel(realtimeChannel);realtimeChannel=null;if(realtimeRefreshTimer)clearTimeout(realtimeRefreshTimer)}
+
+/* 0.5.2: realtime resilience.
+ * Poll only the most recent message in the currently visible conversation.
+ * A failed/quiet WebSocket can no longer force people to manually refresh.
+ * Never replace the composer or move the user's scroll position.
+ */
+let tenderChatSyncTimer=null,tenderChatProbeBusy=false,tenderChatSocketState='connecting',tenderChatLastFullSync=0;
+const TENDER_CHAT_PROBE_MS=3400;
+async function tenderChatProbe(force=false){
+ if(tenderChatProbeBusy||!user||!db||document.visibilityState==='hidden')return;
+ const selected=state.selected,area=state.area,tab=state.pieceTab,channel=state.channelId;
+ if(!selected||!(area==='chats'||(['pieces','discover'].includes(area)&&tab==='chat')))return;
+ tenderChatProbeBusy=true;
+ try{
+  let query,latest,local;
+  if(area==='chats'){
+   query=q('messages').select('id,created_at,edited_at').eq('conversation_id',selected);
+   local=activeMessages.filter(m=>!m.pending&&m.conversation_id===selected);
+  }else{
+   query=q('piece_messages').select('id,created_at').eq('piece_id',selected);
+   const selectedRoom=selectedChannel(selected);
+   if(channelReady&&selectedRoom&&!selectedRoom.id.startsWith('legacy-')){
+    query=selectedRoom.is_default?query.or('channel_id.eq.'+selectedRoom.id+',channel_id.is.null'):query.eq('channel_id',selectedRoom.id);
+   }
+   local=activeMessages.filter(m=>!m.pending&&m.piece_id===selected);
+  }
+  const result=await query.order('created_at',{ascending:false}).limit(1);
+  if(result.error)throw result.error;
+  latest=result.data?.[0]||null;
+  if(selected!==state.selected||area!==state.area||tab!==state.pieceTab||channel!==state.channelId)return;
+  const newest=local[local.length-1]||null;
+  const outOfSync=(!!latest)!=(!!newest)||
+   (!!latest&&(!newest||latest.id!==newest.id||String(latest.edited_at||'')!==String(newest.edited_at||'')));
+  const oldEnough=Date.now()-tenderChatLastFullSync>28000;
+  if(force||outOfSync||oldEnough){
+   await loadActive();
+   if(selected===state.selected&&area===state.area&&tab===state.pieceTab&&channel===state.channelId){
+    syncActiveStream();
+    tenderChatLastFullSync=Date.now();
+   }
+  }
+ }catch(error){console.warn('Tender live chat backup sync:',error)}
+ finally{tenderChatProbeBusy=false}
+}
+function tenderStartChatSync(){
+ tenderStopChatSync();
+ tenderChatSyncTimer=setInterval(()=>{tenderChatProbe().catch(console.warn)},TENDER_CHAT_PROBE_MS);
+}
+function tenderStopChatSync(){
+ if(tenderChatSyncTimer!==null)clearInterval(tenderChatSyncTimer);
+ tenderChatSyncTimer=null;
+}
+
 function subscribe(){
  unsub();if(!user)return;
+ tenderChatSocketState='connecting';
+ tenderStartChatSync();
  realtimeChannel=db.channel('tender-live-'+user.id)
  .on('postgres_changes',{event:'*',schema:'public',table:'messages'},e=>scheduleReconcile(true,'messages',e))
  .on('postgres_changes',{event:'*',schema:'public',table:'piece_messages'},e=>{scheduleReconcile(true,'piece_messages',e);scheduleChannelUnreadRefresh();})
@@ -1467,7 +1565,14 @@ function subscribe(){
  .on('postgres_changes',{event:'*',schema:'public',table:'piece_channels'},e=>scheduleReconcile(false))
  .on('postgres_changes',{event:'*',schema:'public',table:'tender_dm_requests',filter:'recipient_id=eq.'+user.id},()=>{tender05LoadData().then(()=>renderSidebar()).catch(console.warn)})
  .on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:'user_id=eq.'+user.id},e=>{if(e.new){if(!notifications.some(n=>n.id===e.new.id))notifications.unshift(e.new);showBrowserNotification(e.new).catch(console.warn);if(e.new.conversation_id===state.selected&&state.area==='chats'&&document.visibilityState==='visible'){markRead(state.selected).catch(console.warn)}renderNavBadges();renderSidebar()}setTimeout(()=>scheduleReconcile(false),220)})
- .subscribe();
+ .subscribe(status=>{
+  tenderChatSocketState=status;
+  if(status==='SUBSCRIBED'){
+   tenderChatProbe(true).catch(console.warn);
+  }else if(['CHANNEL_ERROR','TIMED_OUT','CLOSED'].includes(status)){
+   console.warn('Tender realtime transport:',status,'— backup chat sync remains active');
+  }
+ });
  subscribeTyping().catch(console.warn);
 }
 function navItem(area,name,label){return `<button data-action="area" data-area="${area}" class="rail-btn ${state.area===area?'active':''}" title="${label}" aria-label="${label}">${ico(name)}<span class="rail-label">${label}</span>${area==='chats'?renderBadge(notifications.filter(n=>!n.is_read&&n.kind==='message').length):area==='friends'?renderBadge(unreadFriends()):''}</button>`}
@@ -1770,59 +1875,152 @@ function renderFriend(p){
 }
 function renderPieceList(discover){const list=pieces.filter(p=>discover?p.is_public:inPiece(p.id));return header(discover?'Discover Pieces':'Your Pieces',discover?'Explore communities made by people':'All your favorite corners of Tender',`<button class="btn sm" data-action="new-piece">${ico('plus')} New Piece</button>`)+`<div class="main-body"><div class="content-pad"><div class="section-row"><div><h1 class="page-title">${discover?'Find your people 🔥':'Your Pieces 🧩'}</h1><p class="page-subtitle">Each Piece has a chat, forum, and gallery. No servers. Just shared interests.</p></div></div><div class="grid grid-3">${list.map(p=>`<article class="card piece-grid-card" tabindex="0" role="button" data-action="open-piece" data-id="${p.id}"><div class="piece-card-banner" style="background:${esc(p.color)}33">${pieceAvatar(p,'piece-icon-card')}</div><div class="piece-card-inner"><h3>${esc(p.name)}</h3><p>${esc(p.description||'A Tender community')}</p><div class="compact-stats"><span class="tag">${p.is_public?'Public':'Private'}</span></div></div></article>`).join('')}</div>${list.length?'':`<div class="notice-inline top-spacer">${discover?'No public Pieces yet. Create the first one!':'You have not joined any Pieces yet. Head to Discover to browse.'}</div>`}</div></div>`}
 function renderPiece(piece){let joined=inPiece(piece.id),own=ownPiece(piece.id);let buttons=`${joined?`<button class="btn sm secondary" data-action="leave-piece" ${own?'disabled title="Owner cannot leave"':''}>${own?'Owner':'Leave'}</button>`:`${piece.is_public?`<button class="btn sm" data-action="join-piece">Join Piece</button>`:''}`}${own?`<button class="round-btn" title="Edit Piece" data-action="edit-piece">${ico('settings')}</button><button class="round-btn" title="Custom roles" data-action="piece-roles">👑</button>`:''}`;
- buttons+=`${own&&tender05Ready?`<button class="round-btn" data-action="tender05-tag-editor" title="Piece Tags">🏷</button>`:'' }${tender05Ready&&tender05PieceTags.some(t=>t.piece_id===piece.id)&&joined?`<button class="round-btn" data-action="tender05-equip-tag" title="Equip Piece Tag">✨</button>`:'' }${piece.is_public?'<button class="round-btn" data-action="copy-piece-link" title="Share Piece invitation card" aria-label="Share Piece invitation card">🔗</button>':''}<button class="round-btn" data-action="toggle-info" title="Members">👥</button><button class="round-btn" data-action="room-appearance" title="Customize this Piece">🎨</button>`;
+ buttons+=`${own&&tender05Ready?`<button class="round-btn" data-action="tender05-tag-editor" title="Piece Tags">🏷</button>`:'' }${piece.is_public?'<button class="round-btn" data-action="copy-piece-link" title="Share Piece invitation card" aria-label="Share Piece invitation card">🔗</button>':''}<button class="round-btn" data-action="toggle-info" title="Members">👥</button><button class="round-btn" data-action="room-appearance" title="Customize this Piece">🎨</button>`;
   let content='';if(state.pieceTab==='chat') content=`<div class="chat-history piece-chat-history"><div class="chat-scroll">${activeMessages.length?chatStreamHTML(activeMessages,'piece_message'):`<div class="chat-empty"><img src="buffalo.webp" alt="Buffalo"><h3>${joined?'No messages yet':'Join this Piece to chat'}</h3><p>${joined?'Say hello to your Piece! 🍗':'Become a member to participate in community chat.'}</p>${!joined&&piece.is_public?'<button type="button" class="btn" data-action="join-piece">Join Piece</button>':''}</div>`}</div><button type="button" class="chat-jump-new" id="chat-jump-new" data-action="jump-latest" hidden>↓ New messages · Jump to latest</button>${composer('piece','Message #'+(selectedChannel(piece.id)?.name||'general'))}</div>`;
  if(state.pieceTab==='forum') content=`<div class="section-row"><h2 class="section-heading">${selectedChannel()?.kind==='forum'?'# '+esc(selectedChannel().name):'Discussions'}</h2>${joined?`<button class="btn sm" data-action="new-post">${ico('plus')} New post</button>`:''}</div><div class="grid">${activePosts.map(post=>`<article class="post-card" role="button" tabindex="0" data-action="open-post" data-id="${post.id}"><div class="post-meta">${profileName(pby(post.author_id))} · ${relative(post.created_at)}</div><h3>${post.pinned?'📌 ':''}${esc(post.title)}</h3>${post.tags?.length?`<div class="tagline">${post.tags.map(t=>`<span class="tag">#${esc(t)}</span>`).join('')}</div>`:''}<p class="post-body">${esc(post.body.slice(0,240))}${post.body.length>240?'...':''}</p><div class="post-footer">${ico('chat','icon-sm')} ${post.locked?'🔒 Locked':'Read discussion'} ${(own||memberships.some(m=>m.piece_id===post.piece_id&&m.user_id===user.id&&m.role==='moderator'))&&extendedReady?`<button class="emoji-inline" data-action="pin-post" data-id="${post.id}" title="Pin">📌</button><button class="emoji-inline" data-action="lock-post" data-id="${post.id}" title="Lock">🔒</button>`:''}${post.author_id===user.id||own?`<button class="emoji-inline" data-action="delete-post" data-id="${post.id}" title="Delete post">${ico('trash','icon-sm')}</button>`:''}</div></article>`).join('')||'<div class="notice-inline">No discussions yet. Be the first to post.</div>'}</div>`;
  if(state.pieceTab==='gallery')content=`<div class="section-row"><h2 class="section-heading">Gallery</h2>${joined&&piece.is_public?`<button class="btn sm" data-action="new-gallery">${ico('plus')} Upload picture</button>`:''}</div><div class="gallery-grid">${activeGallery.map(photo=>`<article class="gallery-card"><img src="${esc(galleryUrl(photo.image_path))}" alt="${esc(photo.caption||'Community image')}" data-action="enlarge" data-src="${esc(galleryUrl(photo.image_path))}"><div class="gallery-info"><p>${esc(photo.caption)}</p><div class="post-meta">${profileName(pby(photo.author_id))} · ${relative(photo.created_at)}</div><div class="bubble-actions"><button class="emoji-inline" data-action="reaction-menu" data-type="gallery" data-id="${photo.id}">${ico('smile')}</button>${own||photo.author_id===user.id?`<button class="emoji-inline" data-action="delete-gallery" data-id="${photo.id}" data-path="${esc(photo.image_path)}">${ico('trash')}</button>`:''}</div></div></article>`).join('')||'<div class="notice-inline">The gallery is waiting for its first photo.</div>'}</div>`;
   if(state.pieceTab==='events')content=`<div class="section-row"><h2 class="section-heading">Events</h2>${(own||memberships.some(m=>m.piece_id===piece.id&&m.user_id===user.id&&m.role==='moderator'))?`<button class="btn sm" data-action="new-event">+ Create event</button>`:''}</div><div class="grid">${pieceEvents.filter(e=>e.piece_id===piece.id).map(e=>`<article class="post-card"><div class="post-meta">${new Date(e.starts_at).toLocaleString()}</div><h3>📅 ${esc(e.title)}</h3><p>${esc(e.description)}</p></article>`).join('')||'<p class="notice-inline">No upcoming events yet.</p>'}</div>`;
   return header((state.pieceTab==='chat'||(state.pieceTab==='forum'&&selectedChannel(piece.id)?.kind==='forum'))?'# '+(selectedChannel(piece.id)?.name||'general'):piece.name,state.pieceTab==='chat'?(selectedChannel(piece.id)?.topic||'Piece text channel'):(piece.is_public?'Public Piece · Chat / Forum / Gallery':'Private Piece'),buttons)+`<div class="main-body piece-body"><div class="piece-top-scroll"><div class="content-pad"><section class="piece-hero layout-${esc(piece.layout_style||'classic')}"><div class="piece-banner" style="background:${piece.banner_url?`linear-gradient(135deg,#0009,#0004),url(&quot;${esc(validUrl(piece.banner_url))}&quot;) center/cover`:`linear-gradient(135deg,${esc(tenderSafeColor(piece.color))},${esc(tenderSafeColor(piece.color_secondary,'#293758'))})`}">${own?`<button type="button" class="piece-hero-edit" data-action="edit-piece" title="Change Piece profile picture" aria-label="Change Piece picture">${pieceAvatar(piece,'piece-icon-hero')}<span class="piece-hero-pencil">✎</span></button>`:pieceAvatar(piece,'piece-icon-hero')}</div><div class="piece-info theme-${esc(piece.theme_style||'classic')}"><div><h2 class="name-font-${nameStyles.includes(piece.name_style)?piece.name_style:'classic'}">${esc(piece.name)}</h2><p>${esc(piece.description||'Welcome to this Tender Piece!')}</p>${piece.welcome_text?`<p class="hint">✨ ${esc(piece.welcome_text)}</p>`:''}</div><span class="tag">${piece.is_public?'🌎 Public':'🔒 Private'}</span></div></section><nav class="tabs" aria-label="Piece sections">${[['chat','Chat'],['forum','Forum'],['gallery','Gallery'],['events','Events']].map(([id,label])=>`<button class="${state.pieceTab===id?'active':''}" data-action="piece-tab" data-tab="${id}">${ico(id==='gallery'?'image':id==='forum'?'forum':id==='events'?'bell':'chat','icon-sm')} ${label}</button>`).join('')}</nav>${state.pieceTab!=='chat'?content:''}</div></div>${state.pieceTab==='chat'?content:''}</div>`;
 }
+function tenderStudioPreviewHTML(person){
+ const p=person||my;
+ const layout=['classic','gamer','minimal','cinematic'].includes(p.profile_layout)?p.profile_layout:'classic';
+ const name=styledName(p,'strong');
+ const widgets=Array.isArray(p.profile_widgets)?p.profile_widgets.filter(w=>w&&typeof w==='object'&&w.title&&w.body).slice(0,3):[];
+ return `<div class="tender-v3-profile-card tender-v3-layout-${esc(layout)}" style="${profileGradientStyle(p)}">
+   <div class="tender-v3-preview-cover"><span class="tender-v3-preview-cover-glow"></span></div>
+   <div class="tender-v3-preview-content">
+    <div class="tender-v3-preview-avatar effect-${esc(p.profile_effect||'none')}">${avatars(p)}<span class="tender-v3-preview-online"></span></div>
+    <div class="tender-v3-preview-username">${name}</div>
+    <p class="tender-v3-preview-handle">@${esc(p.handle||'member')}${p.pronouns?' · '+esc(p.pronouns):''}</p>
+    ${p.game_status?`<div class="tender-v3-preview-status">${esc(p.status_emoji||'🍗')} ${esc(p.game_status)}</div>`:''}
+    <div class="tender-v3-preview-about"><small>ABOUT ME</small><p>${esc(p.bio||'Hey! Welcome to my Tender profile. 🍗').replace(/\n/g,'<br>')}</p></div>
+    ${widgets.length?`<div class="tender-v3-preview-widgets">${widgets.map(w=>`<div class="tender-v3-preview-widget"><strong>${esc(String(w.title).slice(0,60))}</strong><p>${esc(String(w.body).slice(0,320))}</p></div>`).join('')}</div>`:''}
+    <div class="tender-v3-preview-footer">TENDER MEMBER · 🍗</div>
+   </div>
+ </div>`;
+}
+
+function renderProfileStudioV3(){
+ const p=my||{},enabled=visualReady,styling=tender05Ready;
+ const current=['identity','banner','name','layout','tags','widgets','media'].includes(state.studioPanel)?state.studioPanel:'identity';
+ state.studioPanel=current;
+ const options=(items,currentValue)=>items.map(([value,label])=>`<option value="${esc(value)}" ${currentValue===value?'selected':''}>${esc(label)}</option>`).join('');
+ const nav=[['identity','user','Identity'],['banner','image','Banners & colors'],['name','type','Username style'],['layout','layout-grid','Layouts'],['tags','badge-check','Piece Tags'],['widgets','blocks','Profile widgets'],['media','camera','Avatar & uploads']]
+ .map(([id,icon,label])=>`<button type="button" class="tender-v3-nav-option ${current===id?'is-active':''}" data-action="tender-v3-panel" data-tab="${id}" aria-pressed="${current===id}">${ico(icon,'icon-sm')}<span>${label}</span>${current===id?'<span class="tender-v3-nav-active-dot"></span>':''}</button>`).join('');
+ const section=(id,html)=>`<section class="tender-v3-panel" data-tender-v3-panel="${id}" ${current!==id?'hidden':''}>${html}</section>`;
+ return `<div class="tender-studio-v3" aria-label="Tender Profile Studio">
+   <header class="tender-v3-page-title">
+    <div><div class="tender-v3-kicker">✦ TENDER STUDIO / CUSTOMIZE YOURSELF</div>
+      <h1>Make it <em>yours.</em></h1>
+      <p>More than a profile. Your own little corner of Tender.</p>
+    </div>
+    <div class="tender-v3-top-actions">
+     <span class="tender-v3-free-pill">✦ ALL FREE</span>
+     <button type="button" class="btn secondary sm" data-action="settings-tab" data-tab="account">User Settings</button>
+     <button type="button" class="btn sm" data-action="open-profile" data-id="${esc(user.id)}">View full profile ↗</button>
+    </div>
+   </header>
+   <div class="tender-v3-workspace">
+    <nav class="tender-v3-sidebar" aria-label="Profile customization sections">
+      <div class="tender-v3-side-label">CUSTOMIZE</div>
+      ${nav}
+      <div class="tender-v3-side-bottom"><span>🍗</span><strong>Your canvas.</strong><small>Your style. No subscription needed.</small></div>
+    </nav>
+    <div class="tender-v3-editor">
+     ${section('identity',`
+      <div class="tender-v3-panel-heading"><span>01 / PERSONAL DETAILS</span><h2>Who are you?</h2><p>Give people a reason to remember your profile.</p></div>
+      <form id="profile-form" class="tender-v3-form">
+       <div class="field"><label>Display name</label><input class="input" name="display_name" required maxlength="40" value="${esc(p.display_name||'')}" placeholder="Your display name"></div>
+       <div class="field"><label>Pronouns <span class="tender-v3-optional">OPTIONAL</span></label><input class="input" name="pronouns" maxlength="40" ${!pronounsReady?'disabled':''} value="${esc(p.pronouns||'')}" placeholder="he/him, she/her, they/them..."></div>
+       <div class="field"><label>About me <span class="tender-v3-optional">220 CHARACTERS</span></label><textarea class="input textarea" name="bio" rows="5" maxlength="220" placeholder="Tell us what you're into...">${esc(p.bio||'')}</textarea></div>
+       <div class="settings-two-fields"><div class="field"><label>Custom status</label><input class="input" name="game_status" maxlength="90" value="${esc(p.game_status||'')}" placeholder="Currently up to something..."></div>
+       ${extendedReady?`<div class="field"><label>Status emoji</label><input class="input" name="status_emoji" maxlength="12" value="${esc(p.status_emoji||'🍗')}"></div>`:''}</div>
+       <div class="tender-v3-savebar"><span>Changes preview instantly.</span><button type="submit" class="btn">Save identity ✦</button></div>
+      </form>`)}
+     ${enabled?`<form id="profile-style-form" class="tender-v3-style-form">
+       ${section('banner',`
+        <div class="tender-v3-panel-heading"><span>02 / BANNER DESIGN</span><h2>Paint your profile.</h2><p>Your banner and profile background have their own colors—separate from your username.</p></div>
+        ${styling?`<div class="field"><label>Banner type</label><select class="input" name="banner_mode">${options([['solid','Solid color'],['gradient','Gradient'],['image','Uploaded picture']],p.banner_mode||'image')}</select></div>
+        <div class="field"><label>Solid banner color</label><div class="tender-v3-color-row"><input type="color" class="input" name="banner_color" value="${esc(tenderSafeColor(p.banner_color,'#21385d'))}"><span>Pick ANY color. No picture needed.</span></div></div>`:''}
+        <div class="tender-v3-divider-title">PROFILE BACKGROUND GRADIENT</div>
+        <div class="settings-two-fields"><div class="field"><label>First color</label><input class="input" type="color" name="profile_gradient_start" value="${esc(tenderSafeColor(p.profile_gradient_start,'#21385d'))}"></div>
+        <div class="field"><label>Second color</label><input class="input" type="color" name="profile_gradient_end" value="${esc(tenderSafeColor(p.profile_gradient_end,'#563561'))}"></div></div>
+        <div class="tender-v3-palette-actions"><button type="button" class="btn secondary sm" data-action="tender-v3-randomize">🎲 Surprise me</button><span>Try a new palette, then save if you like it.</span></div>
+        <div class="tender-v3-savebar"><span>Free gradient customization.</span><button type="submit" class="btn">Save banner design ✦</button></div>
+       `)}
+       ${section('name',`
+        <div class="tender-v3-panel-heading"><span>03 / DISPLAY NAME</span><h2>Make your name shine.</h2><p>Username gradient and effects are independent of the banner.</p></div>
+        <div class="settings-two-fields"><div class="field"><label>Name gradient: start</label><input class="input" type="color" name="name_gradient_start" value="${esc(tenderSafeColor(p.name_gradient_start||p.profile_gradient_start,'#21385d'))}"></div>
+        <div class="field"><label>Name gradient: end</label><input class="input" type="color" name="name_gradient_end" value="${esc(tenderSafeColor(p.name_gradient_end||p.profile_gradient_end,'#563561'))}"></div></div>
+        <div class="settings-two-fields"><div class="field"><label>Font</label><select class="input" name="name_style">${options(nameStyles.map(s=>[s,s[0].toUpperCase()+s.slice(1)]),p.name_style||'classic')}</select></div>
+        <div class="field"><label>Effect</label><select class="input" name="name_effect">${options(nameEffects.map(s=>[s,s[0].toUpperCase()+s.slice(1)]),p.name_effect||'solid')}</select></div></div>
+        <div class="field"><label>Solid / neon text color</label><input class="input" type="color" name="name_color" value="${esc(tenderSafeColor(p.name_color,'#ffffff'))}"></div>
+        <div class="tender-v3-savebar"><span>Preview effects on the right.</span><button class="btn" type="submit">Save name style ✦</button></div>
+       `)}
+       ${section('layout',`
+        <div class="tender-v3-panel-heading"><span>04 / PROFILE LAYOUT</span><h2>Choose your vibe.</h2><p>Completely different profiles, same you.</p></div>
+        <div class="tender-v3-layout-choices">
+          ${[['classic','Classic','Clean and familiar'],['gamer','Gamer','Bold profile accents'],['minimal','Minimalist','Compact and effortless'],['cinematic','Cinematic','Big and dramatic']].map(([id,title,desc])=>`<label class="tender-v3-layout-choice"><input type="radio" name="profile_layout" value="${id}" ${id===(p.profile_layout||'classic')?'checked':''}><span class="tender-v3-layout-art tender-v3-layout-art-${id}"></span><span class="tender-v3-layout-desc"><strong>${title}</strong><small>${desc}</small></span></label>`).join('')}
+        </div>
+        <div class="tender-v3-savebar"><span>Choose a style that feels like you.</span><button class="btn" type="submit">Save layout ✦</button></div>
+       `)}
+      </form>`:`${section('banner','<p class="notice-inline">Profile styles need the Tender 0.4 profile migration.</p>')}`}
+     ${section('tags',`
+       <div class="tender-v3-panel-heading"><span>05 / PIECE IDENTITY</span><h2>Represent your Piece.</h2><p>Equip a free community tag right here—no jumping into the Piece.</p></div>
+       <div class="tender-v3-tag-current"><small>CURRENTLY EQUIPPED</small><div>${tender05TagHTML(p)||'<span class="tender-v3-tag-empty">No Piece Tag yet</span>'}</div></div>
+       ${tender05Ready?`<button type="button" class="btn full" data-action="tender-v3-tag-picker">🏷 Browse & equip Piece Tags</button>`:'<p class="hint">Piece Tags activate once the Tender 0.5 database migration is installed.</p>'}
+       <div class="tender-v3-side-note">You can equip a tag from any Piece you joined, as long as its owner has created one.</div>
+     `)}
+     ${section('widgets',`
+       <div class="tender-v3-panel-heading"><span>06 / PROFILE BOARD</span><h2>Your story, your widgets.</h2><p>Showcase a game, a project, an achievement or whatever makes you YOU.</p></div>
+       ${tender05Ready?`${tender05WidgetCards(p)}<button type="button" class="btn full" data-action="tender05-widget-editor">🧩 Add / arrange / remove widgets</button>`:'<p class="notice-inline">Profile widgets require the 0.5 database migration.</p>'}
+       <div class="tender-v3-side-note">Widgets are public. Keep private details out of your bio and widgets.</div>
+     `)}
+     ${section('media',`
+       <div class="tender-v3-panel-heading"><span>07 / PHOTOS & MEDIA</span><h2>Show your style.</h2><p>Pick your avatar or upload a banner. Prefer solid colors? Use the Banner tab instead.</p></div>
+       <div class="tender-v3-media-current"><div>${avatars(p)}</div><div><strong>Profile avatar</strong><span>PNG, JPG, WEBP or GIF, up to 2 MB</span></div></div>
+       <div class="field"><label>Upload a new avatar</label><input type="file" class="input" id="avatar-file" accept="image/png,image/jpeg,image/webp,image/gif"></div>
+       <div class="field"><label>Upload a new banner</label><input type="file" class="input" id="banner-file" accept="image/png,image/jpeg,image/webp"></div>
+       <div class="tender-v3-side-note">Uploading a banner automatically switches your banner style to Image.</div>
+     `)}
+    </div>
+    <aside class="tender-v3-preview-rail">
+      <div class="tender-v3-preview-toolbar"><span><span class="tender-v3-live-dot"></span> LIVE PREVIEW</span><small>What others will see</small></div>
+      <div id="tender-v3-preview-live">${tenderStudioPreviewHTML(p)}</div>
+      <div class="tender-v3-preview-tip">✨ Try changing a color, font or name—your preview updates before you save!</div>
+    </aside>
+   </div>
+  </div>`;
+}
+
+function tenderStudioPreviewRefresh(){
+ const target=document.getElementById('tender-v3-preview-live');
+ if(!target||!my)return;
+ const draft={...my};
+ const identity=document.getElementById('profile-form');
+ const design=document.getElementById('profile-style-form');
+ if(identity){
+  for(const key of ['display_name','pronouns','bio','game_status','status_emoji']){
+   const v=identity.elements.namedItem(key);if(v&&typeof v.value==='string')draft[key]=v.value;
+  }
+ }
+ if(design){
+  for(const key of ['banner_mode','banner_color','profile_gradient_start','profile_gradient_end','name_gradient_start','name_gradient_end','name_style','name_effect','name_color']){
+   const v=design.elements.namedItem(key);if(v&&typeof v.value==='string')draft[key]=v.value;
+  }
+  const chosen=design.querySelector('[name="profile_layout"]:checked');
+  if(chosen)draft.profile_layout=chosen.value;
+ }
+ target.innerHTML=tenderStudioPreviewHTML(draft);
+}
+
 function renderSettings(){
  const sections=[['profile','user','My Profile'],['account','settings','My Account'],['appearance','palette','Appearance'],['chatbox','message-circle','Chat Box'],['notifications','bell','Notifications'],['privacy','shield','Privacy & Safety'],['accessibility','accessibility','Accessibility']];
  const tab=sections.some(x=>x[0]===state.settingsTab)?state.settingsTab:'profile';
  const nav=sections.map(([id,icon,label])=>`<button type="button" class="settings-nav-item ${tab===id?'active':''}" data-action="settings-tab" data-tab="${id}" aria-current="${tab===id?'page':'false'}">${ico(icon,'icon-sm')}<span>${label}</span></button>`).join('');
  let content='';
- if(tab==='profile')content=`
-  <div class="settings-section-head"><span class="eyebrow">PROFILE STUDIO 2.0 🍗</span><h1>Make it yours.</h1><p>Customize every corner of your Tender identity. All free, with a live preview.</p></div>
-  <nav class="tender-profile-studio-navigation" aria-label="Profile studio sections"><span class="studio-title">YOUR PROFILE</span>
-   <button type="button" data-action="tender05-studio-jump" data-id="tender05-studio-identity">👤 Avatar & identity</button>
-   <button type="button" data-action="tender05-studio-jump" data-id="tender05-studio-colors">🎨 Banner & name colors</button>
-   <button type="button" data-action="tender05-studio-jump" data-id="tender05-studio-widgets">🧩 Profile widgets</button>
-   <button type="button" data-action="tender05-studio-jump" data-id="tender05-studio-media">🖼️ Pictures</button>
-   <button type="button" data-action="tender05-studio-jump" data-id="tender05-studio-preview">👀 Preview</button>
-  </nav>
-  <div id="tender05-studio-preview" class="settings-profile-preview" style="${profileGradientStyle(my)}">${profileBanner(my)}<div class="settings-preview-identity"><div><h2 id="settings-preview-name">${esc(my.display_name)}</h2><p id="settings-preview-meta">@${esc(my.handle)}${my.pronouns?' · '+esc(my.pronouns):''}</p><p id="settings-preview-status" class="settings-preview-status ${my.game_status?'':'is-empty'}">${my.game_status?esc((my.status_emoji||'🍗')+' '+my.game_status):'No custom status yet'}</p></div><button class="btn secondary sm" data-action="open-profile" data-id="${esc(user.id)}">Preview profile</button></div></div>
-  <div class="settings-card" id="tender05-studio-identity"><div class="settings-card-title"><h3>About you</h3><p>Shown when someone clicks your profile picture or name.</p></div>
-  <form id="profile-form" class="settings-fields">
-  <div class="field"><label>Display name</label><input class="input" name="display_name" maxlength="40" required value="${esc(my.display_name)}"></div>
-  <div class="field"><label>Pronouns</label><input class="input" name="pronouns" maxlength="40" value="${esc(my.pronouns||'')}" placeholder="e.g. he/him · she/her · they/them" ${!pronounsReady?'disabled':''}><p class="hint">${pronounsReady?'Optional. Visible on your profile.':'Pronouns will be available once the small 0.3.2 database migration finishes.'}</p></div>
-  <div class="field"><label>Bio <span class="field-caption">Up to 220 characters</span></label><textarea class="input textarea" name="bio" maxlength="220" rows="4" placeholder="Tell people something about yourself">${esc(my.bio||'')}</textarea></div>
-  <div class="settings-two-fields"><div class="field"><label>Custom text status</label><input class="input" name="game_status" maxlength="90" value="${esc(my.game_status||'')}" placeholder="What's on your mind?"></div>
-  ${extendedReady?`<div class="field"><label>Status emoji</label><input class="input" name="status_emoji" maxlength="12" value="${esc(my.status_emoji||'🍗')}"></div>`:''}</div>
-  <div class="settings-actions"><button class="btn" type="submit">Save profile</button></div></form></div>
-  ${visualReady?`<div class="settings-card free-nitro-studio" id="tender05-studio-colors"><h3>✨ Profile Studio 2.0 — All FREE</h3><p>Gradients, name fonts and effects — free for every Tender member!</p>
- <form id="profile-style-form" class="settings-fields">
- ${tender05Ready?`<div class="settings-card-title"><h4>Banner Style</h4><p>Solid color, gradient, or uploaded picture. No banner image required.</p></div><div class="settings-two-fields"><div class="field"><label>Banner type</label><select class="input" name="banner_mode">${[['gradient','Two-color gradient'],['solid','Solid color'],['image','Uploaded image']].map(([v,l])=>`<option value="${v}" ${(my.banner_mode||'gradient')===v?'selected':''}>${l}</option>`).join('')}</select></div><div class="field"><label>Solid banner color</label><input type="color" class="input" name="banner_color" value="${esc(tenderSafeColor(my.banner_color,'#21385d'))}"></div></div>`:''}
- ${tender05Ready?`<div class="field"><label>Profile Layout</label><select name="profile_layout" class="input">${[['classic','Classic'],['gamer','Gamer'],['minimal','Minimalist'],['cinematic','Cinematic']].map(([v,l])=>`<option value="${v}" ${(my.profile_layout||'classic')===v?'selected':''}>${l}</option>`).join('')}</select></div>`:''}
- <div class="settings-card-title"><h4>Profile background gradient</h4><p>Colors the entire profile card and banner — separately from your name!</p></div>
- <div class="settings-two-fields">
- <div class="field"><label>Background: start</label><input class="input" type="color" name="profile_gradient_start" value="${esc(tenderSafeColor(my.profile_gradient_start,'#21385d'))}"></div>
- <div class="field"><label>Background: end</label><input class="input" type="color" name="profile_gradient_end" value="${esc(tenderSafeColor(my.profile_gradient_end,'#563561'))}"></div></div>
- <div class="profile-gradient-preview" style="${profileGradientStyle(my)}">Your profile background</div>
- <div class="settings-card-title"><h4>Display name gradient</h4><p>Choose an entirely independent gradient for your username.</p></div>
- <div class="settings-two-fields">
- <div class="field"><label>Name gradient: start</label><input class="input" type="color" name="name_gradient_start" value="${esc(tenderSafeColor(my.name_gradient_start||my.profile_gradient_start,'#21385d'))}"></div>
- <div class="field"><label>Name gradient: end</label><input class="input" type="color" name="name_gradient_end" value="${esc(tenderSafeColor(my.name_gradient_end||my.profile_gradient_end,'#563561'))}"></div>
- <div class="field"><label>Display name font</label><select class="input" name="name_style">${nameStyles.map(style=>`<option value="${style}" ${my.name_style===style?'selected':''}>${style[0].toUpperCase()+style.slice(1)}</option>`).join('')}</select></div>
- <div class="field"><label>Display name effect</label><select class="input" name="name_effect">${nameEffects.map(effect=>`<option value="${effect}" ${my.name_effect===effect?'selected':''}>${effect[0].toUpperCase()+effect.slice(1)}</option>`).join('')}</select></div>
- <div class="field"><label>Solid / neon text color</label><input class="input" type="color" name="name_color" value="${esc(tenderSafeColor(my.name_color,'#ffffff'))}"></div>
- </div>
- <div class="profile-name-preview">${styledName(my)}</div><button type="submit" class="btn">Save profile design</button>
- </form></div>`:'<div class="settings-card"><h3>Free profile gradients & fonts</h3><p>These features activate automatically when Tender 0.4 database setup finishes.</p></div>'}
-${tender05Ready?`<div class="settings-card" id="tender05-studio-widgets"><div class="section-row"><div><h3>🧩 Profile Widget Board</h3><p class="hint">Add, reorder, and remove your public profile widgets.</p></div><button type="button" class="btn secondary sm" data-action="tender05-widget-editor">Edit widgets</button></div>${tender05WidgetCards(my)}</div>`:''}
- <div class="settings-card" id="tender05-studio-media"><h3>Avatar & banner</h3><p class="hint">Your pictures are visible to other Tender members.</p>
-  <div class="settings-two-fields"><div class="field"><label>Upload avatar (2 MB — PNG, WEBP, GIF)</label><input type="file" class="input" id="avatar-file" accept="image/png,image/jpeg,image/webp,image/gif"></div>
-  <div class="field"><label>Upload banner (3 MB)</label><input class="input" id="banner-file" type="file" accept="image/png,image/jpeg,image/webp"></div></div></div>`;
+ if(tab==='profile')return header('Profile Studio','Every detail. Completely yours. 🍗')+`<div class="main-body tender-studio-v3-page">${renderProfileStudioV3()}</div>`;
  if(tab==='chatbox')content=`<div class="settings-section-head"><span class="eyebrow">PERSONALIZE</span><h1>Chat Box & Embeds</h1><p>Choose how your messages feel.</p></div>
  <div class="settings-card"><h3>Messaging shortcuts</h3><form id="tender05-chat-prefs-form" class="settings-fields">
  <div class="field"><label>Convert classic emoticons</label><select class="input" name="emoticons"><option value="yes" ${tender05Prefs().emoticons!==false?'selected':''}>Yes — :) becomes 🙂</option><option value="no" ${tender05Prefs().emoticons===false?'selected':''}>No — keep typed punctuation</option></select></div>
@@ -1852,7 +2050,7 @@ ${tender05Ready?`<div class="settings-card" id="tender05-studio-widgets"><div cl
  if(tab==='accessibility')content=`<div class="settings-section-head"><span class="eyebrow">COMFORT</span><h1>Accessibility</h1><p>Adjust readability and motion to suit you.</p></div>
   <div class="settings-card"><h3>Readability & motion</h3><p class="hint">Find font size, density, and reduced-motion controls in Appearance Studio.</p><button class="btn secondary" data-action="settings-tab" data-tab="appearance">Open Appearance Studio</button></div>
   <div class="settings-card"><h3>Keyboard shortcuts</h3><div class="shortcut-row"><kbd>Any letter</kbd><span>Start typing into the current chat</span></div><div class="shortcut-row"><kbd>Enter</kbd><span>Send message while composing</span></div><div class="shortcut-row"><kbd>Shift + Enter</kbd><span>New line</span></div><div class="shortcut-row"><kbd>Esc</kbd><span>Close an open dialog</span></div><div class="shortcut-row"><kbd>Tab</kbd><span>Navigate buttons and inputs</span></div></div>`;
- return header('User Settings','Your space, your rules')+`<div class="main-body settings-page"><div class="settings-layout"><nav class="settings-navigation" aria-label="Settings categories"><div class="settings-nav-label">USER SETTINGS</div>${nav}</nav><section class="settings-content">${content}<div class="settings-footer">Tender 0.5 ALPHA · Stay close. Stay crispy. 🍗</div></section></div></div>`;
+ return header('User Settings','Your space, your rules')+`<div class="main-body settings-page"><div class="settings-layout"><nav class="settings-navigation" aria-label="Settings categories"><div class="settings-nav-label">USER SETTINGS</div>${nav}</nav><section class="settings-content">${content}<div class="settings-footer">Tender 0.5.2 · Stay close. Stay crispy. 🍗</div></section></div></div>`;
 }
 
 let activeLoadVersion=0;
@@ -1862,7 +2060,8 @@ async function loadActive(){
  const pending=activeMessages.filter(m=>m.pending&&(area==='chats'?m.conversation_id===selected:(m.piece_id===selected&&(!channelReady||m.channel_id===state.channelId))));
  let fresh=[],reactions=[],posts=[],gallery=[];
  if(area==='chats'){
-  fresh=assert(await q('messages').select('*').eq('conversation_id',selected).order('created_at',{ascending:true}).limit(150))||[];
+  fresh=assert(await q('messages').select('*').eq('conversation_id',selected).order('created_at',{ascending:false}).limit(150))||[];
+  fresh.reverse();
   if(fresh.length)reactions=assert(await q('reactions').select('*').eq('target_type','message').in('target_id',fresh.map(x=>x.id)))||[];
  }else if(area==='pieces'||area==='discover'){
   if(tab==='chat'){
@@ -1870,7 +2069,8 @@ async function loadActive(){
     let query=q('piece_messages').select('*').eq('piece_id',selected);
     if(channelReady&&activeChannel&&!activeChannel.id.startsWith('legacy-'))
       query=activeChannel.is_default?query.or('channel_id.eq.'+activeChannel.id+',channel_id.is.null'):query.eq('channel_id',activeChannel.id);
-    fresh=assert(await query.order('created_at',{ascending:true}).limit(150))||[];
+    fresh=assert(await query.order('created_at',{ascending:false}).limit(150))||[];
+    fresh.reverse();
    if(fresh.length)reactions=assert(await q('reactions').select('*').eq('target_type','piece_message').in('target_id',fresh.map(x=>x.id)))||[];
   }
   if(tab==='forum'){
@@ -1885,7 +2085,7 @@ async function loadActive(){
  activeMessages=fresh;activeReactions=reactions;activePosts=posts;activeGallery=gallery;
  await Promise.all([prepareAttachmentUrls(),loadPolls()]);
 }
-async function goTo(area,id=null){state.area=area;state.selected=id;state.search='';state.mobileDetail=!!id||['discover','settings'].includes(area);if(area==='friends'&&!id)state.mobileDetail=true;if(area==='pieces'||area==='discover')state.pieceTab='chat';state.channelId=id&&['pieces','discover'].includes(area)?channelsFor(id).find(c=>c.is_default)?.id||channelsFor(id)[0]?.id||null:null;replyTo=null;if(id&&['chats','pieces','discover'].includes(area))await loadActive();if(state.area!==area||state.selected!==id)return;applyLocalAppearance();render();if(area==='chats'&&id){markRead(id);subscribeTyping().catch(console.warn)}else if(['pieces','discover'].includes(area)&&id&&state.pieceTab==='chat'){markChannelRead().catch(console.warn);subscribeTyping().catch(console.warn)}else{unsubTyping()}if(area==='friends')markRead(null,true);}
+async function goTo(area,id=null){state.area=area;state.selected=id;state.search='';state.mobileDetail=!!id||['discover','settings'].includes(area);if(area==='friends'&&!id)state.mobileDetail=true;if(area==='pieces'||area==='discover')state.pieceTab='chat';state.channelId=id&&['pieces','discover'].includes(area)?channelsFor(id).find(c=>c.is_default)?.id||channelsFor(id)[0]?.id||null:null;replyTo=null;if(id&&['chats','pieces','discover'].includes(area))await loadActive();if(state.area!==area||state.selected!==id)return;applyLocalAppearance();render();if(area==='chats'&&id){tenderChatLastFullSync=Date.now();markRead(id);subscribeTyping().catch(console.warn)}else if(['pieces','discover'].includes(area)&&id&&state.pieceTab==='chat'){markChannelRead().catch(console.warn);subscribeTyping().catch(console.warn)}else{unsubTyping()}if(area==='friends')markRead(null,true);}
 let confirmationResolve=null;
 function tenderConfirm(title,description,action='Confirm',danger=true){
  if(confirmationResolve){confirmationResolve(false);confirmationResolve=null}
@@ -2342,6 +2542,34 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
   else assert(await q('tender_profile_guestbook').delete().eq('id',id).eq('profile_id',user.id));
   await tender05GuestbookModal(el.dataset.person);
  });return}
+
+ if(a==='tender-v3-panel'){
+  const next=el.dataset.tab;
+  if(!['identity','banner','name','layout','tags','widgets','media'].includes(next))return;
+  state.studioPanel=next;
+  document.querySelectorAll('[data-tender-v3-panel]').forEach(p=>{p.hidden=p.dataset.tenderV3Panel!==next});
+  document.querySelectorAll('.tender-v3-nav-option').forEach(button=>{
+   const selected=button.dataset.tab===next;
+   button.classList.toggle('is-active',selected);
+   button.setAttribute('aria-pressed',String(selected));
+  });
+  document.querySelector('.tender-v3-editor')?.scrollTo({top:0,behavior:'smooth'});
+  return;
+ }
+ if(a==='tender-v3-randomize'){
+  const form=document.getElementById('profile-style-form');if(!form)return;
+  const palettes=[['#101a36','#523e8a'],['#e68737','#f7bc75'],['#1b6556','#8ad4b1'],['#812c55','#d8a2cf'],['#163968','#499fd4'],['#4d1c3a','#aa5c83'],['#2f3458','#e98865']];
+  const current=String(form.elements.namedItem('profile_gradient_start')?.value||'');
+  const alternatives=palettes.filter(p=>p[0]!==current);
+  const pair=alternatives[Math.floor(Math.random()*alternatives.length)]||palettes[0];
+  for(const [key,value] of [['profile_gradient_start',pair[0]],['profile_gradient_end',pair[1]],['banner_color',pair[0]]]){
+    const field=form.elements.namedItem(key);if(field)field.value=value;
+  }
+  const type=form.elements.namedItem('banner_mode');if(type)type.value='gradient';
+  tenderStudioPreviewRefresh();toast('New palette previewed! Save your banner if you like it. ✨');return;
+ }
+ if(a==='tender-v3-tag-picker'){await safe(()=>tenderTagPickerModal());return}
+ if(a==='tender-v3-tag-equip'){await safe(()=>tenderEquipTagFromProfile(id||null));return}
  if(a==='tender05-tag-editor'){tender05PieceTagModal(selectedPiece());return}
  if(a==='tender05-equip-tag'){await safe(async()=>{const pid=state.selected;assert(await db.rpc('tender_equip_piece_tag',{pid}));cacheUpdatedProfile({equipped_piece_id:pid});render();toast('Piece Tag equipped!')});return}
  if(a==='tender05-clear-tag'){await safe(async()=>{assert(await db.rpc('tender_equip_piece_tag',{pid:null}));cacheUpdatedProfile({equipped_piece_id:null});renderMain();toast('Piece Tag removed.')});return}
@@ -2652,6 +2880,7 @@ document.addEventListener('click',event=>{
  if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;
  if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
 document.addEventListener('input',e=>{
+ if(e.target.closest?.('.tender-studio-v3')){tenderStudioPreviewRefresh();return}
  if(e.target.closest?.('#tender-html-embed-form')){tender05HTMLPreview();return}
  if(e.target.closest?.('#profile-style-form')){
   const form=e.target.closest('#profile-style-form');
@@ -2697,6 +2926,7 @@ document.addEventListener('keydown',e=>{
  }
  if(e.key==='Escape'){closeMiniProfile();closeAccountMenu();closeModal()}if(e.key==='Enter'&&!e.shiftKey&&e.target.id==='message-box'){e.preventDefault();e.target.closest('form')?.requestSubmit()}if(e.key==='Enter'&&e.target.getAttribute('role')==='button')e.target.click()});
 document.addEventListener('change',e=>{
+  if(e.target.closest?.('.tender-studio-v3'))tenderStudioPreviewRefresh();
   if(e.target.id==='tender-theme-import'){
     const file=e.target.files?.[0];if(!file)return;
     if(file.size>16384)return toast('Theme file is too large (max 16 KB).',true);
@@ -2757,7 +2987,7 @@ document.addEventListener('pointercancel',tender05EndCallDrag);
 
 let dragDepth=0;
 document.addEventListener('play',e=>{if(audioPrefs().deafened&&e.target?.matches?.('audio,video'))syncDeafenedAudio()},true);
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshVisibleChatDays()});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){refreshVisibleChatDays();tenderChatProbe(true).catch(console.warn)}});
 document.addEventListener('scroll',e=>{if(!e.target?.matches?.('.chat-scroll'))return;const pill=document.getElementById('chat-jump-new');if(pill&&e.target.scrollHeight-e.target.scrollTop-e.target.clientHeight<55)pill.hidden=true},true);
 let tender05DraggingWidget=null;
  document.addEventListener('dragstart',event=>{
