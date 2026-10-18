@@ -52,4 +52,50 @@ assert.ok(hotfix.includes('CREATE OR REPLACE FUNCTION public.tender_guard_messag
 assert.ok(!/(DROP TABLE|TRUNCATE|DELETE FROM)/i.test(hotfix),'Hotfix must not remove data');
 assert.ok(hotfix.includes('BEGIN;') && hotfix.trimEnd().endsWith('COMMIT;'),'Hotfix is transactional');
 
+
+// Tender 0.5.2: long conversations must load newest messages, never oldest 150.
+assert.ok(app.includes("q('messages').select('*').eq('conversation_id',selected).order('created_at',{ascending:false}).limit(150)"),
+ 'DM history must request newest messages first');
+assert.ok(app.includes("assert(await query.order('created_at',{ascending:false}).limit(150))"),
+ 'Piece chat must request newest messages first');
+assert.ok(app.includes('fresh.reverse();'),'Latest-first DB results are presented in chronological order');
+assert.ok(app.includes('function tenderChatProbe(force=false)'),'Live chat has a recovery probe');
+assert.ok(app.includes("tenderChatProbe(true).catch(console.warn)"),'Reconnection/visibility triggers a chat resync');
+assert.ok(app.includes('tenderStartChatSync();'),'Live sync backup starts with the realtime subscription');
+assert.ok(app.includes('tenderStopChatSync();'),'Live sync backup stops on logout or re-subscribe');
+assert.ok(app.includes('tenderTagPickerModal'),'Piece Tags can be equipped from the profile');
+assert.ok(app.includes('data-action="tender-v3-tag-picker"'),'Profile Tag picker has a user-facing action');
+
+// Run the actual Profile Studio renderer in isolation to catch runtime template
+// mistakes and ensure it truly has controls + a persistent live preview.
+const studioStart=app.indexOf('function renderProfileStudioV3(){');
+const studioEnd=app.indexOf('\nfunction tenderStudioPreviewRefresh(){',studioStart);
+assert.ok(studioStart>=0&&studioEnd>studioStart,'Profile Studio renderer exists');
+const studioSource=app.slice(studioStart,studioEnd);
+const context={
+ my:{id:'test-id',display_name:'Tender Tester',handle:'tester',bio:'I like Tender',name_style:'classic',name_effect:'solid',banner_mode:'solid'},
+ user:{id:'test-id'},
+ state:{studioPanel:'identity'},
+ visualReady:true,tender05Ready:true,pronounsReady:true,extendedReady:true,
+ nameStyles:['classic','rounded'],nameEffects:['solid','gradient'],
+ ico:()=>'<span>icon</span>',
+ esc:v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;'),
+ tenderSafeColor:(v,fallback)=>/^#[a-f0-9]{6}$/i.test(v||'')?v:fallback,
+ avatars:()=>'<span class="avatar">T</span>',
+ tender05TagHTML:()=>'',tender05WidgetCards:()=>'<div>Widgets</div>',
+ tenderStudioPreviewHTML:()=>'<div class="example-profile">Preview</div>'
+};
+const renderStudio=vm.runInNewContext('('+studioSource+')',context,{timeout:1000});
+const studioHTML=renderStudio();
+assert.ok(studioHTML.includes('tender-v3-workspace'),'New studio has a dedicated workspace');
+assert.ok(studioHTML.includes('tender-v3-preview-rail'),'New studio has a live preview pane');
+assert.ok(studioHTML.includes('data-tender-v3-panel="banner"'),'Banner editor tab rendered');
+assert.ok(studioHTML.includes('data-tender-v3-panel="name"'),'Name gradient controls rendered');
+assert.ok(studioHTML.includes('data-tender-v3-panel="tags"'),'Piece Tag picker section rendered');
+assert.ok(studioHTML.includes('id="profile-style-form"'),'Existing profile-style save form preserved');
+assert.ok(studioHTML.includes('id="profile-form"'),'Existing identity save form preserved');
+assert.ok(studioHTML.includes('data-action="tender-v3-randomize"'),'Surprise Me palette feature rendered');
+assert.ok(!studioHTML.includes('settings-profile-preview'),'Old profile editor is not reused');
+
+
 console.log('Tender 0.5 smoke checks passed');
