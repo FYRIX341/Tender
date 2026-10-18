@@ -158,7 +158,7 @@ function styledName(person,tag='span'){
  const effect=nameEffects.includes(person?.name_effect)?person.name_effect:'solid';
  const color=tenderSafeColor(person?.name_color,'#ffffff');
  const first=tenderSafeColor(person?.name_gradient_start||person?.profile_gradient_start,'#21385d'),second=tenderSafeColor(person?.name_gradient_end||person?.profile_gradient_end,'#563561');
- return `<${tag} class="tender-styled-name name-font-${style} name-effect-${effect}" style="--name-color:${esc(color)};--name-gradient-a:${esc(first)};--name-gradient-b:${esc(second)}">${esc(person?.display_name||'Tender member')}</${tag}>`;
+ return `<${tag} class="tender-styled-name name-font-${style} name-effect-${effect}" style="--name-color:${esc(color)};--name-gradient-a:${esc(first)};--name-gradient-b:${esc(second)}">${esc(person?.display_name||'Tender member')}</${tag}>${tender05TagHTML(person)}`;
 }
 function profileGradientStyle(p){
  const a=tenderSafeColor(p?.profile_gradient_start,'#21385d'),b=tenderSafeColor(p?.profile_gradient_end,'#563561');
@@ -298,6 +298,62 @@ function tender05ReportModal(id){
  <input type="hidden" name="request_id" value="${esc(id)}">
  <div class="field"><label>Why are you reporting this?</label><textarea name="reason" required minlength="8" maxlength="500" class="input textarea" rows="4" placeholder="Describe the problem briefly."></textarea></div>
  <button type="submit" class="btn danger full">Submit report</button></form>`);
+}
+
+// Tender 0.5: user-built profile widgets, free Piece Tags and moderated guestbooks.
+function tender05TagHTML(p){
+ if(!tender05Ready||!p?.equipped_piece_id)return '';
+ const tag=tender05PieceTags.find(x=>x.piece_id===p.equipped_piece_id);
+ if(!tag)return '';
+ return `<button class="tender-piece-tag" type="button" style="--tag-color:${esc(tag.color||'#f47735')}" data-action="open-profile-piece" data-id="${esc(tag.piece_id)}" title="View the ${esc(tag.tag)} Piece">${esc(tag.emoji||'🍗')} ${esc(tag.tag)}</button>`;
+}
+function tender05WidgetCards(person){
+ if(!tender05Ready)return '';
+ const board=Array.isArray(person.profile_widgets)?person.profile_widgets:[];
+ const extra=board.filter(x=>x&&typeof x==='object'&&typeof x.title==='string'&&typeof x.body==='string').slice(0,10);
+ if(!extra.length)return '';
+ return `<div class="profile-detail-section"><h3>PROFILE BOARD</h3><div class="tender-widget-board">${extra.map(x=>`<article class="tender-widget"><strong>${esc(x.title.slice(0,60))}</strong><p>${esc(x.body.slice(0,320))}</p></article>`).join('')}</div></div>`;
+}
+function tender05WidgetModal(){
+ if(!tender05Ready)return toast('Profile widgets require migration_0_5.sql.',true);
+ const board=Array.isArray(my.profile_widgets)?my.profile_widgets:[];
+ const cards=board.filter(x=>x&&typeof x==='object'&&typeof x.title==='string');
+ modal('🧩 Profile Widget Studio','Add personal cards and rearrange the order with the arrows.',`
+ <div class="tender-widget-editor">${cards.map((item,i)=>`<div class="tender-widget-editor-row"><div><strong>${esc(item.title)}</strong><p>${esc(item.body||'')}</p></div><div class="tender-widget-controls"><button class="round-btn" data-action="tender05-widget-move" data-index="${i}" data-dir="-1" title="Move up">↑</button><button class="round-btn" data-action="tender05-widget-move" data-index="${i}" data-dir="1" title="Move down">↓</button><button class="round-btn" data-action="tender05-widget-remove" data-index="${i}" title="Remove widget">✕</button></div></div>`).join('')||'<p class="hint">No custom widgets yet. Add one below!</p>'}</div>
+ <form id="tender05-widget-form"><div class="settings-grid"><div class="field"><label>Widget title</label><input class="input" name="title" maxlength="60" required placeholder="Favorite game"></div><div class="field"><label>Text</label><textarea class="input textarea" name="body" maxlength="320" rows="3" required placeholder="DELTARUNE"></textarea></div></div><button type="submit" class="btn full">Add widget</button></form>`);
+}
+async function tender05UpdateWidget(action,index,dir=0){
+ const initial=Array.isArray(my.profile_widgets)?my.profile_widgets:[];
+ const builtin=initial.filter(x=>typeof x==='string');
+ const cards=initial.filter(x=>x&&typeof x==='object'&&typeof x.title==='string');
+ if(index<0||index>=cards.length)return;
+ if(action==='remove')cards.splice(index,1);
+ if(action==='move'){
+  const to=index+dir;if(to<0||to>=cards.length)return;
+  [cards[index],cards[to]]=[cards[to],cards[index]];
+ }
+ const saved=assert(await q('profiles').update({profile_widgets:[...builtin,...cards]}).eq('id',user.id).select('profile_widgets').single());
+ cacheUpdatedProfile(saved);tender05WidgetModal();
+}
+async function tender05GuestbookModal(personId){
+ if(!tender05Ready)return toast('Guestbooks require migration_0_5.sql.',true);
+ const person=pby(personId),owner=personId===user.id;
+ const rows=assert(await q('tender_profile_guestbook').select('*').eq('profile_id',personId).order('created_at',{ascending:false}).limit(40))||[];
+ modal('📖 '+person.display_name+'’s Guestbook',owner?'Approve or remove notes people left for you.':'Leave a short note if you are friends.',`
+ <div class="tender-guestbook">${rows.map(r=>`<div class="tender-guestbook-row"><div><strong>${esc(pby(r.author_id).display_name)}</strong> <small>${relative(r.created_at)}${r.approved?'':' · Pending approval'}</small></div><p>${esc(r.body)}</p>
+  ${owner?`<div class="tender-guestbook-actions">${!r.approved?`<button class="btn sm" data-action="tender05-guestbook-approve" data-id="${esc(r.id)}" data-person="${esc(personId)}">Approve</button>`:''}<button class="btn secondary sm" data-action="tender05-guestbook-delete" data-id="${esc(r.id)}" data-person="${esc(personId)}">Delete</button></div>`:''}</div>`).join('')||'<p class="hint">No guestbook notes yet.</p>'}</div>
+ ${!owner&&myFriendIds().includes(personId)?`<form id="tender05-guestbook-form"><input type="hidden" name="person" value="${esc(personId)}"><div class="field"><label>Leave a note (requires approval)</label><textarea name="body" rows="3" maxlength="220" required class="input textarea"></textarea></div><button class="btn full" type="submit">Leave note</button></form>`:''}`);
+}
+function tender05PieceTagModal(piece){
+ if(!piece||!ownPiece(piece.id))return toast('Only Piece owners can customize tags.',true);
+ if(!tender05Ready)return toast('Piece Tags require migration_0_5.sql.',true);
+ const active=tender05PieceTags.find(x=>x.piece_id===piece.id);
+ modal('🏷 Piece Tag Studio','Give your community a free badge that members can display beside their name.',
+ `<form id="tender05-piece-tag-form"><input type="hidden" name="piece_id" value="${esc(piece.id)}">
+ <div class="field"><label>Tag (2–5 letters/numbers)</label><input class="input" name="tag" required minlength="2" maxlength="5" pattern="[A-Za-z0-9]{2,5}" value="${esc(active?.tag||'RUNE')}" placeholder="RUNE"></div>
+ <div class="settings-two-fields"><div class="field"><label>Icon</label><input class="input" name="emoji" required maxlength="16" value="${esc(active?.emoji||'🍗')}"></div>
+ <div class="field"><label>Color</label><input class="input" type="color" name="color" value="${esc(active?.color||'#f47735')}"></div></div>
+ <button class="btn full" type="submit">Save Piece Tag</button></form>`);
 }
 
 function inPiece(pid){return memberships.some(m=>m.piece_id===pid && m.user_id===user.id)}
@@ -1192,7 +1248,7 @@ function publicProfileDetails(person){
  const joined=person.created_at?new Date(person.created_at):null;
  return `<div class="profile-detail-section"><h3>ABOUT ME</h3><div class="profile-detail-about">${esc(person.bio||'No bio yet. Stay crispy! 🍗').replace(/\n/g,'<br>')}</div></div>
   ${person.game_status?`<div class="profile-detail-section"><h3>STATUS</h3><p>${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</p></div>`:''}
-  ${joined&&!Number.isNaN(joined.getTime())?`<div class="profile-detail-section"><h3>MEMBER SINCE</h3><p>${esc(joined.toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'}))}</p></div>`:''}`;
+  ${joined&&!Number.isNaN(joined.getTime())?`<div class="profile-detail-section"><h3>MEMBER SINCE</h3><p>${esc(joined.toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'}))}</p></div>`:''}${tender05WidgetCards(person)}`;
 }
 function sharedPiecesHTML(otherId,mini=false){
  const shared=sharedPublicPieces(otherId);
@@ -1215,7 +1271,7 @@ function profileCardHTML(person){
   <section class="profile-dialog-content">
     <div class="profile-dialog-tabs"><span class="active">Overview</span><span>${sharedPublicPieces(person.id).length} shared Pieces</span></div>
     <div class="profile-dialog-scroll">${publicProfileDetails(person)}${sharedPiecesHTML(person.id)}
-    <div class="profile-detail-section"><h3>ABOUT TENDER PROFILES</h3><p class="hint">Only information this person chose to share is shown here.</p></div></div>
+    <div class="profile-detail-section"><button class="btn secondary sm" data-action="tender05-guestbook" data-id="${esc(person.id)}">📖 View Guestbook</button><p class="hint">Only information this person chose to share is shown here.</p></div></div>
   </section>
  </div>`;
 }
@@ -1633,7 +1689,7 @@ function renderFriend(p){
 }
 function renderPieceList(discover){const list=pieces.filter(p=>discover?p.is_public:inPiece(p.id));return header(discover?'Discover Pieces':'Your Pieces',discover?'Explore communities made by people':'All your favorite corners of Tender',`<button class="btn sm" data-action="new-piece">${ico('plus')} New Piece</button>`)+`<div class="main-body"><div class="content-pad"><div class="section-row"><div><h1 class="page-title">${discover?'Find your people 🔥':'Your Pieces 🧩'}</h1><p class="page-subtitle">Each Piece has a chat, forum, and gallery. No servers. Just shared interests.</p></div></div><div class="grid grid-3">${list.map(p=>`<article class="card piece-grid-card" tabindex="0" role="button" data-action="open-piece" data-id="${p.id}"><div class="piece-card-banner" style="background:${esc(p.color)}33">${pieceAvatar(p,'piece-icon-card')}</div><div class="piece-card-inner"><h3>${esc(p.name)}</h3><p>${esc(p.description||'A Tender community')}</p><div class="compact-stats"><span class="tag">${p.is_public?'Public':'Private'}</span></div></div></article>`).join('')}</div>${list.length?'':`<div class="notice-inline top-spacer">${discover?'No public Pieces yet. Create the first one!':'You have not joined any Pieces yet. Head to Discover to browse.'}</div>`}</div></div>`}
 function renderPiece(piece){let joined=inPiece(piece.id),own=ownPiece(piece.id);let buttons=`${joined?`<button class="btn sm secondary" data-action="leave-piece" ${own?'disabled title="Owner cannot leave"':''}>${own?'Owner':'Leave'}</button>`:`${piece.is_public?`<button class="btn sm" data-action="join-piece">Join Piece</button>`:''}`}${own?`<button class="round-btn" title="Edit Piece" data-action="edit-piece">${ico('settings')}</button><button class="round-btn" title="Custom roles" data-action="piece-roles">👑</button>`:''}`;
- buttons+=`${piece.is_public?'<button class="round-btn" data-action="copy-piece-link" title="Share Piece invitation card" aria-label="Share Piece invitation card">🔗</button>':''}<button class="round-btn" data-action="toggle-info" title="Members">👥</button><button class="round-btn" data-action="room-appearance" title="Customize this Piece">🎨</button>`;
+ buttons+=`${own&&tender05Ready?`<button class="round-btn" data-action="tender05-tag-editor" title="Piece Tags">🏷</button>`:'' }${tender05Ready&&tender05PieceTags.some(t=>t.piece_id===piece.id)&&joined?`<button class="round-btn" data-action="tender05-equip-tag" title="Equip Piece Tag">✨</button>`:'' }${piece.is_public?'<button class="round-btn" data-action="copy-piece-link" title="Share Piece invitation card" aria-label="Share Piece invitation card">🔗</button>':''}<button class="round-btn" data-action="toggle-info" title="Members">👥</button><button class="round-btn" data-action="room-appearance" title="Customize this Piece">🎨</button>`;
   let content='';if(state.pieceTab==='chat') content=`<div class="chat-history piece-chat-history"><div class="chat-scroll">${activeMessages.length?chatStreamHTML(activeMessages,'piece_message'):`<div class="chat-empty"><img src="buffalo.webp" alt="Buffalo"><h3>${joined?'No messages yet':'Join this Piece to chat'}</h3><p>${joined?'Say hello to your Piece! 🍗':'Become a member to participate in community chat.'}</p>${!joined&&piece.is_public?'<button type="button" class="btn" data-action="join-piece">Join Piece</button>':''}</div>`}</div><button type="button" class="chat-jump-new" id="chat-jump-new" data-action="jump-latest" hidden>↓ New messages · Jump to latest</button>${composer('piece','Message #'+(selectedChannel(piece.id)?.name||'general'))}</div>`;
  if(state.pieceTab==='forum') content=`<div class="section-row"><h2 class="section-heading">Discussions</h2>${joined?`<button class="btn sm" data-action="new-post">${ico('plus')} New post</button>`:''}</div><div class="grid">${activePosts.map(post=>`<article class="post-card" role="button" tabindex="0" data-action="open-post" data-id="${post.id}"><div class="post-meta">${profileName(pby(post.author_id))} · ${relative(post.created_at)}</div><h3>${post.pinned?'📌 ':''}${esc(post.title)}</h3>${post.tags?.length?`<div class="tagline">${post.tags.map(t=>`<span class="tag">#${esc(t)}</span>`).join('')}</div>`:''}<p class="post-body">${esc(post.body.slice(0,240))}${post.body.length>240?'...':''}</p><div class="post-footer">${ico('chat','icon-sm')} ${post.locked?'🔒 Locked':'Read discussion'} ${(own||memberships.some(m=>m.piece_id===post.piece_id&&m.user_id===user.id&&m.role==='moderator'))&&extendedReady?`<button class="emoji-inline" data-action="pin-post" data-id="${post.id}" title="Pin">📌</button><button class="emoji-inline" data-action="lock-post" data-id="${post.id}" title="Lock">🔒</button>`:''}${post.author_id===user.id||own?`<button class="emoji-inline" data-action="delete-post" data-id="${post.id}" title="Delete post">${ico('trash','icon-sm')}</button>`:''}</div></article>`).join('')||'<div class="notice-inline">No discussions yet. Be the first to post.</div>'}</div>`;
  if(state.pieceTab==='gallery')content=`<div class="section-row"><h2 class="section-heading">Gallery</h2>${joined&&piece.is_public?`<button class="btn sm" data-action="new-gallery">${ico('plus')} Upload picture</button>`:''}</div><div class="gallery-grid">${activeGallery.map(photo=>`<article class="gallery-card"><img src="${esc(galleryUrl(photo.image_path))}" alt="${esc(photo.caption||'Community image')}" data-action="enlarge" data-src="${esc(galleryUrl(photo.image_path))}"><div class="gallery-info"><p>${esc(photo.caption)}</p><div class="post-meta">${profileName(pby(photo.author_id))} · ${relative(photo.created_at)}</div><div class="bubble-actions"><button class="emoji-inline" data-action="reaction-menu" data-type="gallery" data-id="${photo.id}">${ico('smile')}</button>${own||photo.author_id===user.id?`<button class="emoji-inline" data-action="delete-gallery" data-id="${photo.id}" data-path="${esc(photo.image_path)}">${ico('trash')}</button>`:''}</div></div></article>`).join('')||'<div class="notice-inline">The gallery is waiting for its first photo.</div>'}</div>`;
@@ -2168,6 +2224,17 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='enlarge'){MODALS.innerHTML=`<div class="backdrop-img" data-action="close-modal"><img src="${esc(validUrl(el.dataset.src))}" alt="Gallery picture"></div>`;return}
  if(a==='open-attachment'){let url=assert(await db.storage.from('tender-chat').createSignedUrl(el.dataset.path,60)).signedUrl;window.open(validUrl(url),'_blank','noopener,noreferrer');return}
  if(a==='logout'){await safe(async()=>{await finishTenderCall();assert(await db.auth.signOut());unsub();reset();renderAuth()});return}
+ if(a==='tender05-widget-editor'){tender05WidgetModal();return}
+ if(a==='tender05-widget-move'||a==='tender05-widget-remove'){await safe(()=>tender05UpdateWidget(a.endsWith('move')?'move':'remove',Number(el.dataset.index),Number(el.dataset.dir)||0));return}
+ if(a==='tender05-guestbook'){await safe(()=>tender05GuestbookModal(id));return}
+ if(a==='tender05-guestbook-approve'||a==='tender05-guestbook-delete'){await safe(async()=>{
+  if(a.endsWith('approve'))assert(await q('tender_profile_guestbook').update({approved:true}).eq('id',id).eq('profile_id',user.id));
+  else assert(await q('tender_profile_guestbook').delete().eq('id',id).eq('profile_id',user.id));
+  await tender05GuestbookModal(el.dataset.person);
+ });return}
+ if(a==='tender05-tag-editor'){tender05PieceTagModal(selectedPiece());return}
+ if(a==='tender05-equip-tag'){await safe(async()=>{const pid=state.selected;assert(await db.rpc('tender_equip_piece_tag',{pid}));cacheUpdatedProfile({equipped_piece_id:pid});render();toast('Piece Tag equipped!')});return}
+ if(a==='tender05-clear-tag'){await safe(async()=>{assert(await db.rpc('tender_equip_piece_tag',{pid:null}));cacheUpdatedProfile({equipped_piece_id:null});renderMain();toast('Piece Tag removed.')});return}
  if(a==='start-dm'){await safe(async()=>{await tender05Contact(id)});return}
  if(a==='message-requests'){tender05RequestModal();return}
  if(a==='accept-dm-request'){await safe(()=>tender05AcceptRequest(id));return}
@@ -2199,6 +2266,27 @@ async function submitForm(form){switch(form.id){
     if(wallpaper==='image' && (!/^https:\/\//i.test(image)||validUrl(image)==='#'))throw Error('Choose an HTTPS image URL.');
     localStorage.setItem(key,JSON.stringify({wallpaper,image:image.slice(0,1200)}));closeModal();applyLocalAppearance();toast('Wallpaper saved!');return}
  case'composer-form':return sendMessage(form);
+ case'tender05-piece-tag-form':return safe(async()=>{
+  const d=new FormData(form),pid=String(d.get('piece_id')||''),tag=String(d.get('tag')||'').toUpperCase().trim();
+  if(!ownPiece(pid)||!/^[A-Z0-9]{2,5}$/.test(tag))throw Error('A Piece owner must choose a tag with 2–5 letters or digits.');
+  const record={piece_id:pid,tag,emoji:String(d.get('emoji')||'🍗').slice(0,16),color:tenderSafeColor(d.get('color'))};
+  assert(await q('tender_piece_tags').upsert(record,{onConflict:'piece_id'}));
+  await tender05LoadData();closeModal();render();toast('Piece Tag saved! 🏷');
+ });
+ case'tender05-widget-form':return safe(async()=>{
+  const d=new FormData(form),title=String(d.get('title')||'').trim(),body=String(d.get('body')||'').trim();
+  if(!title||!body)throw Error('Write a title and text for your widget.');
+  const old=Array.isArray(my.profile_widgets)?my.profile_widgets:[],cards=old.filter(x=>x&&typeof x==='object'&&x.title);
+  if(cards.length>=10)throw Error('Maximum of 10 custom profile widgets.');
+  const saved=assert(await q('profiles').update({profile_widgets:[...old,{id:crypto.randomUUID(),title:title.slice(0,60),body:body.slice(0,320)}]}).eq('id',user.id).select('profile_widgets').single());
+  cacheUpdatedProfile(saved);tender05WidgetModal();
+ });
+ case'tender05-guestbook-form':return safe(async()=>{
+  const d=new FormData(form),person=String(d.get('person')||''),body=String(d.get('body')||'').trim();
+  if(!body)throw Error('Write a note first.');
+  assert(await q('tender_profile_guestbook').insert({profile_id:person,author_id:user.id,body}));
+  await tender05GuestbookModal(person);toast('Note submitted for profile owner approval.');
+ });
  case'tender05-chat-prefs-form':{
   const d=new FormData(form);localStorage.setItem('tender-0.5-composer',JSON.stringify({emoticons:d.get('emoticons')==='yes'}));toast('Chat Box settings saved.');return;
  }
