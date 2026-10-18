@@ -3182,6 +3182,7 @@ document.addEventListener('dblclick',event=>{
 });
 document.addEventListener('submit',event=>{if(event.target.matches('form')){event.preventDefault();submitForm(event.target).catch(e=>{console.error(e);toast(e.message||'Error',true)})}});
 document.addEventListener('click',event=>{
+ const spoiler=event.target.closest?.('[data-tender-spoiler]');if(spoiler){spoiler.classList.toggle('revealed');return}
  if(!event.target.closest?.('.tender-v53-attach-wrap')){const m=document.getElementById('tender-v53-plus-menu');if(m)m.hidden=true}
  if(!event.target.closest?.('#tender-inbox-context'))tenderInboxCloseContext();
  // Explicitly handle Create Channel clicks; do not rely exclusively on the
@@ -3202,7 +3203,7 @@ document.addEventListener('click',event=>{
  if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;
  if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
 document.addEventListener('contextmenu',tenderInboxContextMenu);
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){tenderInboxCloseContext();if(tenderInbox.open)tenderInboxClose();const m=document.getElementById('tender-v53-plus-menu');if(m)m.hidden=true}});
+document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches?.('[data-tender-spoiler]')){e.preventDefault();e.target.classList.toggle('revealed');return}if(e.key==='Escape'){tenderInboxCloseContext();if(tenderInbox.open)tenderInboxClose();const m=document.getElementById('tender-v53-plus-menu');if(m)m.hidden=true}});
 document.addEventListener('input',e=>{
  if(e.target.closest?.('.tender-studio-v3')){tenderStudioPreviewRefresh();return}
  if(e.target.closest?.('#tender-html-embed-form')){tender05HTMLPreview();return}
