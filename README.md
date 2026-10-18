@@ -6,7 +6,15 @@ Tender is a responsive social messaging app with **Buffalo** the mascot. Chat wi
 
 **[🍗 Open Tender securely](https://fyrix341.github.io/Tender/)** · [Source code](https://github.com/FYRIX341/Tender)
 
-## ✨ Tender 0.4.5 — Daily Chat Dates
+## ✨ Tender 0.4.6 — Channel Button Repair
+
+This **bug-fix update** addresses the Create Channel button that appeared to do nothing. Clicking the orange button now directly invokes the save handler, instead of depending only on the browser's form submission event. Tender also bypasses silent native validation on this form and reports database response codes in its existing persistent error box.
+
+The Create Channel form includes a visible **Tender 0.4.6 • Channel Repair** label. If you do not see it after a hard refresh, the website you are visiting has not loaded this version of the code.
+
+**Note:** A visible save attempt does not guarantee successful channel creation. Actual Supabase errors (permissions, missing tables, duplicate names) are displayed so they can be diagnosed individually. See [0.4.6 release notes](RELEASE_0_4_6.md).
+
+### Previous release: 0.4.5 — Daily Chat Dates
 
 **Tender 0.4.5 gives conversations Discord-style day separators.** When the message history crosses into a new calendar day, a slim horizontal divider appears automatically. Recent dates read **Today, October 18, 2026** or **Yesterday, October 17, 2026** (as appropriate for your browser's local date), while older messages use their full date.
 
