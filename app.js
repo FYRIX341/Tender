@@ -1471,7 +1471,7 @@ async function tenderChatProbe(force=false){
    query=q('messages').select('id,created_at,edited_at').eq('conversation_id',selected);
    local=activeMessages.filter(m=>!m.pending&&m.conversation_id===selected);
   }else{
-   query=q('piece_messages').select('id,created_at,edited_at').eq('piece_id',selected);
+   query=q('piece_messages').select('id,created_at').eq('piece_id',selected);
    const selectedRoom=selectedChannel(selected);
    if(channelReady&&selectedRoom&&!selectedRoom.id.startsWith('legacy-')){
     query=selectedRoom.is_default?query.or('channel_id.eq.'+selectedRoom.id+',channel_id.is.null'):query.eq('channel_id',selectedRoom.id);
