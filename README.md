@@ -6,6 +6,19 @@ Tender is a responsive social messaging app with **Buffalo** the mascot. Chat wi
 
 **[🍗 Open Tender securely](https://fyrix341.github.io/Tender/)** · [Source code](https://github.com/FYRIX341/Tender)
 
+## ✏️ Tender 0.5.4 — Inline Editing, Old Mentions & Full Articles
+
+**Fixes and improvements**:
+- **Edit message in place.** Click Edit on a message you sent: that same chat bubble turns into an editor with Save and Cancel. **Enter** saves, **Shift+Enter** adds a newline, **Esc** cancels. Saves are verified by the server, and **(edited)** appears on changed messages. This works in DMs, groups, and Pieces after the new migration.
+- **Recover previous @mentions.** Open Inbox → Mentions. Tender automatically searches older messages from DMs, groups and Pieces you **still have permission to read**. Previously indexed mentions stay visible, and the scan runs in bounded batches with a **Continue scanning older messages** button for larger histories. Recovered historical mentions are already read, avoiding false new alerts.
+- **Full articles inside Tender.** Click any Updates or News card to read the **entire changelog or article** in a large illustrated, scrollable popup. All article content is stored directly in Tender. No new GitHub Markdown changelog files are created for this release.
+
+**Manual database step:** Back up your Supabase database, then run [migration_0_5_4.sql](migration_0_5_4.sql) in Supabase SQL Editor **after** the older 0.5, 0.5.1, and 0.5.3 migrations. It adds a permission-checked message editing RPC, Piece edited timestamps, updated-mention tracking, and paginated historical-mention recovery. The migration is additive and does not erase existing message history.
+
+**Legacy note:** Earlier @mentions made using a different username, or in Pieces/conversations you no longer belong to, may not be recoverable. The date, kind, and message ID cursor lets the scan continue across large message histories.
+
+**Testing:** `node tests/tender05-smoke.cjs` checks browser JavaScript syntax, safe article data, in-bubble edit rendering, legacy feature protection, and SQL migration structure. Authenticated end-to-end testing against your live Supabase database is still required.
+
 ## 📥 Tender 0.5.3 — Inbox & Message Formatting
 
 **Tender now has an IN-APP CHANGELOG**: open the 📥 button in the conversation top bar → **Updates** to see Major, Minor and Patch releases with artwork, or → **News** for Tender announcements. The in-app views replace the need to browse GitHub release Markdown files. Historical Markdown files remain in GitHub only as development records.
