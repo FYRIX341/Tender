@@ -20,6 +20,10 @@ DO $tender$ BEGIN
   ALTER TABLE public.profiles ADD CONSTRAINT tender_banner_color_valid
    CHECK (banner_color ~ '^#[0-9a-fA-F]{6}
 
+-- Piece owners may choose a community slow-mode cooldown (0 disables it).
+ALTER TABLE public.pieces ADD COLUMN IF NOT EXISTS message_cooldown_seconds integer NOT NULL DEFAULT 0
+ CHECK(message_cooldown_seconds BETWEEN 0 AND 120);
+
 -- Direct messages from strangers are requests, not unconsented full chat membership.
 CREATE TABLE IF NOT EXISTS public.tender_dm_requests(
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -137,6 +141,17 @@ DECLARE sent_count int;
 BEGIN
  IF NOT EXISTS(SELECT 1 FROM public.profiles WHERE id=NEW.author_id AND account_state='active') THEN
    RAISE EXCEPTION 'Your account is inactive';
+ END IF;
+ IF TG_TABLE_NAME='piece_messages' AND NOT public.is_piece_mod(NEW.piece_id) THEN
+   IF EXISTS (
+    SELECT 1 FROM public.pieces p JOIN public.piece_messages old
+      ON old.piece_id=p.id
+    WHERE p.id=NEW.piece_id AND old.author_id=NEW.author_id
+      AND p.message_cooldown_seconds>0
+      AND old.created_at>now()-(p.message_cooldown_seconds*interval '1 second')
+   ) THEN
+     RAISE EXCEPTION 'Piece slow mode: wait before sending another message';
+   END IF;
  END IF;
  IF TG_TABLE_NAME='messages' THEN
    IF EXISTS(
