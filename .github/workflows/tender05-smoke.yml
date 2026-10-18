@@ -1,0 +1,17 @@
+name: Tender 0.5 Smoke Checks
+on:
+  push:
+    branches: [main, feature/tender-05-content-core]
+  pull_request:
+    branches: [main]
+jobs:
+  syntax-and-features:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test Tender 0.5 frontend helpers and migration integrity
+        run: node tests/tender05-smoke.cjs
