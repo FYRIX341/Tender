@@ -1882,52 +1882,145 @@ function renderPiece(piece){let joined=inPiece(piece.id),own=ownPiece(piece.id);
   if(state.pieceTab==='events')content=`<div class="section-row"><h2 class="section-heading">Events</h2>${(own||memberships.some(m=>m.piece_id===piece.id&&m.user_id===user.id&&m.role==='moderator'))?`<button class="btn sm" data-action="new-event">+ Create event</button>`:''}</div><div class="grid">${pieceEvents.filter(e=>e.piece_id===piece.id).map(e=>`<article class="post-card"><div class="post-meta">${new Date(e.starts_at).toLocaleString()}</div><h3>📅 ${esc(e.title)}</h3><p>${esc(e.description)}</p></article>`).join('')||'<p class="notice-inline">No upcoming events yet.</p>'}</div>`;
   return header((state.pieceTab==='chat'||(state.pieceTab==='forum'&&selectedChannel(piece.id)?.kind==='forum'))?'# '+(selectedChannel(piece.id)?.name||'general'):piece.name,state.pieceTab==='chat'?(selectedChannel(piece.id)?.topic||'Piece text channel'):(piece.is_public?'Public Piece · Chat / Forum / Gallery':'Private Piece'),buttons)+`<div class="main-body piece-body"><div class="piece-top-scroll"><div class="content-pad"><section class="piece-hero layout-${esc(piece.layout_style||'classic')}"><div class="piece-banner" style="background:${piece.banner_url?`linear-gradient(135deg,#0009,#0004),url(&quot;${esc(validUrl(piece.banner_url))}&quot;) center/cover`:`linear-gradient(135deg,${esc(tenderSafeColor(piece.color))},${esc(tenderSafeColor(piece.color_secondary,'#293758'))})`}">${own?`<button type="button" class="piece-hero-edit" data-action="edit-piece" title="Change Piece profile picture" aria-label="Change Piece picture">${pieceAvatar(piece,'piece-icon-hero')}<span class="piece-hero-pencil">✎</span></button>`:pieceAvatar(piece,'piece-icon-hero')}</div><div class="piece-info theme-${esc(piece.theme_style||'classic')}"><div><h2 class="name-font-${nameStyles.includes(piece.name_style)?piece.name_style:'classic'}">${esc(piece.name)}</h2><p>${esc(piece.description||'Welcome to this Tender Piece!')}</p>${piece.welcome_text?`<p class="hint">✨ ${esc(piece.welcome_text)}</p>`:''}</div><span class="tag">${piece.is_public?'🌎 Public':'🔒 Private'}</span></div></section><nav class="tabs" aria-label="Piece sections">${[['chat','Chat'],['forum','Forum'],['gallery','Gallery'],['events','Events']].map(([id,label])=>`<button class="${state.pieceTab===id?'active':''}" data-action="piece-tab" data-tab="${id}">${ico(id==='gallery'?'image':id==='forum'?'forum':id==='events'?'bell':'chat','icon-sm')} ${label}</button>`).join('')}</nav>${state.pieceTab!=='chat'?content:''}</div></div>${state.pieceTab==='chat'?content:''}</div>`;
 }
+function tenderStudioPreviewHTML(person){
+ const p=person||my;
+ const layout=['classic','gamer','minimal','cinematic'].includes(p.profile_layout)?p.profile_layout:'classic';
+ const name=styledName(p,'strong');
+ const widgets=Array.isArray(p.profile_widgets)?p.profile_widgets.filter(w=>w&&typeof w==='object'&&w.title&&w.body).slice(0,3):[];
+ return `<div class="tender-v3-profile-card tender-v3-layout-${esc(layout)}" style="${profileGradientStyle(p)}">
+   <div class="tender-v3-preview-cover"><span class="tender-v3-preview-cover-glow"></span></div>
+   <div class="tender-v3-preview-content">
+    <div class="tender-v3-preview-avatar effect-${esc(p.profile_effect||'none')}">${avatars(p)}<span class="tender-v3-preview-online"></span></div>
+    <div class="tender-v3-preview-username">${name}</div>
+    <p class="tender-v3-preview-handle">@${esc(p.handle||'member')}${p.pronouns?' · '+esc(p.pronouns):''}</p>
+    ${p.game_status?`<div class="tender-v3-preview-status">${esc(p.status_emoji||'🍗')} ${esc(p.game_status)}</div>`:''}
+    <div class="tender-v3-preview-about"><small>ABOUT ME</small><p>${esc(p.bio||'Hey! Welcome to my Tender profile. 🍗').replace(/\n/g,'<br>')}</p></div>
+    ${widgets.length?`<div class="tender-v3-preview-widgets">${widgets.map(w=>`<div class="tender-v3-preview-widget"><strong>${esc(String(w.title).slice(0,60))}</strong><p>${esc(String(w.body).slice(0,320))}</p></div>`).join('')}</div>`:''}
+    <div class="tender-v3-preview-footer">TENDER MEMBER · 🍗</div>
+   </div>
+ </div>`;
+}
+
+function renderProfileStudioV3(){
+ const p=my||{},enabled=visualReady,styling=tender05Ready;
+ const current=['identity','banner','name','layout','tags','widgets','media'].includes(state.studioPanel)?state.studioPanel:'identity';
+ state.studioPanel=current;
+ const options=(items,currentValue)=>items.map(([value,label])=>`<option value="${esc(value)}" ${currentValue===value?'selected':''}>${esc(label)}</option>`).join('');
+ const nav=[['identity','user','Identity'],['banner','image','Banners & colors'],['name','type','Username style'],['layout','layout-grid','Layouts'],['tags','badge-check','Piece Tags'],['widgets','blocks','Profile widgets'],['media','camera','Avatar & uploads']]
+ .map(([id,icon,label])=>`<button type="button" class="tender-v3-nav-option ${current===id?'is-active':''}" data-action="tender-v3-panel" data-tab="${id}" aria-pressed="${current===id}">${ico(icon,'icon-sm')}<span>${label}</span>${current===id?'<span class="tender-v3-nav-active-dot"></span>':''}</button>`).join('');
+ const section=(id,html)=>`<section class="tender-v3-panel" data-tender-v3-panel="${id}" ${current!==id?'hidden':''}>${html}</section>`;
+ return `<div class="tender-studio-v3" aria-label="Tender Profile Studio">
+   <header class="tender-v3-page-title">
+    <div><div class="tender-v3-kicker">✦ TENDER STUDIO / CUSTOMIZE YOURSELF</div>
+      <h1>Make it <em>yours.</em></h1>
+      <p>More than a profile. Your own little corner of Tender.</p>
+    </div>
+    <div class="tender-v3-top-actions">
+     <span class="tender-v3-free-pill">✦ ALL FREE</span>
+     <button type="button" class="btn secondary sm" data-action="settings-tab" data-tab="account">User Settings</button>
+     <button type="button" class="btn sm" data-action="open-profile" data-id="${esc(user.id)}">View full profile ↗</button>
+    </div>
+   </header>
+   <div class="tender-v3-workspace">
+    <nav class="tender-v3-sidebar" aria-label="Profile customization sections">
+      <div class="tender-v3-side-label">CUSTOMIZE</div>
+      ${nav}
+      <div class="tender-v3-side-bottom"><span>🍗</span><strong>Your canvas.</strong><small>Your style. No subscription needed.</small></div>
+    </nav>
+    <div class="tender-v3-editor">
+     ${section('identity',`
+      <div class="tender-v3-panel-heading"><span>01 / PERSONAL DETAILS</span><h2>Who are you?</h2><p>Give people a reason to remember your profile.</p></div>
+      <form id="profile-form" class="tender-v3-form">
+       <div class="field"><label>Display name</label><input class="input" name="display_name" required maxlength="40" value="${esc(p.display_name||'')}" placeholder="Your display name"></div>
+       <div class="field"><label>Pronouns <span class="tender-v3-optional">OPTIONAL</span></label><input class="input" name="pronouns" maxlength="40" ${!pronounsReady?'disabled':''} value="${esc(p.pronouns||'')}" placeholder="he/him, she/her, they/them..."></div>
+       <div class="field"><label>About me <span class="tender-v3-optional">220 CHARACTERS</span></label><textarea class="input textarea" name="bio" rows="5" maxlength="220" placeholder="Tell us what you're into...">${esc(p.bio||'')}</textarea></div>
+       <div class="settings-two-fields"><div class="field"><label>Custom status</label><input class="input" name="game_status" maxlength="90" value="${esc(p.game_status||'')}" placeholder="Currently up to something..."></div>
+       ${extendedReady?`<div class="field"><label>Status emoji</label><input class="input" name="status_emoji" maxlength="12" value="${esc(p.status_emoji||'🍗')}"></div>`:''}</div>
+       <div class="tender-v3-savebar"><span>Changes preview instantly.</span><button type="submit" class="btn">Save identity ✦</button></div>
+      </form>`)}
+     ${enabled?`<form id="profile-style-form" class="tender-v3-style-form">
+       ${section('banner',`
+        <div class="tender-v3-panel-heading"><span>02 / BANNER DESIGN</span><h2>Paint your profile.</h2><p>Your banner and profile background have their own colors—separate from your username.</p></div>
+        ${styling?`<div class="field"><label>Banner type</label><select class="input" name="banner_mode">${options([['solid','Solid color'],['gradient','Gradient'],['image','Uploaded picture']],p.banner_mode||'image')}</select></div>
+        <div class="field"><label>Solid banner color</label><div class="tender-v3-color-row"><input type="color" class="input" name="banner_color" value="${esc(tenderSafeColor(p.banner_color,'#21385d'))}"><span>Pick ANY color. No picture needed.</span></div></div>`:''}
+        <div class="tender-v3-divider-title">PROFILE BACKGROUND GRADIENT</div>
+        <div class="settings-two-fields"><div class="field"><label>First color</label><input class="input" type="color" name="profile_gradient_start" value="${esc(tenderSafeColor(p.profile_gradient_start,'#21385d'))}"></div>
+        <div class="field"><label>Second color</label><input class="input" type="color" name="profile_gradient_end" value="${esc(tenderSafeColor(p.profile_gradient_end,'#563561'))}"></div></div>
+        <div class="tender-v3-palette-actions"><button type="button" class="btn secondary sm" data-action="tender-v3-randomize">🎲 Surprise me</button><span>Try a new palette, then save if you like it.</span></div>
+        <div class="tender-v3-savebar"><span>Free gradient customization.</span><button type="submit" class="btn">Save banner design ✦</button></div>
+       `)}
+       ${section('name',`
+        <div class="tender-v3-panel-heading"><span>03 / DISPLAY NAME</span><h2>Make your name shine.</h2><p>Username gradient and effects are independent of the banner.</p></div>
+        <div class="settings-two-fields"><div class="field"><label>Name gradient: start</label><input class="input" type="color" name="name_gradient_start" value="${esc(tenderSafeColor(p.name_gradient_start||p.profile_gradient_start,'#21385d'))}"></div>
+        <div class="field"><label>Name gradient: end</label><input class="input" type="color" name="name_gradient_end" value="${esc(tenderSafeColor(p.name_gradient_end||p.profile_gradient_end,'#563561'))}"></div></div>
+        <div class="settings-two-fields"><div class="field"><label>Font</label><select class="input" name="name_style">${options(nameStyles.map(s=>[s,s[0].toUpperCase()+s.slice(1)]),p.name_style||'classic')}</select></div>
+        <div class="field"><label>Effect</label><select class="input" name="name_effect">${options(nameEffects.map(s=>[s,s[0].toUpperCase()+s.slice(1)]),p.name_effect||'solid')}</select></div></div>
+        <div class="field"><label>Solid / neon text color</label><input class="input" type="color" name="name_color" value="${esc(tenderSafeColor(p.name_color,'#ffffff'))}"></div>
+        <div class="tender-v3-savebar"><span>Preview effects on the right.</span><button class="btn" type="submit">Save name style ✦</button></div>
+       `)}
+       ${section('layout',`
+        <div class="tender-v3-panel-heading"><span>04 / PROFILE LAYOUT</span><h2>Choose your vibe.</h2><p>Completely different profiles, same you.</p></div>
+        <div class="tender-v3-layout-choices">
+          ${[['classic','Classic','Clean and familiar'],['gamer','Gamer','Bold profile accents'],['minimal','Minimalist','Compact and effortless'],['cinematic','Cinematic','Big and dramatic']].map(([id,title,desc])=>`<label class="tender-v3-layout-choice"><input type="radio" name="profile_layout" value="${id}" ${id===(p.profile_layout||'classic')?'checked':''}><span class="tender-v3-layout-art tender-v3-layout-art-${id}"></span><span class="tender-v3-layout-desc"><strong>${title}</strong><small>${desc}</small></span></label>`).join('')}
+        </div>
+        <div class="tender-v3-savebar"><span>Choose a style that feels like you.</span><button class="btn" type="submit">Save layout ✦</button></div>
+       `)}
+      </form>`:`${section('banner','<p class="notice-inline">Profile styles need the Tender 0.4 profile migration.</p>')}`}
+     ${section('tags',`
+       <div class="tender-v3-panel-heading"><span>05 / PIECE IDENTITY</span><h2>Represent your Piece.</h2><p>Equip a free community tag right here—no jumping into the Piece.</p></div>
+       <div class="tender-v3-tag-current"><small>CURRENTLY EQUIPPED</small><div>${tender05TagHTML(p)||'<span class="tender-v3-tag-empty">No Piece Tag yet</span>'}</div></div>
+       ${tender05Ready?`<button type="button" class="btn full" data-action="tender-v3-tag-picker">🏷 Browse & equip Piece Tags</button>`:'<p class="hint">Piece Tags activate once the Tender 0.5 database migration is installed.</p>'}
+       <div class="tender-v3-side-note">You can equip a tag from any Piece you joined, as long as its owner has created one.</div>
+     `)}
+     ${section('widgets',`
+       <div class="tender-v3-panel-heading"><span>06 / PROFILE BOARD</span><h2>Your story, your widgets.</h2><p>Showcase a game, a project, an achievement or whatever makes you YOU.</p></div>
+       ${tender05Ready?`${tender05WidgetCards(p)}<button type="button" class="btn full" data-action="tender05-widget-editor">🧩 Add / arrange / remove widgets</button>`:'<p class="notice-inline">Profile widgets require the 0.5 database migration.</p>'}
+       <div class="tender-v3-side-note">Widgets are public. Keep private details out of your bio and widgets.</div>
+     `)}
+     ${section('media',`
+       <div class="tender-v3-panel-heading"><span>07 / PHOTOS & MEDIA</span><h2>Show your style.</h2><p>Pick your avatar or upload a banner. Prefer solid colors? Use the Banner tab instead.</p></div>
+       <div class="tender-v3-media-current"><div>${avatars(p)}</div><div><strong>Profile avatar</strong><span>PNG, JPG, WEBP or GIF, up to 2 MB</span></div></div>
+       <div class="field"><label>Upload a new avatar</label><input type="file" class="input" id="avatar-file" accept="image/png,image/jpeg,image/webp,image/gif"></div>
+       <div class="field"><label>Upload a new banner</label><input type="file" class="input" id="banner-file" accept="image/png,image/jpeg,image/webp"></div>
+       <div class="tender-v3-side-note">Uploading a banner automatically switches your banner style to Image.</div>
+     `)}
+    </div>
+    <aside class="tender-v3-preview-rail">
+      <div class="tender-v3-preview-toolbar"><span><span class="tender-v3-live-dot"></span> LIVE PREVIEW</span><small>What others will see</small></div>
+      <div id="tender-v3-preview-live">${tenderStudioPreviewHTML(p)}</div>
+      <div class="tender-v3-preview-tip">✨ Try changing a color, font or name—your preview updates before you save!</div>
+    </aside>
+   </div>
+  </div>`;
+}
+
+function tenderStudioPreviewRefresh(){
+ const target=document.getElementById('tender-v3-preview-live');
+ if(!target||!my)return;
+ const draft={...my};
+ const identity=document.getElementById('profile-form');
+ const design=document.getElementById('profile-style-form');
+ if(identity){
+  for(const key of ['display_name','pronouns','bio','game_status','status_emoji']){
+   const v=identity.elements.namedItem(key);if(v&&typeof v.value==='string')draft[key]=v.value;
+  }
+ }
+ if(design){
+  for(const key of ['banner_mode','banner_color','profile_gradient_start','profile_gradient_end','name_gradient_start','name_gradient_end','name_style','name_effect','name_color']){
+   const v=design.elements.namedItem(key);if(v&&typeof v.value==='string')draft[key]=v.value;
+  }
+  const chosen=design.querySelector('[name="profile_layout"]:checked');
+  if(chosen)draft.profile_layout=chosen.value;
+ }
+ target.innerHTML=tenderStudioPreviewHTML(draft);
+}
+
 function renderSettings(){
  const sections=[['profile','user','My Profile'],['account','settings','My Account'],['appearance','palette','Appearance'],['chatbox','message-circle','Chat Box'],['notifications','bell','Notifications'],['privacy','shield','Privacy & Safety'],['accessibility','accessibility','Accessibility']];
  const tab=sections.some(x=>x[0]===state.settingsTab)?state.settingsTab:'profile';
  const nav=sections.map(([id,icon,label])=>`<button type="button" class="settings-nav-item ${tab===id?'active':''}" data-action="settings-tab" data-tab="${id}" aria-current="${tab===id?'page':'false'}">${ico(icon,'icon-sm')}<span>${label}</span></button>`).join('');
  let content='';
- if(tab==='profile')content=`
-  <div class="settings-section-head"><span class="eyebrow">PROFILE STUDIO 2.0 🍗</span><h1>Make it yours.</h1><p>Customize every corner of your Tender identity. All free, with a live preview.</p></div>
-  <nav class="tender-profile-studio-navigation" aria-label="Profile studio sections"><span class="studio-title">YOUR PROFILE</span>
-   <button type="button" data-action="tender05-studio-jump" data-id="tender05-studio-identity">👤 Avatar & identity</button>
-   <button type="button" data-action="tender05-studio-jump" data-id="tender05-studio-colors">🎨 Banner & name colors</button>
-   <button type="button" data-action="tender05-studio-jump" data-id="tender05-studio-widgets">🧩 Profile widgets</button>
-   <button type="button" data-action="tender05-studio-jump" data-id="tender05-studio-media">🖼️ Pictures</button>
-   <button type="button" data-action="tender05-studio-jump" data-id="tender05-studio-preview">👀 Preview</button>
-  </nav>
-  <div id="tender05-studio-preview" class="settings-profile-preview" style="${profileGradientStyle(my)}">${profileBanner(my)}<div class="settings-preview-identity"><div><h2 id="settings-preview-name">${esc(my.display_name)}</h2><p id="settings-preview-meta">@${esc(my.handle)}${my.pronouns?' · '+esc(my.pronouns):''}</p><p id="settings-preview-status" class="settings-preview-status ${my.game_status?'':'is-empty'}">${my.game_status?esc((my.status_emoji||'🍗')+' '+my.game_status):'No custom status yet'}</p></div><button class="btn secondary sm" data-action="open-profile" data-id="${esc(user.id)}">Preview profile</button></div></div>
-  <div class="settings-card" id="tender05-studio-identity"><div class="settings-card-title"><h3>About you</h3><p>Shown when someone clicks your profile picture or name.</p></div>
-  <form id="profile-form" class="settings-fields">
-  <div class="field"><label>Display name</label><input class="input" name="display_name" maxlength="40" required value="${esc(my.display_name)}"></div>
-  <div class="field"><label>Pronouns</label><input class="input" name="pronouns" maxlength="40" value="${esc(my.pronouns||'')}" placeholder="e.g. he/him · she/her · they/them" ${!pronounsReady?'disabled':''}><p class="hint">${pronounsReady?'Optional. Visible on your profile.':'Pronouns will be available once the small 0.3.2 database migration finishes.'}</p></div>
-  <div class="field"><label>Bio <span class="field-caption">Up to 220 characters</span></label><textarea class="input textarea" name="bio" maxlength="220" rows="4" placeholder="Tell people something about yourself">${esc(my.bio||'')}</textarea></div>
-  <div class="settings-two-fields"><div class="field"><label>Custom text status</label><input class="input" name="game_status" maxlength="90" value="${esc(my.game_status||'')}" placeholder="What's on your mind?"></div>
-  ${extendedReady?`<div class="field"><label>Status emoji</label><input class="input" name="status_emoji" maxlength="12" value="${esc(my.status_emoji||'🍗')}"></div>`:''}</div>
-  <div class="settings-actions"><button class="btn" type="submit">Save profile</button></div></form></div>
-  ${visualReady?`<div class="settings-card free-nitro-studio" id="tender05-studio-colors"><h3>✨ Profile Studio 2.0 — All FREE</h3><p>Gradients, name fonts and effects — free for every Tender member!</p>
- <form id="profile-style-form" class="settings-fields">
- ${tender05Ready?`<div class="settings-card-title"><h4>Banner Style</h4><p>Solid color, gradient, or uploaded picture. No banner image required.</p></div><div class="settings-two-fields"><div class="field"><label>Banner type</label><select class="input" name="banner_mode">${[['gradient','Two-color gradient'],['solid','Solid color'],['image','Uploaded image']].map(([v,l])=>`<option value="${v}" ${(my.banner_mode||'gradient')===v?'selected':''}>${l}</option>`).join('')}</select></div><div class="field"><label>Solid banner color</label><input type="color" class="input" name="banner_color" value="${esc(tenderSafeColor(my.banner_color,'#21385d'))}"></div></div>`:''}
- ${tender05Ready?`<div class="field"><label>Profile Layout</label><select name="profile_layout" class="input">${[['classic','Classic'],['gamer','Gamer'],['minimal','Minimalist'],['cinematic','Cinematic']].map(([v,l])=>`<option value="${v}" ${(my.profile_layout||'classic')===v?'selected':''}>${l}</option>`).join('')}</select></div>`:''}
- <div class="settings-card-title"><h4>Profile background gradient</h4><p>Colors the entire profile card and banner — separately from your name!</p></div>
- <div class="settings-two-fields">
- <div class="field"><label>Background: start</label><input class="input" type="color" name="profile_gradient_start" value="${esc(tenderSafeColor(my.profile_gradient_start,'#21385d'))}"></div>
- <div class="field"><label>Background: end</label><input class="input" type="color" name="profile_gradient_end" value="${esc(tenderSafeColor(my.profile_gradient_end,'#563561'))}"></div></div>
- <div class="profile-gradient-preview" style="${profileGradientStyle(my)}">Your profile background</div>
- <div class="settings-card-title"><h4>Display name gradient</h4><p>Choose an entirely independent gradient for your username.</p></div>
- <div class="settings-two-fields">
- <div class="field"><label>Name gradient: start</label><input class="input" type="color" name="name_gradient_start" value="${esc(tenderSafeColor(my.name_gradient_start||my.profile_gradient_start,'#21385d'))}"></div>
- <div class="field"><label>Name gradient: end</label><input class="input" type="color" name="name_gradient_end" value="${esc(tenderSafeColor(my.name_gradient_end||my.profile_gradient_end,'#563561'))}"></div>
- <div class="field"><label>Display name font</label><select class="input" name="name_style">${nameStyles.map(style=>`<option value="${style}" ${my.name_style===style?'selected':''}>${style[0].toUpperCase()+style.slice(1)}</option>`).join('')}</select></div>
- <div class="field"><label>Display name effect</label><select class="input" name="name_effect">${nameEffects.map(effect=>`<option value="${effect}" ${my.name_effect===effect?'selected':''}>${effect[0].toUpperCase()+effect.slice(1)}</option>`).join('')}</select></div>
- <div class="field"><label>Solid / neon text color</label><input class="input" type="color" name="name_color" value="${esc(tenderSafeColor(my.name_color,'#ffffff'))}"></div>
- </div>
- <div class="profile-name-preview">${styledName(my)}</div><button type="submit" class="btn">Save profile design</button>
- </form></div>`:'<div class="settings-card"><h3>Free profile gradients & fonts</h3><p>These features activate automatically when Tender 0.4 database setup finishes.</p></div>'}
-${tender05Ready?`<div class="settings-card" id="tender05-studio-widgets"><div class="section-row"><div><h3>🧩 Profile Widget Board</h3><p class="hint">Add, reorder, and remove your public profile widgets.</p></div><button type="button" class="btn secondary sm" data-action="tender05-widget-editor">Edit widgets</button></div>${tender05WidgetCards(my)}</div>`:''}
- <div class="settings-card" id="tender05-studio-media"><h3>Avatar & banner</h3><p class="hint">Your pictures are visible to other Tender members.</p>
-  <div class="settings-two-fields"><div class="field"><label>Upload avatar (2 MB — PNG, WEBP, GIF)</label><input type="file" class="input" id="avatar-file" accept="image/png,image/jpeg,image/webp,image/gif"></div>
-  <div class="field"><label>Upload banner (3 MB)</label><input class="input" id="banner-file" type="file" accept="image/png,image/jpeg,image/webp"></div></div></div>`;
+ if(tab==='profile')return header('Profile Studio','Every detail. Completely yours. 🍗')+`<div class="main-body tender-studio-v3-page">${renderProfileStudioV3()}</div>`;
  if(tab==='chatbox')content=`<div class="settings-section-head"><span class="eyebrow">PERSONALIZE</span><h1>Chat Box & Embeds</h1><p>Choose how your messages feel.</p></div>
  <div class="settings-card"><h3>Messaging shortcuts</h3><form id="tender05-chat-prefs-form" class="settings-fields">
  <div class="field"><label>Convert classic emoticons</label><select class="input" name="emoticons"><option value="yes" ${tender05Prefs().emoticons!==false?'selected':''}>Yes — :) becomes 🙂</option><option value="no" ${tender05Prefs().emoticons===false?'selected':''}>No — keep typed punctuation</option></select></div>
