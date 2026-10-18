@@ -1360,3 +1360,22 @@ html[data-tender-theme="light"] .screen .composer textarea::placeholder{color:#7
  html:not([data-tender-theme="light"]) .screen .composer-wrap{padding:10px 10px 13px!important}
  html:not([data-tender-theme="light"]) .screen .chat-scroll{padding:12px 8px 14px!important}
 }
+
+/* Tender 0.4.4 — a user without a live session must not get a green Online badge. */
+.profile-presence.offline{
+ color:#c4cad3!important;
+ background:rgba(104,113,130,.25)!important;
+ border:1px solid rgba(150,159,174,.24);
+}
+.profile-presence.offline:before{
+ background:#8994a4!important;
+ box-shadow:none!important;
+}
+html[data-tender-theme="light"] .profile-presence.offline{
+ color:#626a77!important;
+ background:rgba(106,115,132,.14)!important;
+ border-color:rgba(106,115,132,.22);
+}
+html[data-tender-theme="light"] .profile-presence.offline:before{
+ background:#818995!important;
+}
