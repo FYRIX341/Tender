@@ -162,7 +162,13 @@ function styledName(person,tag='span'){
 }
 function profileGradientStyle(p){
  const a=tenderSafeColor(p?.profile_gradient_start,'#21385d'),b=tenderSafeColor(p?.profile_gradient_end,'#563561');
- return `--profile-start:${esc(a)};--profile-end:${esc(b)};`;
+ const mode=p?.banner_mode||(p?.banner_url?'image':'gradient');
+ const bannerColor=tenderSafeColor(p?.banner_color,a);
+ const image=(p?.banner_url&&validUrl(p.banner_url)!=='#')?validUrl(p.banner_url):'';
+ const banner=mode==='solid'?bannerColor:
+  mode==='image'&&image?`linear-gradient(0deg,#11152140,#11152122),url("${image}") center/cover`:
+  `linear-gradient(125deg,${a},${b})`;
+ return `--profile-start:${esc(a)};--profile-end:${esc(b)};--tender-banner-bg:${esc(banner)};`;
 }
 const avatars = p => `<span class="avatar md">${p?.avatar_url?`<img src="${esc(validUrl(p.avatar_url))}" alt="">`:esc((p?.display_name||p?.handle||'?').slice(0,1).toUpperCase())}</span>`;
 // Piece avatars reuse the existing text "icon" column: HTTPS storage image URL or legacy emoji.
@@ -501,6 +507,7 @@ function updatePresenceMarkers(){
  });
  // Keep already-open full profile dialogs, DM profile panes and profile
  // pages up to date without disturbing current message drafts.
+ document.querySelectorAll('[data-info-status-id]').forEach(el=>{el.textContent=presenceLabel(activePresence(el.dataset.infoStatusId))});
  document.querySelectorAll('[data-profile-presence-id]').forEach(el=>{
   const status=activePresence(el.dataset.profilePresenceId);
   el.className='profile-presence '+status;
@@ -841,6 +848,7 @@ function applyLocalAppearance(){
  r.dataset.tenderFx=p.reduceMotion?'off':'on';
  r.dataset.tenderDensity=p.density||'compact';
  r.dataset.tenderGradient=p.gradient||'sunset';
+ r.dataset.tenderWorkspace=['classic','snow','aurora','rose','ocean','sunset'].includes(p.workspaceTheme)?p.workspaceTheme:'classic';
  const room=roomPref();
  r.dataset.tenderWallpaper=room.wallpaper||'none';
  if(room.wallpaper==='image'&&room.image&&validUrl(room.image)!=='#')r.style.setProperty('--tender-chat-image','url("'+String(room.image).replace(/["\\]/g,'')+'")');
@@ -849,6 +857,7 @@ function applyLocalAppearance(){
 function appearanceStudio(){
  const p=localPrefs();
  return `<section class="card top-spacer appearance-studio"><div class="section-row"><div><h2 class="section-heading">🎨 Appearance Studio</h2><p class="hint">Personal settings stay on this device. Export a theme to save it.</p></div><button class="btn sm secondary" type="button" data-action="export-theme">Export theme</button></div><label class="theme-import-label">Import a theme <input id="tender-theme-import" type="file" accept="application/json,.json"></label><div class="settings-grid">
+ <div class="field"><label>Whole Tender theme</label><select class="input tender-local-pref" name="workspaceTheme">${[['classic','Buffalo Charcoal'],['snow','Snow Light'],['aurora','Aurora Forest'],['rose','Cotton Candy'],['ocean','Deep Ocean'],['sunset','Buffalo Sunset']].map(([v,l])=>`<option value="${v}" ${(p.workspaceTheme||'classic')===v?'selected':''}>${l}</option>`).join('')}</select></div>
  <div class="field"><label>UI density</label><select class="input tender-local-pref" name="density">${[['minimal','Ultra compact'],['compact','Compact'],['cozy','Comfortable']].map(([v,l])=>`<option value="${v}" ${(p.density||'compact')===v?'selected':''}>${l}</option>`).join('')}</select></div>
  <div class="field"><label>Accent gradient</label><select class="input tender-local-pref" name="gradient">${[['sunset','Buffalo sunset'],['violet','Violet neon'],['ocean','Blue shift'],['forest','Emerald'],['rose','Rose dusk']].map(([v,l])=>`<option value="${v}" ${(p.gradient||'sunset')===v?'selected':''}>${l}</option>`).join('')}</select></div>
  <div class="field"><label>Secondary accent color</label><input class="input tender-local-pref" type="color" name="accent2" value="${esc(p.accent2||'#aa68ff')}"></div>
@@ -1448,7 +1457,7 @@ function renderInfoPanel(){
    members=memberships.filter(x=>x.piece_id===piece.id).map(x=>({...pby(x.user_id),_role:x.role}));
  }
  members=members.sort((a,b)=>(a.display_name||'').localeCompare(b.display_name||''));
- const rows=members.slice(0,65).map(p=>`<button type="button" class="info-member info-member-button" data-action="open-profile" data-id="${esc(p.id)}" title="View profile">${avatars(p)}<span class="info-person"><strong>${esc(p.display_name)}</strong><small>@${esc(p.handle||'member')}${p._role?' · '+esc(p._role):''}</small></span></button>`).join('');
+ const rows=members.slice(0,65).map(p=>`<button type="button" class="info-member info-member-button" data-action="open-profile" data-id="${esc(p.id)}" title="View profile"><span class="member-avatar-presence">${avatars(p)}${presenceDotHTML(activePresence(p.id),'',p.id)}</span><span class="info-person"><strong>${esc(p.display_name)}</strong><small>@${esc(p.handle||'member')}${p._role?' · '+esc(p._role):''}</small><small class="tender-info-status" data-info-status-id="${esc(p.id)}">${presenceLabel(activePresence(p.id))}</small></span></button>`).join('');
  box.innerHTML=`<div class="info-head"><span class="info-heading">DETAILS</span><button type="button" class="round-btn" data-action="toggle-info" aria-label="Hide panel">${ico('x','icon-sm')}</button></div><div class="info-overview"><div class="info-emblem">🍗</div><h3>${esc(name)}</h3><p>${esc(description)}</p></div><div class="info-count">Members <strong>${members.length}</strong></div><div class="info-members">${rows||'<p class="hint">No members to display.</p>'}</div><div class="info-resize-hint">↔ Drag the divider to resize</div>`;
 }
 // The dock has real local audio controls and a synced Supabase availability.
@@ -1712,8 +1721,9 @@ function renderSettings(){
   <div class="settings-two-fields"><div class="field"><label>Custom text status</label><input class="input" name="game_status" maxlength="90" value="${esc(my.game_status||'')}" placeholder="What's on your mind?"></div>
   ${extendedReady?`<div class="field"><label>Status emoji</label><input class="input" name="status_emoji" maxlength="12" value="${esc(my.status_emoji||'🍗')}"></div>`:''}</div>
   <div class="settings-actions"><button class="btn" type="submit">Save profile</button></div></form></div>
-  ${visualReady?`<div class="settings-card free-nitro-studio"><h3>✨ Free profile studio</h3><p>Gradients, name fonts and effects — free for every Tender member!</p>
+  ${visualReady?`<div class="settings-card free-nitro-studio"><h3>✨ Profile Studio 2.0 — All FREE</h3><p>Gradients, name fonts and effects — free for every Tender member!</p>
  <form id="profile-style-form" class="settings-fields">
+ ${tender05Ready?`<div class="settings-card-title"><h4>Banner Style</h4><p>Solid color, gradient, or uploaded picture. No banner image required.</p></div><div class="settings-two-fields"><div class="field"><label>Banner type</label><select class="input" name="banner_mode">${[['gradient','Two-color gradient'],['solid','Solid color'],['image','Uploaded image']].map(([v,l])=>`<option value="${v}" ${(my.banner_mode||'gradient')===v?'selected':''}>${l}</option>`).join('')}</select></div><div class="field"><label>Solid banner color</label><input type="color" class="input" name="banner_color" value="${esc(tenderSafeColor(my.banner_color,'#21385d'))}"></div></div>`:''}
  <div class="settings-card-title"><h4>Profile background gradient</h4><p>Colors the entire profile card and banner — separately from your name!</p></div>
  <div class="settings-two-fields">
  <div class="field"><label>Background: start</label><input class="input" type="color" name="profile_gradient_start" value="${esc(tenderSafeColor(my.profile_gradient_start,'#21385d'))}"></div>
@@ -1727,9 +1737,10 @@ function renderSettings(){
  <div class="field"><label>Display name effect</label><select class="input" name="name_effect">${nameEffects.map(effect=>`<option value="${effect}" ${my.name_effect===effect?'selected':''}>${effect[0].toUpperCase()+effect.slice(1)}</option>`).join('')}</select></div>
  <div class="field"><label>Solid / neon text color</label><input class="input" type="color" name="name_color" value="${esc(tenderSafeColor(my.name_color,'#ffffff'))}"></div>
  </div>
- <div class="profile-name-preview">${styledName(my)}</div><button type="submit" class="btn">Apply free profile style</button>
+ <div class="profile-name-preview">${styledName(my)}</div><button type="submit" class="btn">Save profile design</button>
  </form></div>`:'<div class="settings-card"><h3>Free profile gradients & fonts</h3><p>These features activate automatically when Tender 0.4 database setup finishes.</p></div>'}
-<div class="settings-card"><h3>Avatar & banner</h3><p class="hint">Your pictures are visible to other Tender members.</p>
+${tender05Ready?`<div class="settings-card"><div class="section-row"><div><h3>🧩 Profile Widget Board</h3><p class="hint">Add, reorder, and remove your public profile widgets.</p></div><button type="button" class="btn secondary sm" data-action="tender05-widget-editor">Edit widgets</button></div>${tender05WidgetCards(my)}</div>`:''}
+ <div class="settings-card"><h3>Avatar & banner</h3><p class="hint">Your pictures are visible to other Tender members.</p>
   <div class="settings-two-fields"><div class="field"><label>Upload avatar (2 MB — PNG, WEBP, GIF)</label><input type="file" class="input" id="avatar-file" accept="image/png,image/jpeg,image/webp,image/gif"></div>
   <div class="field"><label>Upload banner (3 MB)</label><input class="input" id="banner-file" type="file" accept="image/png,image/jpeg,image/webp"></div></div></div>`;
  if(tab==='chatbox')content=`<div class="settings-section-head"><span class="eyebrow">PERSONALIZE</span><h1>Chat Box & Embeds</h1><p>Choose how your messages feel.</p></div>
@@ -1755,7 +1766,7 @@ function renderSettings(){
   ${deviceNotificationsPanel()}
   ${extendedReady?`<div class="settings-card"><h3>Notification preferences</h3><form id="notification-preferences-form" class="settings-fields"><div class="settings-two-fields"><div class="field"><label>Notify me about</label><select class="input" name="notification_mode">${[['all','All messages & friends'],['mentions','Mentions & friend requests'],['none','Nothing']].map(([v,label])=>`<option value="${v}" ${my.notification_mode===v?'selected':''}>${label}</option>`).join('')}</select></div><div class="field"><label>Sound</label><select class="input" name="notification_sound"><option value="yes" ${my.notification_sound?'selected':''}>Enabled</option><option value="no" ${!my.notification_sound?'selected':''}>Muted</option></select></div><div class="field"><label>Notification sound</label><select class="input" name="notification_tone">${["pop","chime","soft"].map(v=>`<option value="${v}" ${my.notification_tone===v?'selected':''}>${v}</option>`).join('')}</select></div></div><button class="btn" type="submit">Save notification preferences</button></form></div>`:''}`;
  if(tab==='privacy')content=`<div class="settings-section-head"><span class="eyebrow">YOUR SPACE</span><h1>Privacy & Safety</h1><p>Decide how others can interact with you.</p></div>
-  ${extendedReady?`<div class="settings-card"><h3>Privacy options</h3><form id="privacy-preferences-form"><div class="field"><label>Presence</label><select class="input" name="presence_mode">${[['online','Online'],['idle','Idle'],['dnd','Do Not Disturb'],['invisible','Invisible']].map(([v,t])=>`<option value="${v}" ${my.presence_mode===v?'selected':''}>${t}</option>`).join('')}</select></div><button class="btn" type="submit">Save privacy options</button></form></div>
+  ${extendedReady?`<div class="settings-card"><h3>Privacy options</h3><form id="privacy-preferences-form"><div class="field"><label>Presence</label><select class="input" name="presence_mode">${[['online','Online'],['idle','Idle'],['dnd','Do Not Disturb'],['invisible','Invisible']].map(([v,t])=>`<option value="${v}" ${my.presence_mode===v?'selected':''}>${t}</option>`).join('')}</select></div>${tender05Ready?`<div class="field"><label>Who can DM me?</label><select class="input" name="dm_policy">${[['everyone','Anyone — open DMs'],['requests','Anyone — request first'],['friends','Friends only'],['none','Nobody']].map(([v,l])=>`<option value="${v}" ${my.dm_policy===v?'selected':''}>${l}</option>`).join('')}</select><p class="hint">Unaccepted requests remain outside regular chats.</p></div>`:''}<button class="btn" type="submit">Save privacy options</button></form></div>
   <div class="settings-card"><h3>Blocked users</h3><p class="hint">Blocked accounts cannot contact you by DM.</p><button class="btn secondary" data-action="blocked-list">Manage blocked people (${blockedUsers.length})</button></div>`:''}
   <div class="settings-card"><h3>Staying safe</h3><p class="hint">Think carefully before sharing personal details in public Pieces. Moderation tools are still being developed.</p></div>`;
  if(tab==='accessibility')content=`<div class="settings-section-head"><span class="eyebrow">COMFORT</span><h1>Accessibility</h1><p>Adjust readability and motion to suit you.</p></div>
@@ -2367,6 +2378,7 @@ async function submitForm(form){switch(form.id){
    name_style:nameStyles.includes(style)?style:'classic',
    name_effect:nameEffects.includes(effect)?effect:'solid',
    name_color:tenderSafeColor(d.get('name_color'),'#ffffff')};
+  if(tender05Ready){updates.banner_mode=['solid','gradient','image'].includes(d.get('banner_mode'))?d.get('banner_mode'):'gradient';updates.banner_color=tenderSafeColor(d.get('banner_color'),'#21385d')}
   assert(await q('profiles').update(updates).eq('id',user.id));cacheUpdatedProfile(updates);renderMain();renderSidebar();
   toast('Profile style saved for everyone to see — FREE! ✨');
  });
@@ -2396,7 +2408,7 @@ async function submitForm(form){switch(form.id){
     upd.chat_theme=d.get('chat_theme');upd.accent_color=d.get('accent_color');upd.profile_effect=d.get('profile_effect');
    }else if(form.id==='notification-preferences-form'){
     upd.notification_mode=d.get('notification_mode');upd.notification_sound=d.get('notification_sound')==='yes';upd.notification_tone=d.get('notification_tone')||'pop';
-   }else{upd.presence_mode=d.get('presence_mode')}
+   }else{upd.presence_mode=d.get('presence_mode');if(tender05Ready)upd.dm_policy=d.get('dm_policy')||'requests'}
    assert(await q('profiles').update(upd).eq('id',user.id));
    cacheUpdatedProfile(upd);applyTheme();
     if(Object.prototype.hasOwnProperty.call(upd,'presence_mode'))await publishPresence();
@@ -2577,7 +2589,7 @@ document.addEventListener('change',e=>{
    return;
  }
  if(e.target.id==='avatar-file'||e.target.id==='banner-file'){
- const file=e.target.files[0];if(!file)return;safe(async()=>{const isAvatar=e.target.id==='avatar-file';const asset=await uploadPublicAsset(file,isAvatar?'tender-avatars':'tender-banners',isAvatar?2097152:3145728,isAvatar?['image/png','image/jpeg','image/webp','image/gif']:['image/png','image/jpeg','image/webp'],isAvatar?'avatar':'banner');assert(await q('profiles').update(isAvatar?{avatar_url:asset.url}:{banner_url:asset.url}).eq('id',user.id));await refreshData();render();toast(isAvatar?'Profile picture updated!':'Banner updated!')});}
+ const file=e.target.files[0];if(!file)return;safe(async()=>{const isAvatar=e.target.id==='avatar-file';const asset=await uploadPublicAsset(file,isAvatar?'tender-avatars':'tender-banners',isAvatar?2097152:3145728,isAvatar?['image/png','image/jpeg','image/webp','image/gif']:['image/png','image/jpeg','image/webp'],isAvatar?'avatar':'banner');assert(await q('profiles').update(isAvatar?{avatar_url:asset.url}:{banner_url:asset.url,...(tender05Ready?{banner_mode:'image'}:{})}).eq('id',user.id));await refreshData();render();toast(isAvatar?'Profile picture updated!':'Banner updated!')});}
  if(e.target.id==='message-file'){const label=document.getElementById('file-status');if(label)label.textContent=e.target.files?.[0]?`📎 ${e.target.files[0].name}`:''}
  if(e.target.matches('.core-role-change')&&e.target.value){const uid=e.target.dataset.person,role=e.target.value;safe(async()=>{assert(await db.rpc('set_piece_member_role',{pid:state.selected,uid,new_role:role}));await refreshData();toast('Member role updated!')})}
  if(e.target.matches('.role-assign')&&e.target.value){const role=e.target.dataset.role;const userId=e.target.value;safe(async()=>{assert(await q('piece_role_assignments').insert({role_id:role,user_id:userId}));toast('Role assigned!')})}
