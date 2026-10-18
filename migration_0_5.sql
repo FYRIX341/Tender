@@ -468,4 +468,31 @@ DROP TRIGGER IF EXISTS tender_guard_equipped_tag_trigger ON public.profiles;
 CREATE TRIGGER tender_guard_equipped_tag_trigger BEFORE INSERT OR UPDATE OF equipped_piece_id ON public.profiles
  FOR EACH ROW EXECUTE FUNCTION public.tender_guard_equipped_tag();
 
+
+-- Mutual friends shown in a pending DM request without exposing the sender's
+-- complete friendship graph to unrelated Tender users.
+CREATE OR REPLACE FUNCTION public.tender_mutual_friends(other_id uuid)
+RETURNS TABLE(friend_id uuid,display_name text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $tender$
+ WITH mine AS (
+  SELECT CASE WHEN f.requester=auth.uid() THEN f.recipient ELSE f.requester END friend_id
+  FROM public.friendships f
+  WHERE f.status='accepted' AND auth.uid() IN(f.requester,f.recipient)
+ ), theirs AS (
+  SELECT CASE WHEN f.requester=other_id THEN f.recipient ELSE f.requester END friend_id
+  FROM public.friendships f
+  WHERE f.status='accepted' AND other_id IN(f.requester,f.recipient)
+ )
+ SELECT p.id,p.display_name
+ FROM mine JOIN theirs USING(friend_id)
+ JOIN public.profiles p ON p.id=mine.friend_id
+ WHERE other_id<>auth.uid()
+  AND EXISTS(SELECT 1 FROM public.tender_dm_requests req
+    WHERE (req.recipient_id=auth.uid() AND req.sender_id=other_id)
+       OR (req.sender_id=auth.uid() AND req.recipient_id=other_id))
+ ORDER BY p.display_name LIMIT 12;
+$tender$;
+REVOKE ALL ON FUNCTION public.tender_mutual_friends(uuid) FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.tender_mutual_friends(uuid) TO authenticated;
+
 COMMIT;
