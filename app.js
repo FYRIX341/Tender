@@ -2040,6 +2040,149 @@ function tenderStudioPreviewRefresh(){
  target.innerHTML=tenderStudioPreviewHTML(draft);
 }
 
+let tenderInbox={open:false,tab:'unread',filter:'all',ready:false,saves:[],reminders:[],mentions:[],messageMap:new Map()};
+function tenderInboxHost(){
+ let host=document.getElementById('tender-inbox-host');
+ if(!host){host=document.createElement('div');host.id='tender-inbox-host';host.className='tender-inbox-host';host.hidden=true;document.body.append(host)}
+ return host;
+}
+async function tenderInboxLoad(){
+ if(!user||!db)return;
+ const [saves,reminders,mentions]=await Promise.all([
+  q('tender_inbox_saves').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(150),
+  q('tender_inbox_reminders').select('*').eq('user_id',user.id).order('remind_at',{ascending:true}).limit(150),
+  q('tender_inbox_mentions').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(150)
+ ]);
+ tenderInbox.ready=!saves.error&&!reminders.error&&!mentions.error;
+ if(!saves.error)tenderInbox.saves=saves.data||[];
+ if(!reminders.error)tenderInbox.reminders=reminders.data||[];
+ if(!mentions.error)tenderInbox.mentions=mentions.data||[];
+ const ids={message:new Set(),piece_message:new Set()};
+ for(const rec of [...tenderInbox.saves,...tenderInbox.reminders,...tenderInbox.mentions])if(ids[rec.target_type])ids[rec.target_type].add(rec.message_id);
+ if(bookmarks?.length)for(const saved of bookmarks)ids.message.add(saved.message_id);
+ const fetched=await Promise.all(['message','piece_message'].map(async type=>{
+  const entries=[...ids[type]].slice(0,120);if(!entries.length)return {type,rows:[]};
+  const table=type==='message'?'messages':'piece_messages';
+  const result=await q(table).select('*').in('id',entries);
+  if(result.error)console.warn('Tender Inbox message lookup:',result.error);
+  return {type,rows:result.data||[]};
+ }));
+ tenderInbox.messageMap=new Map();
+ for(const {type,rows} of fetched)for(const m of rows)tenderInbox.messageMap.set(type+':'+m.id,m);
+}
+function tenderInboxMessage(rec){
+ return tenderInbox.messageMap.get(rec.target_type+':'+rec.message_id)||null;
+}
+function tenderInboxJumpButton(rec,content,extraClass=''){
+ const type=rec.target_type||'message';
+ return `<button class="tender-inbox-entry ${extraClass}" type="button" data-action="tender-inbox-jump" data-type="${esc(type)}" data-id="${esc(rec.message_id||'')}" data-cid="${esc(rec.conversation_id||'')}" data-pid="${esc(rec.piece_id||'')}" data-channel="${esc(rec.channel_id||'')}">${content}<span class="tender-inbox-arrow" aria-hidden="true">↗</span></button>`;
+}
+function tenderInboxBadgeCount(){
+ return notifications.filter(n=>!n.is_read).length+tenderInbox.mentions.filter(n=>!n.is_read).length+
+  tenderInbox.reminders.filter(r=>!r.notified_at&&new Date(r.remind_at).getTime()<=Date.now()).length;
+}
+function tenderInboxNewsCard(post,isUpdate=false){
+ const kind=String(post.kind||'NEWS');
+ return `<article class="tender-inbox-release">
+   <div class="tender-inbox-release-art tender-inbox-art-${esc(post.art||'content')}"><img src="${esc(post.image||'buffalo.webp')}" alt="Tender update artwork" loading="lazy"><span>tender<span class="tender-inbox-art-dot">.</span></span></div>
+   <div class="tender-inbox-release-copy">${isUpdate?`<span class="tender-inbox-release-type tender-inbox-type-${esc(kind.toLowerCase().replace(/\s+/g,'-'))}">${esc(kind)}</span>`:'<span class="tender-inbox-release-type">TENDER NEWS</span>'}
+    <small>${esc(post.date||'')}</small><h3>${esc(post.title)}</h3><p>${esc(post.desc)}</p>${post.version?`<div class="tender-inbox-release-version">Version ${esc(post.version)}</div>`:''}
+   </div></article>`;
+}
+function tenderInboxContent(){
+ const tab=tenderInbox.tab;
+ if(tab==='updates'){
+  const categories=[['all','All updates'],['MAJOR UPDATE','Major'],['MINOR UPDATE','Minor'],['PATCH','Patch']];
+  const filter=tenderInbox.filter;
+  const updates=window.Tender053?.updates||[];
+  return `<div class="tender-inbox-filter-bar">${categories.map(([id,label])=>`<button type="button" data-action="tender-inbox-filter" data-id="${esc(id)}" class="${filter===id?'selected':''}">${esc(label)}</button>`).join('')}</div>
+   <div class="tender-inbox-release-list">${updates.filter(u=>filter==='all'||u.kind===filter).map(u=>tenderInboxNewsCard(u,true)).join('')||'<p class="tender-inbox-empty">No updates in this category yet.</p>'}</div>`;
+ }
+ if(tab==='news')return `<div class="tender-inbox-release-list">${(window.Tender053?.news||[]).map(item=>tenderInboxNewsCard(item)).join('')}</div>`;
+ if(tab==='unread'){
+  const alerts=notifications.filter(n=>!n.is_read).slice(0,80);
+  const pieceUnreads=channelUnread.filter(x=>Number(x.unread_count)>0).slice(0,25);
+  if(!alerts.length&&!pieceUnreads.length&&!tenderInbox.mentions.some(m=>!m.is_read))return `<div class="tender-inbox-empty-state"><div class="tender-inbox-empty-icon">📥</div><h3>All caught up!</h3><p>No unread messages or mentions. Your inbox is looking crispy. 🍗</p></div>`;
+  const rows=alerts.map(n=>{
+   const actor=n.actor_id?pby(n.actor_id):null;
+   const target={target_type:'message',message_id:'',conversation_id:n.conversation_id||'',piece_id:n.piece_id||'',channel_id:''};
+   const label=n.conversation_id?conversations.find(c=>c.id===n.conversation_id):null;
+   const html=`<span class="tender-inbox-entry-avatar">${actor?avatars(actor):'📩'}</span><span class="tender-inbox-entry-main"><strong>${esc(actor?.display_name||'Tender activity')}</strong><small>${esc(label?namesFor(label):n.kind==='friend'?'Friend request':'Tender message')} · ${relative(n.created_at)}</small><span class="tender-inbox-entry-body">${esc(n.body||'New activity')}</span></span>`;
+   return tenderInboxJumpButton(target,html);
+  });
+  const pieceRows=pieceUnreads.map(rec=>{
+   const channel=pieceChannels.find(c=>c.id===rec.channel_id),piece=pieces.find(p=>p.id===channel?.piece_id);
+   if(!channel||!piece)return '';
+   return tenderInboxJumpButton({target_type:'piece_message',piece_id:piece.id,channel_id:channel.id,message_id:''},
+    `<span class="tender-inbox-entry-avatar">#</span><span class="tender-inbox-entry-main"><strong>${esc(channel.name)}</strong><small>${esc(piece.name)} · Piece channel</small><span class="tender-inbox-entry-body">${Number(rec.unread_count)||0} unread messages</span></span>`);
+  });
+  const mentionRows=tenderInbox.mentions.filter(m=>!m.is_read).map(m=>{
+   const author=pby(m.author_id);
+   const html=`<span class="tender-inbox-entry-avatar">${avatars(author)}</span><span class="tender-inbox-entry-main"><strong>${esc(author.display_name)} mentioned you</strong><small>${relative(m.created_at)}</small><span class="tender-inbox-entry-body">${esc(m.body_excerpt)}</span></span>`;
+   return tenderInboxJumpButton(m,html);
+  });
+  return `<div class="tender-inbox-list">${[...mentionRows,...rows,...pieceRows].join('')}</div>`;
+ }
+ if(tab==='mentions'){
+  if(!tenderInbox.ready)return tenderInboxMigrationNotice();
+  const mentions=tenderInbox.mentions;
+  return mentions.length?`<div class="tender-inbox-list">${mentions.map(m=>{
+    const author=pby(m.author_id),message=tenderInboxMessage(m);
+    const where=m.piece_id?pieces.find(p=>p.id===m.piece_id)?.name:'Private chat';
+    const html=`<span class="tender-inbox-entry-avatar">${avatars(author)}</span><span class="tender-inbox-entry-main"><strong>${esc(author.display_name)} <span class="tender-mentions-at">@</span>mentioned you</strong><small>${esc(where||'Piece')} · ${relative(m.created_at)} ${m.is_read?'':'· New'}</small><span class="tender-inbox-entry-body">${esc(message?.body||m.body_excerpt)}</span></span>`;
+    return tenderInboxJumpButton(m,html);
+   }).join('')}</div>`:'<div class="tender-inbox-empty-state"><div class="tender-inbox-empty-icon">@</div><h3>No mentions yet</h3><p>When someone @mentions your username in a DM, group or Piece, it appears here.</p></div>';
+ }
+ if(tab==='bookmarks'){
+  const combined=tenderInbox.saves.map(x=>x);
+  for(const b of bookmarks)if(!combined.some(x=>x.target_type==='message'&&x.message_id===b.message_id))combined.push({...b,target_type:'message'});
+  return combined.length?`<div class="tender-inbox-list">${combined.map(saved=>{
+   const msg=tenderInboxMessage(saved);if(!msg)return '';
+   const author=pby(msg.author_id);
+   const html=`<span class="tender-inbox-entry-avatar">🔖</span><span class="tender-inbox-entry-main"><strong>${esc(author.display_name)}</strong><small>${relative(msg.created_at)} · Saved message</small><span class="tender-inbox-entry-body">${esc(String(msg.body||'Attachment').slice(0,260))}</span></span>`;
+   return tenderInboxJumpButton({...saved,...(saved.target_type==='message'?{conversation_id:msg.conversation_id}:{piece_id:msg.piece_id,channel_id:msg.channel_id})},html);
+  }).join('')}</div>`:'<div class="tender-inbox-empty-state"><div class="tender-inbox-empty-icon">🔖</div><h3>Nothing bookmarked yet</h3><p>Right-click any message and choose Bookmark Message.</p></div>';
+ }
+ if(tab==='reminders'){
+  if(!tenderInbox.ready)return tenderInboxMigrationNotice();
+  return tenderInbox.reminders.length?`<div class="tender-inbox-list">${tenderInbox.reminders.map(rem=>{
+   const msg=tenderInboxMessage(rem),due=new Date(rem.remind_at).getTime()<=Date.now();
+   const author=pby(msg?.author_id);
+   return `<div class="tender-inbox-reminder">${tenderInboxJumpButton({...rem,...(rem.target_type==='message'?{conversation_id:msg?.conversation_id}:{piece_id:msg?.piece_id,channel_id:msg?.channel_id})},
+    `<span class="tender-inbox-entry-avatar">⏰</span><span class="tender-inbox-entry-main"><strong>${esc(author.display_name||'Message reminder')}</strong><small>${due?'Due':'Scheduled'} · ${esc(new Date(rem.remind_at).toLocaleString())}</small><span class="tender-inbox-entry-body">${esc(String(msg?.body||'Original message').slice(0,230))}</span></span>`,due?'is-due':'')}
+    <button type="button" class="tender-inbox-remove-reminder" data-action="tender-inbox-remove-reminder" data-id="${esc(rem.id)}" title="Dismiss reminder">✕</button></div>`;
+  }).join('')}</div>`:'<div class="tender-inbox-empty-state"><div class="tender-inbox-empty-icon">⏰</div><h3>No reminders</h3><p>Right-click a message to remind yourself later.</p></div>';
+ }
+ return '<p class="tender-inbox-empty">Open a tab to get started.</p>';
+}
+function tenderInboxMigrationNotice(){
+ return '<div class="tender-inbox-empty-state"><div class="tender-inbox-empty-icon">🔐</div><h3>Finish Inbox setup</h3><p>Ask the Tender admin to run migration_0_5_3.sql in the existing Supabase database to enable cross-chat mentions, bookmarks and reminders.</p></div>';
+}
+function tenderInboxRender(){
+ const host=tenderInboxHost();if(!user||!tenderInbox.open){host.hidden=true;host.innerHTML='';return}
+ host.hidden=false;
+ const tabs=[['unread','Unread'],['mentions','Mentions'],['bookmarks','Bookmarks'],['reminders','Reminders'],['updates','Updates'],['news','News']];
+ host.innerHTML=`<div class="tender-inbox-backdrop" data-action="tender-inbox-close"></div><section class="tender-inbox-panel" role="dialog" aria-label="Tender inbox" aria-modal="false">
+  <header class="tender-inbox-head"><div><span class="tender-inbox-symbol">📥</span><h2>Inbox</h2><span class="tender-inbox-counter">${tenderInboxBadgeCount()||''}</span></div>
+   <div class="tender-inbox-head-actions"><button type="button" class="round-btn" data-action="tender-inbox-mark-read" title="Mark all as read" aria-label="Mark all as read">✓✓</button>
+   <button type="button" class="round-btn" data-action="tender-inbox-close" title="Close inbox" aria-label="Close inbox">✕</button></div></header>
+  <nav class="tender-inbox-tabs" aria-label="Inbox categories">${tabs.map(([key,name])=>`<button type="button" data-action="tender-inbox-tab" data-id="${key}" class="${tenderInbox.tab===key?'selected':''}" aria-current="${tenderInbox.tab===key?'page':'false'}">${name}${key==='mentions'&&tenderInbox.mentions.filter(m=>!m.is_read).length?` <span class="tender-inbox-dot">${tenderInbox.mentions.filter(m=>!m.is_read).length}</span>`:''}</button>`).join('')}</nav>
+  <div class="tender-inbox-content" id="tender-inbox-content">${tenderInboxContent()}</div>
+  <footer class="tender-inbox-foot">🍗 TENDER · YOUR ACTIVITY, ALL IN ONE PLACE</footer>
+ </section>`;
+}
+async function tenderInboxOpen(){
+ tenderInbox.open=true;tenderInboxRender();
+ await tenderInboxLoad();if(tenderInbox.open)tenderInboxRender();
+}
+function tenderInboxClose(){
+ tenderInbox.open=false;const host=document.getElementById('tender-inbox-host');if(host){host.hidden=true;host.innerHTML=''}
+}
+function tenderInboxSetTab(tab){
+ if(!['unread','mentions','bookmarks','reminders','updates','news'].includes(tab))return;
+ tenderInbox.tab=tab;tenderInboxRender();
+}
+
 function renderSettings(){
  const sections=[['profile','user','My Profile'],['account','settings','My Account'],['appearance','palette','Appearance'],['chatbox','message-circle','Chat Box'],['privacy','shield','Privacy & Safety'],['accessibility','accessibility','Accessibility']];
  const tab=sections.some(x=>x[0]===state.settingsTab)?state.settingsTab:'profile';
