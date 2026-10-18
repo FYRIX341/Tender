@@ -9,7 +9,7 @@ ALTER TABLE public.profiles
  ADD COLUMN IF NOT EXISTS account_state text NOT NULL DEFAULT 'active'
    CHECK (account_state IN ('active','deactivated','deletion_requested')),
  ADD COLUMN IF NOT EXISTS deletion_requested_at timestamptz,
- ADD COLUMN IF NOT EXISTS banner_mode text NOT NULL DEFAULT 'gradient'
+ ADD COLUMN IF NOT EXISTS banner_mode text NOT NULL DEFAULT 'image'
    CHECK (banner_mode IN ('gradient','solid','image')),
  ADD COLUMN IF NOT EXISTS banner_color text NOT NULL DEFAULT '#21385d',
  ADD COLUMN IF NOT EXISTS profile_layout text NOT NULL DEFAULT 'classic',
