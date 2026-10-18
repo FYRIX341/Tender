@@ -96,7 +96,8 @@ CREATE POLICY "tender inbox mentions read change" ON public.tender_inbox_mention
  USING(user_id=auth.uid() AND public.tender_inbox_can_access(target_type,message_id,auth.uid()))
  WITH CHECK(user_id=auth.uid() AND public.tender_inbox_can_access(target_type,message_id,auth.uid()));
 REVOKE ALL ON public.tender_inbox_mentions FROM PUBLIC,anon,authenticated;
-GRANT SELECT,UPDATE ON public.tender_inbox_mentions TO authenticated;
+GRANT SELECT ON public.tender_inbox_mentions TO authenticated;
+GRANT UPDATE(is_read) ON public.tender_inbox_mentions TO authenticated;
 -- No client-side mention INSERT; only trusted message triggers create them.
 
 CREATE OR REPLACE FUNCTION public.tender_inbox_capture_mentions()
