@@ -68,7 +68,8 @@ DROP POLICY IF EXISTS "tender inbox reminders delete" ON public.tender_inbox_rem
 CREATE POLICY "tender inbox reminders delete" ON public.tender_inbox_reminders FOR DELETE TO authenticated
  USING(user_id=auth.uid());
 REVOKE ALL ON public.tender_inbox_reminders FROM PUBLIC,anon;
-GRANT SELECT,INSERT,UPDATE,DELETE ON public.tender_inbox_reminders TO authenticated;
+GRANT SELECT,INSERT,DELETE ON public.tender_inbox_reminders TO authenticated;
+GRANT UPDATE(notified_at) ON public.tender_inbox_reminders TO authenticated;
 
 CREATE TABLE IF NOT EXISTS public.tender_inbox_mentions(
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
