@@ -1596,3 +1596,7 @@ html[data-tender-workspace="snow"] .profile-presence{color:#2b5a48}
  .tender-widget-editor-row{flex-wrap:wrap}
  .tender-translate-buttons .btn{width:100%}
 }
+
+.tender-sticker-image{display:block;max-width:180px;max-height:140px;object-fit:contain;border-radius:9px}
+.tender-profile-studio-navigation button:focus-visible{outline:2px solid var(--orange)}
+@media(min-width:930px){.settings-content:has(.tender-profile-studio-navigation)>.settings-footer{grid-column:2}}
