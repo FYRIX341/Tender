@@ -71,17 +71,18 @@ function tender05EmbedStudio(){
 }
 function tender05StickerPicker(){
  const helper=window.Tender05;
- modal('🍗 Stickers','Pick a sticker or make an emoji sticker with a custom caption.',`
+ modal('🍗 Stickers','Pick a sticker or upload a custom picture. Your sticker is visible to people in the chat.',`
  <div class="tender-sticker-picker">
  ${helper.stickerPresets.map(s=>`<button type="button" class="tender-sticker-item" data-action="send-sticker" data-emoji="${esc(s.emoji)}" data-name="${esc(s.name)}"><span>${esc(s.emoji)}</span><small>${esc(s.name)}</small></button>`).join('')}
  </div>
  <form id="tender-sticker-form" class="settings-fields">
- <div class="settings-card-title"><h3>Make your own sticker</h3><p>Personalized emoji + caption. Everyone in this chat can see it.</p></div>
+ <div class="settings-card-title"><h3>Make your own sticker</h3><p>Choose an emoji or upload a PNG, WEBP or GIF picture (256 KB max).</p></div>
  <div class="settings-two-fields">
-  <div class="field"><label>Emoji</label><input class="input" name="emoji" required maxlength="12" placeholder="🐔"></div>
+  <div class="field"><label>Emoji (optional if image chosen)</label><input class="input" name="emoji" maxlength="12" placeholder="🐔"></div>
   <div class="field"><label>Caption</label><input class="input" name="name" required maxlength="40" placeholder="Buffalo Moment"></div>
  </div>
- <button class="btn secondary full" type="submit">Send sticker</button>
+ <div class="field"><label>Upload sticker image (PNG, WEBP, GIF — under 256 KB)</label><input class="input" type="file" name="sticker_image" accept="image/png,image/webp,image/gif"></div>
+ <button class="btn secondary full" type="submit">Upload & send sticker</button>
  </form>`);
 }
 function tender05SendPayload(prefix,data){
@@ -1011,7 +1012,7 @@ function mentionedPlainText(raw){
 function messageText(text){
  if(String(text||'').startsWith('[TENDER_EMBED]'))return richEmbedHTML(text);
  if(String(text||'').startsWith('[TENDER_HTML]'))return window.Tender05.renderEmbed(String(text).slice('[TENDER_HTML]'.length));
- if(String(text||'').startsWith('[TENDER_STICKER]'))return window.Tender05.renderSticker(String(text).slice('[TENDER_STICKER]'.length));
+ if(String(text||'').startsWith('[TENDER_STICKER]'))return window.Tender05.renderSticker(String(text).slice('[TENDER_STICKER]'.length),path=>db.storage.from('tender-emoji').getPublicUrl(path).data.publicUrl);
  const raw=String(text||'');
  let result=raw.split(/(https:\/\/[^\s<]+)/gi).map(part=>{
   if(!/^https:\/\//i.test(part))return mentionedPlainText(part);
@@ -2417,11 +2418,17 @@ async function submitForm(form){switch(form.id){
   if(!html.trim())throw Error('Add some HTML first.');
   tender05SendPayload('[TENDER_HTML]',{html:html.slice(0,2600),css:css.slice(0,900)});return;
  }
- case'tender-sticker-form':{
-  const d=new FormData(form),emoji=String(d.get('emoji')||'').trim(),name=String(d.get('name')||'').trim();
-  if(!emoji||!name)throw Error('Choose an emoji and a caption.');
-  tender05SendPayload('[TENDER_STICKER]',{emoji:emoji.slice(0,12),name:name.slice(0,40)});return;
- }
+ case'tender-sticker-form':return safe(async()=>{
+  const d=new FormData(form),emoji=String(d.get('emoji')||'').trim(),name=String(d.get('name')||'').trim(),
+   file=d.get('sticker_image');
+  if(!name||(!emoji&&!file?.size))throw Error('Add a caption and an emoji or picture.');
+  let image_path='';
+  if(file?.size){
+   const uploaded=await uploadPublicAsset(file,'tender-emoji',262144,['image/png','image/webp','image/gif'],'sticker');
+   image_path=uploaded.path;
+  }
+  tender05SendPayload('[TENDER_STICKER]',{emoji:emoji.slice(0,12),name:name.slice(0,40),...(image_path?{image_path}:{})});
+ });
  case'friend-search-form':return safe(async()=>{let h=String(new FormData(form).get('handle')).trim().toLowerCase();let target=assert(await q('profiles').select('id,handle,display_name,avatar_url').eq('handle',h).maybeSingle());let res=document.getElementById('friend-search-results');if(!res)return;if(!target){res.innerHTML='<p class="notice-inline">No user with that username. Double-check their spelling.</p>';return}if(target.id===user.id){res.innerHTML='<p class="notice-inline">That\'s you, Buffalo! 🍗</p>';return}let f=friendships.find(f=>[f.requester,f.recipient].includes(user.id)&&[f.requester,f.recipient].includes(target.id));res.innerHTML=`<div class="friend-row">${profileFace(target)}<div class="friend-data">${profileName(target)}<p>@${esc(target.handle)}</p></div>${f?`<span class="tag">${esc(f.status)}</span>`:`<button class="btn sm" data-action="request-friend" data-id="${target.id}">Add friend</button>`}</div>`;return});
  case'group-form':return safe(async()=>{let data=new FormData(form),name=String(data.get('group_name')).trim(),members=data.getAll('member');let cid=assert(await db.rpc('start_group',{group_name:name,member_ids:members}));closeModal();await refreshData();await goTo('chats',cid);toast('Group created!')});
  case'channel-form':return submitChannelForm(form);
