@@ -1762,3 +1762,185 @@ html[data-tender-workspace="snow"] .profile-presence{color:#2b5a48}
 @media(prefers-reduced-motion:reduce){
  .tender-v3-panel{animation:none}
 }
+
+/* ═════ Tender 0.5.3 — Discord-style Markdown, composer, Inbox ═════ */
+/* Markdown applies only to user-message bodies, not user-controlled HTML. */
+.bubble .tender-md-paragraph{margin:0;white-space:normal;line-height:1.6;overflow-wrap:anywhere}
+.bubble .tender-md-paragraph+.tender-md-paragraph{margin-top:9px}
+.bubble .tender-md-heading{font-family:Outfit,'DM Sans',sans-serif;font-weight:850;line-height:1.18;white-space:normal;overflow-wrap:anywhere;margin:4px 0 9px}
+.bubble h1.tender-md-heading{font-size:clamp(24px,2.3vw,32px);letter-spacing:-.04em}
+.bubble h2.tender-md-heading{font-size:clamp(20px,1.9vw,26px);letter-spacing:-.03em}
+.bubble h3.tender-md-heading{font-size:17px}
+.bubble .tender-md-list{padding:0 0 0 23px;margin:5px 0 8px;white-space:normal;list-style:disc}
+.bubble .tender-md-list li{padding:2px 0;overflow-wrap:anywhere}
+.bubble .tender-md-quote{border-left:3px solid var(--orange2,#ffa264);padding:5px 12px;margin:7px 0;background:#fff1;border-radius:0 5px 5px 0;white-space:normal}
+.bubble .tender-md-code,.bubble .tender-md-pre{background:#12141c;padding:3px 6px;border-radius:5px;color:#ffa884;border:1px solid #6c554a;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.94em}
+.bubble .tender-md-pre{margin:9px 0;padding:12px;overflow-x:auto;white-space:pre;max-width:min(580px,75vw);font-size:12px}
+.bubble .tender-md-pre code{border:0;background:transparent;color:#e3e0ed;padding:0}
+.bubble .tender-md-divider{border:0;border-top:1px solid #6a6b75;margin:9px 0}
+.bubble .tender-md-spoiler{display:inline;background:#111;color:transparent;border-radius:3px;cursor:pointer;user-select:none;padding:1px 3px}
+.bubble .tender-md-spoiler.revealed,.bubble .tender-md-spoiler:focus-visible{background:#494b56;color:#fff;user-select:auto}
+.bubble .tender-md-inline{text-decoration-color:currentColor}
+
+/* Unified composer with plus menu on left and expressive buttons on right. */
+.composer.tender-v53-composer{display:flex;align-items:center;gap:10px;position:relative;min-height:64px;border-radius:13px;padding:7px 10px}
+.tender-v53-attach-wrap{position:relative;display:flex;align-items:center;flex:0 0 auto}
+.tender-v53-plus{font-size:28px!important;font-weight:320!important;line-height:1;width:38px!important;height:38px!important;color:var(--text)!important;border-radius:50%!important}
+.tender-v53-plus:hover{background:var(--surface2)!important}
+.tender-v53-composer textarea{flex:1 1 auto;min-width:55px;padding:9px 3px!important;font-size:14px}
+.tender-v53-composer-right{margin-left:auto;flex:0 0 auto;display:flex;align-items:center;gap:4px}
+.tender-v53-media{font-size:12px!important;color:var(--muted)!important;border-radius:9px!important;font-weight:900;min-width:36px}
+.tender-v53-media:hover{color:var(--text)!important;background:var(--surface2)}
+.tender-v53-composer .send-btn{height:37px;width:37px;border-radius:10px!important;margin-left:6px}
+.tender-v53-plus-menu{position:absolute;z-index:750;left:-8px;bottom:calc(100% + 18px);min-width:238px;max-width:min(300px,85vw);background:#24252c;color:#f3f3f6;border:1px solid #565661;box-shadow:0 15px 48px #0009;border-radius:12px;padding:7px;display:grid;gap:3px}
+.tender-v53-plus-menu[hidden]{display:none!important}
+.tender-v53-plus-menu button{display:flex;align-items:center;gap:11px;width:100%;border:0;background:transparent;border-radius:8px;color:#e9e8f2;text-align:left;font-weight:680;font-size:13px;min-height:39px;padding:9px 12px;cursor:pointer}
+.tender-v53-plus-menu button:hover,.tender-v53-plus-menu button:focus-visible{background:#3b3a48;outline:none}
+.tender-v53-plus-menu button span{flex:1}
+
+/* Main toolbar inbox shortcut. */
+.tender-inbox-top-button{background:color-mix(in srgb,var(--surface) 85%,transparent)!important;position:relative;font-size:20px}
+.tender-inbox-top-button:hover,.tender-inbox-top-button:focus-visible{background:color-mix(in srgb,var(--orange) 20%,var(--surface))!important;outline:2px solid var(--orange)}
+.tender-inbox-top-button .unread-badge{position:absolute;right:-5px;top:-6px;font-size:9px;min-width:16px;padding:2px 4px}
+
+/* In-app Inbox, not another Settings tab. */
+.tender-inbox-host{position:fixed;z-index:2700;inset:0;display:flex;align-items:flex-start;justify-content:flex-end;padding:65px clamp(9px,2vw,30px) 18px;pointer-events:none}
+.tender-inbox-host[hidden]{display:none!important}
+.tender-inbox-backdrop{position:fixed;inset:0;background:#05060825;pointer-events:auto}
+.tender-inbox-panel{position:relative;pointer-events:auto;display:flex;flex-direction:column;width:min(820px,calc(100vw - 22px));max-height:min(85dvh,900px);background:#1d1d21;border:1px solid #48484f;border-radius:14px;box-shadow:0 22px 100px #000b;color:#f5f4f7;overflow:hidden}
+.tender-inbox-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:74px;padding:15px 23px 13px}
+.tender-inbox-head>div:first-child{display:flex;align-items:center;gap:12px}
+.tender-inbox-head h2{font-family:Outfit,'DM Sans',sans-serif;font-size:24px;font-weight:850}
+.tender-inbox-symbol{font-size:24px}
+.tender-inbox-counter{display:grid;place-items:center;color:#f5e7ea;font-size:11px;font-weight:900}
+.tender-inbox-head-actions{display:flex;align-items:center;gap:8px}
+.tender-inbox-head .round-btn{background:#2c2c33!important;color:#e7e5ee!important}
+.tender-inbox-head .round-btn:hover{background:#42424e!important}
+.tender-inbox-tabs{display:flex;align-items:center;overflow-x:auto;scrollbar-width:thin;flex-shrink:0;border-bottom:1px solid #37363d;padding:0 16px}
+.tender-inbox-tabs button{flex:1 0 auto;min-width:80px;min-height:52px;background:transparent;border:0;border-bottom:3px solid transparent;color:#a9a6af;font-size:12px;font-weight:780;white-space:nowrap;padding:12px 11px 9px}
+.tender-inbox-tabs button:hover{color:#fff}
+.tender-inbox-tabs button.selected{border-bottom-color:#8d9fff;color:#b6c4ff}
+.tender-inbox-dot{border-radius:99px;background:#df3849;color:white;font-size:9px;font-weight:900;padding:2px 5px;margin-left:4px}
+.tender-inbox-content{padding:21px 22px;overflow-y:auto;min-height:230px;max-height:calc(85dvh - 190px);scrollbar-width:thin;scrollbar-color:#595961 transparent}
+.tender-inbox-foot{border-top:1px solid #37363d;text-align:center;padding:10px 16px;color:#92909d;font-size:9px;letter-spacing:.12em;font-weight:850}
+.tender-inbox-filter-bar{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-bottom:18px}
+.tender-inbox-filter-bar button{background:#303038;color:#c6c2cc;border:1px solid #41414b;border-radius:50px;padding:7px 13px;font-size:11px;font-weight:720}
+.tender-inbox-filter-bar button:hover{background:#444550}
+.tender-inbox-filter-bar button.selected{background:#3d446b;color:#c7d1ff;border-color:#6477dd}
+.tender-inbox-list{display:grid;gap:9px}
+.tender-inbox-entry{display:flex;align-items:center;gap:14px;width:100%;min-width:0;text-align:left;border:1px solid #393940;background:#25252a;color:#ececf0;padding:14px 17px;border-radius:12px;cursor:pointer;transition:background .12s,border-color .12s}
+.tender-inbox-entry:hover,.tender-inbox-entry:focus-visible{background:#303039;border-color:#73788f;outline:none}
+.tender-inbox-entry-avatar{font-size:24px;display:grid;place-items:center;width:44px;flex:0 0 44px;color:#b6caff}
+.tender-inbox-entry-avatar .avatar{height:39px;width:39px}
+.tender-inbox-entry-main{display:grid;gap:5px;flex:1;min-width:0}
+.tender-inbox-entry-main strong{font-size:14px;white-space:normal;overflow-wrap:anywhere}
+.tender-inbox-entry-main small{font-size:11px;color:#acaab8}
+.tender-inbox-entry-body{font-size:12px;line-height:1.55;color:#c6c3ce;overflow-wrap:anywhere;white-space:pre-wrap;max-height:66px;overflow:hidden}
+.tender-inbox-arrow{color:#a9a9b7;font-size:18px}
+.tender-mentions-at{color:#94a9fa}
+.tender-inbox-reminder{position:relative;display:flex;gap:5px}
+.tender-inbox-reminder .tender-inbox-entry{flex:1;padding-right:38px}
+.tender-inbox-entry.is-due{border-color:#e19964;background:#3d2d2a}
+.tender-inbox-remove-reminder{position:absolute;right:11px;top:12px;color:#b7b4c0;background:#3b3b44;border:none;border-radius:8px;width:27px;height:27px}
+.tender-inbox-remove-reminder:hover{background:#79424e;color:#fff}
+.tender-inbox-empty-state{display:grid;justify-items:center;align-content:center;text-align:center;gap:11px;min-height:315px;padding:30px 15px}
+.tender-inbox-empty-state h3{font-size:22px;line-height:1.2;font-family:Outfit,'DM Sans',sans-serif}
+.tender-inbox-empty-state p{font-size:13px;color:#bbb8c4;line-height:1.6;max-width:390px}
+.tender-inbox-empty-icon{font-size:59px;line-height:1.5;filter:drop-shadow(0 8px 22px #0009)}
+.tender-inbox-empty{color:#c1bbc7;font-size:13px;padding:15px;text-align:center}
+.tender-inbox-release-list{display:grid;gap:13px}
+.tender-inbox-release{background:#24242b;border:1px solid #393942;border-radius:13px;display:grid;grid-template-columns:180px minmax(0,1fr);gap:17px;padding:12px;min-height:180px}
+.tender-inbox-release-art{height:100%;min-height:156px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;position:relative;overflow:hidden;background:linear-gradient(145deg,#5b3452,#242e55)}
+.tender-inbox-release-art:after{content:'';position:absolute;inset:-30%;background:radial-gradient(circle at 20% 30%,#ffcd9b50,transparent 44%);pointer-events:none}
+.tender-inbox-release-art img{position:relative;z-index:1;max-width:65%;max-height:95px;object-fit:contain;filter:drop-shadow(0 10px 16px #0009)}
+.tender-inbox-release-art>span{z-index:1;font-family:Outfit,sans-serif;letter-spacing:-.04em;font-weight:900;font-size:22px;color:#fff}
+.tender-inbox-art-dot{color:#ffa17c}
+.tender-inbox-art-inbox{background:linear-gradient(140deg,#133b65,#7255b2)}
+.tender-inbox-art-profile{background:linear-gradient(130deg,#363a66,#a35872)}
+.tender-inbox-art-repair{background:linear-gradient(145deg,#674523,#bd7049)}
+.tender-inbox-art-content{background:linear-gradient(150deg,#693152,#b26052)}
+.tender-inbox-art-presence{background:linear-gradient(135deg,#155e59,#356ba5)}
+.tender-inbox-art-messages{background:linear-gradient(135deg,#3e4b79,#7255b2)}
+.tender-inbox-release-copy{min-width:0;align-self:center;display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:3px 4px}
+.tender-inbox-release-copy>small{font-size:10px;color:#aba7b6}
+.tender-inbox-release-copy h3{font-size:17px;line-height:1.25;color:#fbf8fd;font-family:Outfit,'DM Sans',sans-serif;overflow-wrap:anywhere}
+.tender-inbox-release-copy p{color:#cfccd9;font-size:12px;line-height:1.55;overflow-wrap:anywhere}
+.tender-inbox-release-type{font-size:9px;color:#bebeff;letter-spacing:.1em;font-weight:900;border-radius:4px;background:#393b58;padding:4px 7px}
+.tender-inbox-type-major-update{background:#663459;color:#ffb9dd}
+.tender-inbox-type-minor-update{background:#30536c;color:#b3e6ff}
+.tender-inbox-type-patch{background:#344d42;color:#aff5d0}
+.tender-inbox-release-version{color:#a3a0af;font-size:11px;font-weight:750}
+.tender-inbox-context{z-index:2900;position:fixed;min-width:210px;background:#27272e;border:1px solid #4c4c58;border-radius:12px;box-shadow:0 11px 35px #000a;padding:5px;display:grid;gap:3px}
+.tender-inbox-context[hidden]{display:none!important}
+.tender-inbox-context button{background:transparent;border:0;text-align:left;padding:11px;border-radius:8px;font-size:12px;font-weight:750;color:#eeeaf5}
+.tender-inbox-context button:hover{background:#44434e}
+.tender-reminder-message{padding:12px;background:var(--surface);color:var(--text);font-size:12px;border-radius:9px;border:1px solid var(--stroke);margin:10px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* Keep the same studio structure, but tone down visual effects and integrate it
+   with the Settings page rather than a disconnected full-screen splash. */
+.settings-content:has(.tender-studio-v3){padding:0!important;background:var(--panel2)!important;max-height:100%;overflow:auto}
+.settings-content:has(.tender-studio-v3)>.settings-footer{padding:15px 24px;border-top:1px solid var(--stroke);font-size:10px}
+.settings-content .tender-studio-v3{background:var(--panel2)!important;color:var(--text);min-height:100%}
+.settings-content .tender-v3-page-title{background:var(--panel2);border-color:var(--stroke);padding:22px 23px 18px}
+.settings-content .tender-v3-kicker{color:var(--muted);letter-spacing:.08em}
+.settings-content .tender-v3-page-title h1{font-size:29px;letter-spacing:-.025em;font-weight:780}
+.settings-content .tender-v3-page-title h1 em{color:inherit;-webkit-text-fill-color:inherit;background:transparent}
+.settings-content .tender-v3-page-title p{color:var(--muted)}
+.settings-content .tender-v3-free-pill{background:var(--surface);color:var(--muted);border-color:var(--stroke)}
+.settings-content .tender-v3-workspace{grid-template-columns:145px minmax(250px,1fr) minmax(265px,.85fr);min-height:540px}
+.settings-content .tender-v3-sidebar{background:var(--panel);border-color:var(--stroke)}
+.settings-content .tender-v3-nav-option.is-active{background:var(--surface2);border-color:var(--stroke);color:var(--text);box-shadow:inset 3px 0 var(--orange)}
+.settings-content .tender-v3-editor{max-height:none;overflow:visible;border-color:var(--stroke);padding:20px clamp(13px,2vw,25px)}
+.settings-content .tender-v3-preview-rail{background:var(--panel);border-color:var(--stroke);max-height:unset;top:0}
+.settings-content .tender-v3-panel-heading>span{color:var(--orange2)}
+.settings-content .tender-v3-panel-heading h2{color:var(--text);font-size:25px}
+.settings-content .tender-v3-panel-heading p{color:var(--muted)}
+.settings-content .tender-v3-panel .input{background:var(--surface)!important;color:var(--text)!important;border-color:var(--stroke)!important}
+.settings-content .tender-v3-panel .input::placeholder{color:var(--muted)!important}
+.settings-content .tender-v3-panel .field label{color:var(--text)}
+.settings-content .tender-v3-page-title,.settings-content .tender-v3-preview-rail,.settings-content .tender-v3-sidebar{box-shadow:none}
+.settings-content .tender-v3-preview-toolbar>span{color:var(--text)}
+.settings-content .tender-v3-preview-toolbar small{color:var(--muted)}
+.settings-content .tender-v3-preview-tip{color:var(--muted)}
+@media(max-width:1480px){
+ .settings-content .tender-v3-workspace{grid-template-columns:130px minmax(260px,1fr)}
+ .settings-content .tender-v3-preview-rail{grid-column:2;display:block;position:relative;max-height:none}
+ .settings-content #tender-v3-preview-live{max-width:450px;margin:0 auto}
+}
+@media(max-width:960px){
+ .settings-layout{grid-template-columns:160px minmax(0,1fr)}
+ .settings-content .tender-v3-workspace{grid-template-columns:1fr}
+ .settings-content .tender-v3-sidebar{flex-direction:row;overflow:auto;border-right:0;border-bottom:1px solid var(--stroke)}
+ .settings-content .tender-v3-side-label,.settings-content .tender-v3-side-bottom{display:none}
+ .settings-content .tender-v3-nav-option{width:max-content;flex:0 0 auto}
+ .settings-content .tender-v3-editor{grid-column:1}
+ .settings-content .tender-v3-preview-rail{grid-column:1}
+}
+@media(max-width:680px){
+ .tender-v53-composer{gap:5px!important;padding:7px!important}
+ .tender-v53-composer-right{gap:0}
+ .tender-v53-media{min-width:29px!important;width:29px!important;font-size:10px!important}
+ .tender-v53-composer .send-btn{width:33px;height:33px;margin-left:2px}
+ .tender-v53-composer textarea{font-size:12px}
+ .tender-inbox-host{padding:48px 6px 6px}
+ .tender-inbox-panel{width:100%;max-height:calc(100dvh - 57px);border-radius:11px}
+ .tender-inbox-head{padding:12px 13px;min-height:63px}
+ .tender-inbox-tabs{padding:0 4px}
+ .tender-inbox-tabs button{min-width:79px;padding:10px 8px;font-size:11px;min-height:45px}
+ .tender-inbox-content{padding:12px;max-height:calc(100dvh - 174px)}
+ .tender-inbox-entry{padding:10px}
+ .tender-inbox-release{grid-template-columns:100px minmax(0,1fr);gap:9px;padding:7px;min-height:120px}
+ .tender-inbox-release-art{min-height:115px}
+ .tender-inbox-release-art>span{font-size:14px}
+ .tender-inbox-release-art img{max-height:65px}
+ .tender-inbox-release-copy h3{font-size:13px}
+ .tender-inbox-release-copy p{font-size:11px}
+ .settings-layout{grid-template-columns:1fr}
+ .settings-navigation{flex-direction:row;align-items:center;gap:4px;padding:9px 12px;overflow-x:auto;flex-shrink:0;border-right:0;border-bottom:1px solid var(--stroke)}
+ .settings-nav-label{display:none}
+ .settings-nav-item{flex:0 0 auto;min-height:35px;padding:8px}
+ .settings-content .tender-v3-page-title{padding:17px 13px}
+ .settings-content .tender-v3-page-title h1{font-size:24px}
+ .settings-content .tender-v3-editor{padding:16px 13px}
+}
+@media(prefers-reduced-motion:reduce){.tender-inbox-entry{transition:none}}
