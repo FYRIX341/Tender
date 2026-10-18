@@ -1063,18 +1063,19 @@ function messageText(text){
  if(String(text||'').startsWith('[TENDER_HTML]'))return window.Tender05.renderEmbed(String(text).slice('[TENDER_HTML]'.length));
  if(String(text||'').startsWith('[TENDER_STICKER]'))return window.Tender05.renderSticker(String(text).slice('[TENDER_STICKER]'.length),path=>db.storage.from('tender-emoji').getPublicUrl(path).data.publicUrl);
  const raw=String(text||'');
- let result=raw.split(/(https:\/\/[^\s<]+)/gi).map(part=>{
-  if(!/^https:\/\//i.test(part))return mentionedPlainText(part);
-  const url=validUrl(part);
-  return url==='#'?esc(part):`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="message-link">${esc(part)}</a>`;
+ const safePlain=part=>String(part).split(/(https:\/\/[^\s<]+)/gi).map(chunk=>{
+  if(!/^https:\/\//i.test(chunk))return mentionedPlainText(chunk);
+  const url=validUrl(chunk);
+  return url==='#'?esc(chunk):`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="message-link">${esc(chunk)}</a>`;
  }).join('');
+ let result=window.Tender053?window.Tender053.format(raw,safePlain):safePlain(raw).replace(/\n/g,'<br>');
  result=result.replace(/:([a-z0-9_]{2,24}):/g,(whole,code)=>{
   const e=customEmojis.find(x=>x.shortcode===code&&(x.piece_id===null||x.piece_id===state.selected));
   return e?`<img class="inline-custom-emoji" src="${esc(db.storage.from('tender-emoji').getPublicUrl(e.image_path).data.publicUrl)}" alt=":${esc(code)}:" title=":${esc(code)}:">`:whole;
  });
  if(/^:[a-z0-9_]{2,24}:$/.test(raw.trim()))result=result.replace('class="inline-custom-emoji"','class="inline-custom-emoji sticker-emoji"');
  const invite=extractPublicPieceInvite(text);
- return result.replace(/\n/g,'<br>')+(invite?pieceInviteCardHTML(invite):'')+richLinkCards(raw);
+ return result+(invite?pieceInviteCardHTML(invite):'')+richLinkCards(raw);
 }
 
 // Safe, automatic outbound link cards. No CORS-unsafe OpenGraph fetch, third-party
