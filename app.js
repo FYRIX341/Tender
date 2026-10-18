@@ -2354,7 +2354,21 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
 
  if(a==='accept-friend')await safe(async()=>{assert(await q('friendships').update({status:'accepted'}).eq('id',id));await refreshData();render();toast('Friend request accepted!')});
  if(a==='remove-friend') {if(!await tenderConfirm('Remove friend?','They will be removed from your friends list. You can add them back later.','Remove friend'))return;await safe(async()=>{let f=friendships.find(f=>f.status==='accepted'&&[f.requester,f.recipient].includes(id));if(f)assert(await q('friendships').delete().eq('id',f.id));await refreshData();await goTo('friends');toast('Friend removed.')})}
- if(a==='join-piece')await safe(async()=>{assert(await db.rpc('join_piece',{pid:state.selected}));await refreshData();await loadActive();render();toast('Joined the Piece! 🍗')});
+ if(a==='join-piece')await safe(async()=>{
+  const pid=state.selected;
+  assert(await db.rpc('join_piece',{pid}));
+  await refreshData();await loadActive();render();
+  const piece=pieces.find(p=>p.id===pid);
+  if(piece){
+   const intro=String(piece.channel_welcome||piece.welcome_text||piece.description||'Welcome to your new corner of Tender!').slice(0,500);
+   const list=channelsFor(pid).slice(0,5);
+   modal('🍗 Welcome to '+piece.name,'Your Piece onboarding',`
+    <div class="tender-welcome-screen"><div class="tender-welcome-emblem">${pieceAvatar(piece)}</div>
+    <h3>${esc(piece.name)}</h3><p>${esc(intro)}</p><strong>EXPLORE YOUR CHANNELS</strong>
+    <div class="tender-welcome-channels">${list.map(c=>`<span>${c.kind==='forum'?'🧵':c.kind==='announcements'?'📣':'#'} ${esc(c.name)}</span>`).join('')}</div>
+    <button type="button" class="btn full" data-action="close-modal">Let's go! 🍗</button></div>`);
+  }else toast('Joined the Piece! 🍗');
+ });
  if(a==='leave-piece'){if(ownPiece(state.selected)||!await tenderConfirm('Leave this Piece?','You will stop seeing its member-only messages unless you rejoin.','Leave Piece'))return;await safe(async()=>{assert(await db.rpc('leave_piece',{pid:state.selected}));await refreshData();render();toast('Left Piece.')})}
  if(a==='react'){const type=el.dataset.type, emoji=el.dataset.emoji;let existing=activeReactions.find(r=>r.target_type===type&&r.target_id===id&&r.author_id===user.id&&r.emoji===emoji);if(existing)activeReactions=activeReactions.filter(r=>r!==existing);else activeReactions.push({id:'pending-'+crypto.randomUUID(),author_id:user.id,target_type:type,target_id:id,emoji});closeModal();renderMain();safe(async()=>{try{if(existing)assert(await q('reactions').delete().eq('id',existing.id));else assert(await q('reactions').insert({author_id:user.id,target_type:type,target_id:id,emoji}));}catch(e){await loadActive();renderMain();throw e}});return}
  if(a==='delete-message'){if(!await tenderConfirm('Delete message?','This message will be removed for everyone who could see it. This cannot be undone.','Delete message'))return;await safe(async()=>{assert(await q(el.dataset.type==='message'?'messages':'piece_messages').delete().eq('id',id));await loadActive();renderMain()})}
