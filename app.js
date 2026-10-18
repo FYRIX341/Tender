@@ -372,7 +372,7 @@ function tender05TagHTML(p){
  if(!tender05Ready||!p?.equipped_piece_id)return '';
  const tag=tender05PieceTags.find(x=>x.piece_id===p.equipped_piece_id);
  if(!tag)return '';
- return `<button class="tender-piece-tag" type="button" style="--tag-color:${esc(tag.color||'#f47735')}" data-action="open-profile-piece" data-id="${esc(tag.piece_id)}" title="View the ${esc(tag.tag)} Piece">${esc(tag.emoji||'🍗')} ${esc(tag.tag)}</button>`;
+ return `<span class="tender-piece-tag" style="--tag-color:${esc(tag.color||'#f47735')}" title="${esc(tag.tag)} Piece Tag">${esc(tag.emoji||'🍗')} ${esc(tag.tag)}</span>`;
 }
 function tender05WidgetCards(person){
  if(!tender05Ready)return '';
@@ -1775,9 +1775,16 @@ function renderSettings(){
  const nav=sections.map(([id,icon,label])=>`<button type="button" class="settings-nav-item ${tab===id?'active':''}" data-action="settings-tab" data-tab="${id}" aria-current="${tab===id?'page':'false'}">${ico(icon,'icon-sm')}<span>${label}</span></button>`).join('');
  let content='';
  if(tab==='profile')content=`
-  <div class="settings-section-head"><span class="eyebrow">PERSONAL PROFILE</span><h1>Make it yours.</h1><p>Give your Tender profile some personality.</p></div>
-  <div class="settings-profile-preview" style="${profileGradientStyle(my)}">${profileBanner(my)}<div class="settings-preview-identity"><div><h2 id="settings-preview-name">${esc(my.display_name)}</h2><p id="settings-preview-meta">@${esc(my.handle)}${my.pronouns?' · '+esc(my.pronouns):''}</p><p id="settings-preview-status" class="settings-preview-status ${my.game_status?'':'is-empty'}">${my.game_status?esc((my.status_emoji||'🍗')+' '+my.game_status):'No custom status yet'}</p></div><button class="btn secondary sm" data-action="open-profile" data-id="${esc(user.id)}">Preview profile</button></div></div>
-  <div class="settings-card"><div class="settings-card-title"><h3>About you</h3><p>Shown when someone clicks your profile picture or name.</p></div>
+  <div class="settings-section-head"><span class="eyebrow">PROFILE STUDIO 2.0 🍗</span><h1>Make it yours.</h1><p>Customize every corner of your Tender identity. All free, with a live preview.</p></div>
+  <nav class="tender-profile-studio-navigation" aria-label="Profile studio sections"><span class="studio-title">YOUR PROFILE</span>
+   <button type="button" data-action="tender05-studio-jump" data-id="tender05-studio-identity">👤 Avatar & identity</button>
+   <button type="button" data-action="tender05-studio-jump" data-id="tender05-studio-colors">🎨 Banner & name colors</button>
+   <button type="button" data-action="tender05-studio-jump" data-id="tender05-studio-widgets">🧩 Profile widgets</button>
+   <button type="button" data-action="tender05-studio-jump" data-id="tender05-studio-media">🖼️ Pictures</button>
+   <button type="button" data-action="tender05-studio-jump" data-id="tender05-studio-preview">👀 Preview</button>
+  </nav>
+  <div id="tender05-studio-preview" class="settings-profile-preview" style="${profileGradientStyle(my)}">${profileBanner(my)}<div class="settings-preview-identity"><div><h2 id="settings-preview-name">${esc(my.display_name)}</h2><p id="settings-preview-meta">@${esc(my.handle)}${my.pronouns?' · '+esc(my.pronouns):''}</p><p id="settings-preview-status" class="settings-preview-status ${my.game_status?'':'is-empty'}">${my.game_status?esc((my.status_emoji||'🍗')+' '+my.game_status):'No custom status yet'}</p></div><button class="btn secondary sm" data-action="open-profile" data-id="${esc(user.id)}">Preview profile</button></div></div>
+  <div class="settings-card" id="tender05-studio-identity"><div class="settings-card-title"><h3>About you</h3><p>Shown when someone clicks your profile picture or name.</p></div>
   <form id="profile-form" class="settings-fields">
   <div class="field"><label>Display name</label><input class="input" name="display_name" maxlength="40" required value="${esc(my.display_name)}"></div>
   <div class="field"><label>Pronouns</label><input class="input" name="pronouns" maxlength="40" value="${esc(my.pronouns||'')}" placeholder="e.g. he/him · she/her · they/them" ${!pronounsReady?'disabled':''}><p class="hint">${pronounsReady?'Optional. Visible on your profile.':'Pronouns will be available once the small 0.3.2 database migration finishes.'}</p></div>
@@ -1785,7 +1792,7 @@ function renderSettings(){
   <div class="settings-two-fields"><div class="field"><label>Custom text status</label><input class="input" name="game_status" maxlength="90" value="${esc(my.game_status||'')}" placeholder="What's on your mind?"></div>
   ${extendedReady?`<div class="field"><label>Status emoji</label><input class="input" name="status_emoji" maxlength="12" value="${esc(my.status_emoji||'🍗')}"></div>`:''}</div>
   <div class="settings-actions"><button class="btn" type="submit">Save profile</button></div></form></div>
-  ${visualReady?`<div class="settings-card free-nitro-studio"><h3>✨ Profile Studio 2.0 — All FREE</h3><p>Gradients, name fonts and effects — free for every Tender member!</p>
+  ${visualReady?`<div class="settings-card free-nitro-studio" id="tender05-studio-colors"><h3>✨ Profile Studio 2.0 — All FREE</h3><p>Gradients, name fonts and effects — free for every Tender member!</p>
  <form id="profile-style-form" class="settings-fields">
  ${tender05Ready?`<div class="settings-card-title"><h4>Banner Style</h4><p>Solid color, gradient, or uploaded picture. No banner image required.</p></div><div class="settings-two-fields"><div class="field"><label>Banner type</label><select class="input" name="banner_mode">${[['gradient','Two-color gradient'],['solid','Solid color'],['image','Uploaded image']].map(([v,l])=>`<option value="${v}" ${(my.banner_mode||'gradient')===v?'selected':''}>${l}</option>`).join('')}</select></div><div class="field"><label>Solid banner color</label><input type="color" class="input" name="banner_color" value="${esc(tenderSafeColor(my.banner_color,'#21385d'))}"></div></div>`:''}
  ${tender05Ready?`<div class="field"><label>Profile Layout</label><select name="profile_layout" class="input">${[['classic','Classic'],['gamer','Gamer'],['minimal','Minimalist'],['cinematic','Cinematic']].map(([v,l])=>`<option value="${v}" ${(my.profile_layout||'classic')===v?'selected':''}>${l}</option>`).join('')}</select></div>`:''}
@@ -1804,8 +1811,8 @@ function renderSettings(){
  </div>
  <div class="profile-name-preview">${styledName(my)}</div><button type="submit" class="btn">Save profile design</button>
  </form></div>`:'<div class="settings-card"><h3>Free profile gradients & fonts</h3><p>These features activate automatically when Tender 0.4 database setup finishes.</p></div>'}
-${tender05Ready?`<div class="settings-card"><div class="section-row"><div><h3>🧩 Profile Widget Board</h3><p class="hint">Add, reorder, and remove your public profile widgets.</p></div><button type="button" class="btn secondary sm" data-action="tender05-widget-editor">Edit widgets</button></div>${tender05WidgetCards(my)}</div>`:''}
- <div class="settings-card"><h3>Avatar & banner</h3><p class="hint">Your pictures are visible to other Tender members.</p>
+${tender05Ready?`<div class="settings-card" id="tender05-studio-widgets"><div class="section-row"><div><h3>🧩 Profile Widget Board</h3><p class="hint">Add, reorder, and remove your public profile widgets.</p></div><button type="button" class="btn secondary sm" data-action="tender05-widget-editor">Edit widgets</button></div>${tender05WidgetCards(my)}</div>`:''}
+ <div class="settings-card" id="tender05-studio-media"><h3>Avatar & banner</h3><p class="hint">Your pictures are visible to other Tender members.</p>
   <div class="settings-two-fields"><div class="field"><label>Upload avatar (2 MB — PNG, WEBP, GIF)</label><input type="file" class="input" id="avatar-file" accept="image/png,image/jpeg,image/webp,image/gif"></div>
   <div class="field"><label>Upload banner (3 MB)</label><input class="input" id="banner-file" type="file" accept="image/png,image/jpeg,image/webp"></div></div></div>`;
  if(tab==='chatbox')content=`<div class="settings-section-head"><span class="eyebrow">PERSONALIZE</span><h1>Chat Box & Embeds</h1><p>Choose how your messages feel.</p></div>
@@ -1837,7 +1844,7 @@ ${tender05Ready?`<div class="settings-card"><div class="section-row"><div><h3>�
  if(tab==='accessibility')content=`<div class="settings-section-head"><span class="eyebrow">COMFORT</span><h1>Accessibility</h1><p>Adjust readability and motion to suit you.</p></div>
   <div class="settings-card"><h3>Readability & motion</h3><p class="hint">Find font size, density, and reduced-motion controls in Appearance Studio.</p><button class="btn secondary" data-action="settings-tab" data-tab="appearance">Open Appearance Studio</button></div>
   <div class="settings-card"><h3>Keyboard shortcuts</h3><div class="shortcut-row"><kbd>Any letter</kbd><span>Start typing into the current chat</span></div><div class="shortcut-row"><kbd>Enter</kbd><span>Send message while composing</span></div><div class="shortcut-row"><kbd>Shift + Enter</kbd><span>New line</span></div><div class="shortcut-row"><kbd>Esc</kbd><span>Close an open dialog</span></div><div class="shortcut-row"><kbd>Tab</kbd><span>Navigate buttons and inputs</span></div></div>`;
- return header('User Settings','Your space, your rules')+`<div class="main-body settings-page"><div class="settings-layout"><nav class="settings-navigation" aria-label="Settings categories"><div class="settings-nav-label">USER SETTINGS</div>${nav}</nav><section class="settings-content">${content}<div class="settings-footer">Tender 0.4.6 · Stay close. Stay crispy. 🍗</div></section></div></div>`;
+ return header('User Settings','Your space, your rules')+`<div class="main-body settings-page"><div class="settings-layout"><nav class="settings-navigation" aria-label="Settings categories"><div class="settings-nav-label">USER SETTINGS</div>${nav}</nav><section class="settings-content">${content}<div class="settings-footer">Tender 0.5 ALPHA · Stay close. Stay crispy. 🍗</div></section></div></div>`;
 }
 
 let activeLoadVersion=0;
@@ -2317,6 +2324,7 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='tender05-thread-chooser'){await safe(()=>tender05ThreadChooser(id,el.dataset.type));return}
  if(a==='tender05-thread-new'){tender05ThreadCreateModal(id,el.dataset.type);return}
  if(a==='tender05-thread-open'){await safe(()=>tender05ThreadView(id));return}
+ if(a==='tender05-studio-jump'){document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'});return}
  if(a==='tender05-widget-editor'){tender05WidgetModal();return}
  if(a==='tender05-widget-move'||a==='tender05-widget-remove'){await safe(()=>tender05UpdateWidget(a.endsWith('move')?'move':'remove',Number(el.dataset.index),Number(el.dataset.dir)||0));return}
  if(a==='tender05-guestbook'){await safe(()=>tender05GuestbookModal(id));return}
