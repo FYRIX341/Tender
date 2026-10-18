@@ -37,6 +37,62 @@ const ICONS = {
 const ico=(name,extra='')=>`<span class="ico ${extra}" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||ICONS.info}</svg></span>`;
 const esc=(value='')=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const fmt = iso => {try{return new Date(iso).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});}catch{return ''}};
+// Tender 0.4.5 — daily chat separators using browser-local calendar days.
+function chatDayKey(input){
+ const value=new Date(input);
+ if(Number.isNaN(value.getTime()))return 'unknown';
+ return [String(value.getFullYear()),String(value.getMonth()+1).padStart(2,'0'),String(value.getDate()).padStart(2,'0')].join('-');
+}
+function chatDayLabel(input,now=new Date()){
+ const value=new Date(input);
+ if(Number.isNaN(value.getTime()))return 'Unknown date';
+ const absolute=new Intl.DateTimeFormat('en-US',{month:'long',day:'numeric',year:'numeric'}).format(value);
+ const today=new Date(now);
+ const yesterday=new Date(today.getFullYear(),today.getMonth(),today.getDate()-1);
+ const key=chatDayKey(value);
+ if(key===chatDayKey(today))return 'Today, '+absolute;
+ if(key===chatDayKey(yesterday))return 'Yesterday, '+absolute;
+ return absolute;
+}
+function chatStreamEntries(messages){
+ const sorted=[...messages].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+ const entries=[];
+ let lastDay=null;
+ for(const row of sorted){
+  const day=chatDayKey(row.created_at);
+  if(day!==lastDay){
+   entries.push({kind:'day',key:'day:'+day,day,date:row.created_at});
+   lastDay=day;
+  }
+  entries.push({kind:'message',key:'message:'+String(row.id),row});
+ }
+ return entries;
+}
+function chatDaySeparatorHTML(entry){
+ const label=chatDayLabel(entry.date);
+ return `<div class="chat-day-separator" data-chat-day="${esc(entry.day)}" role="separator" aria-label="${esc(label)}"><span>${esc(label)}</span></div>`;
+}
+function chatStreamHTML(messages,type){
+ return chatStreamEntries(messages).map(entry=>entry.kind==='day'?chatDaySeparatorHTML(entry):messageHTML(entry.row,type)).join('');
+}
+let chatDayRefreshTimer=null;
+function refreshVisibleChatDays(){
+ document.querySelectorAll('#main .chat-day-separator[data-chat-day]').forEach(el=>{
+  const date=new Date(el.dataset.chatDay+'T12:00:00');
+  const label=chatDayLabel(date);
+  el.querySelector('span')?.replaceChildren(document.createTextNode(label));
+  el.setAttribute('aria-label',label);
+  delete el.__tenderRender;
+ });
+}
+function scheduleChatDayRefresh(){
+ clearTimeout(chatDayRefreshTimer);
+ if(!user)return;
+ const now=new Date();
+ const next=new Date(now.getFullYear(),now.getMonth(),now.getDate()+1,0,0,1);
+ chatDayRefreshTimer=setTimeout(()=>{refreshVisibleChatDays();scheduleChatDayRefresh()},Math.max(1000,next.getTime()-now.getTime()));
+}
+
 const relative = iso => {let d=(Date.now()-new Date(iso).getTime())/1000;return d<60?'just now':d<3600?Math.floor(d/60)+'m ago':d<86400?Math.floor(d/3600)+'h ago':new Date(iso).toLocaleDateString();};
 const validUrl = url => {try{let u=new URL(url,location.origin);return ['http:','https:'].includes(u.protocol)?u.href:'#';}catch{return '#'}};
 const tenderSafeColor=(value,fallback='#f47735')=>/^#[0-9a-f]{6}$/i.test(String(value||''))?value:fallback;
@@ -835,21 +891,30 @@ function syncActiveStream(scrollOnce=false){
  const list=document.querySelector('#main .chat-scroll');if(!list)return;
  if(!(state.area==='chats'||(['pieces','discover'].includes(state.area)&&state.pieceTab==='chat')))return;
  const near=list.scrollHeight-list.scrollTop-list.clientHeight<96,top=list.scrollTop;
- const kind=state.area==='chats'?'message':'piece_message';
- const old=new Map([...list.querySelectorAll(':scope > [data-message-id]')].map(el=>[el.dataset.messageId,el]));
- const rows=[...new Map(activeMessages.map(r=>[String(r.id),r])).values()].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
- const hasNewMessage=rows.some(r=>!old.has(String(r.id)));
- const ids=new Set(rows.map(r=>String(r.id)));
- for(const [id,el] of old)if(!ids.has(id))el.remove();
+ const type=state.area==='chats'?'message':'piece_message';
+ // Keep date separators in the keyed DOM diff, so live messages never break order.
+ const keyForElement=el=>el.hasAttribute('data-message-id')?'message:'+el.dataset.messageId:el.hasAttribute('data-chat-day')?'day:'+el.dataset.chatDay:null;
+ const old=new Map([...list.children].map(el=>[keyForElement(el),el]).filter(([key])=>key!==null));
+ const entries=chatStreamEntries(activeMessages);
+ const newKeys=new Set(entries.map(e=>e.key));
+ const hasNewMessage=entries.some(e=>e.kind==='message'&&!old.has(e.key));
+ for(const [key,el] of old)if(!newKeys.has(key))el.remove();
  list.querySelector('.chat-empty,.notice-inline')?.remove();
- const t=document.createElement('template');
- if(!rows.length&&list.children.length===0)list.innerHTML='<div class="chat-empty"><img src="buffalo.webp" alt="Buffalo"><h3>No messages yet</h3><p class="hint">Say hello! 🍗</p></div>';
- for(const [i,row] of rows.entries()){
-  const html=messageHTML(row,kind);let node=old.get(String(row.id));
-  if(!node){t.innerHTML=html;node=t.content.firstElementChild}
-  else if(node.__tenderRender!==html){t.innerHTML=html;const fresh=t.content.firstElementChild;node.replaceWith(fresh);node=fresh}
-  if(node)node.__tenderRender=html
-  if(node&&list.children[i]!==node)list.insertBefore(node,list.children[i]||null);
+ const template=document.createElement('template');
+ if(!entries.length){
+  if(!list.children.length)list.innerHTML='<div class="chat-empty"><img src="buffalo.webp" alt="Buffalo"><h3>No messages yet</h3><p class="hint">Say hello! 🍗</p></div>';
+ }else{
+  for(const [i,entry] of entries.entries()){
+   const html=entry.kind==='day'?chatDaySeparatorHTML(entry):messageHTML(entry.row,type);
+   let node=old.get(entry.key);
+   if(!node){template.innerHTML=html;node=template.content.firstElementChild}
+   else if(node.__tenderRender!==html){
+    template.innerHTML=html;const updated=template.content.firstElementChild;
+    node.replaceWith(updated);node=updated;
+   }
+   if(node)node.__tenderRender=html;
+   if(node&&list.children[i]!==node)list.insertBefore(node,list.children[i]||null);
+  }
  }
  const pill=document.getElementById('chat-jump-new');
  if(scrollOnce||near){list.scrollTo({top:list.scrollHeight,behavior:scrollOnce?'smooth':'auto'});if(pill)pill.hidden=true}
@@ -1062,13 +1127,13 @@ async function boot(){
    if(user)await initialize();else renderAuth();
  }catch(e){ROOT.innerHTML=empty('Could not reach Tender','Check the public Supabase URL and key in config.js.');toast(e.message||'Could not connect.',true)}
 }
-function reset(){stopCallInbox();notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;channelBackendError='';state.channelId=null;presenceRoster.clear();presenceConnectionReady=false;if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
+function reset(){clearTimeout(chatDayRefreshTimer);chatDayRefreshTimer=null;stopCallInbox();notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;channelBackendError='';state.channelId=null;presenceRoster.clear();presenceConnectionReady=false;if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
 function renderSetup(){ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Your friends. Your spaces. Your flavor.</p></div><div class="login-panel"><div class="eyebrow">Tender setup</div><h2>Almost ready to connect.</h2><p>This website needs a free online Supabase project for accounts, messages and Pieces. It's not a local chat simulator.</p><div class="setup-box"><h3>🍗 Connect the shared database</h3><p>1. Create a free project at <a href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Supabase</a>.<br>2. Run <strong>schema.sql</strong> in the project's SQL editor.<br>3. Copy its Project URL and publishable (anon) key into <strong>config.js</strong> on GitHub.<br>4. Refresh this website. Everyone will connect to the same database.</p><details><summary>Important security information</summary>Only use the public publishable/anon key. Never put a service_role key or other secret in GitHub. Set URL configuration for email confirmation in Supabase Auth.</details></div><p class="hint">Your Tender HTML interface is deployed separately from the database. A GitHub Pages link alone cannot deliver live messaging.</p><a class="btn" href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Connect Supabase ${ico('external')}</a></div></div>`}
 function renderAuth(){state.mobileDetail=false;ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Stay close. Stay crispy. 🍗</p></div><div class="login-panel"><div class="eyebrow">Welcome to Tender</div><h2>${state.loginMode==='login'?'Good to have you back.':'Your people are waiting.'}</h2><p>${state.loginMode==='login'?'Sign in to catch up with your people.':'Create your account to join the conversation.'}</p><div class="login-tabs"><button class="${state.loginMode==='login'?'selected':''}" data-action="auth-tab" data-tab="login">Log in</button><button class="${state.loginMode==='signup'?'selected':''}" data-action="auth-tab" data-tab="signup">Sign up</button></div><form id="auth-form">${state.loginMode==='signup'?`<div class="field"><label for="handle">Username (3–20 letters, numbers, underscores)</label><input class="input" id="handle" name="handle" minlength="3" maxlength="20" pattern="[a-zA-Z0-9_]{3,20}" required autocomplete="username" placeholder="buffalofan"></div><div class="field"><label for="display">Display name</label><input class="input" id="display" name="display_name" maxlength="40" required placeholder="Your name"></div>`:''}<div class="field"><label for="email">Email address</label><input class="input" id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com"></div><div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" minlength="8" autocomplete="${state.loginMode==='login'?'current-password':'new-password'}" required placeholder="At least 8 characters"></div><button class="btn full top-spacer" type="submit">${state.loginMode==='login'?'Log in':'Create account'} ${ico('back')}</button></form><p class="hint top-spacer">Tender is an early beta. Please don't post private information in public Pieces.</p></div></div>`}
 async function authSubmit(form){const data=new FormData(form), email=String(data.get('email')).trim(), password=String(data.get('password'));
  await safe(async()=>{if(state.loginMode==='signup'){const handle=String(data.get('handle')).trim().toLowerCase(),display_name=String(data.get('display_name')).trim();if(!/^[a-z0-9_]{3,20}$/.test(handle))throw Error('Username needs 3–20 letters, numbers or underscores.');const r=await db.auth.signUp({email,password,options:{data:{handle,display_name},emailRedirectTo:location.origin+location.pathname}});assert(r);toast(r.data.session?'Welcome to Tender!':'Check your inbox to confirm your email, then sign in.');if(!r.data.session){state.loginMode='login';renderAuth()}}
  else{assert(await db.auth.signInWithPassword({email,password}));toast('Welcome back! 🍗')}})}
-async function initialize(){ROOT.innerHTML='<div class="loading-screen"><img src="buffalo.webp" alt="Buffalo"><h1>tender<span>.</span></h1><p>Loading your messages...</p></div>';try{await refreshData();applyTheme();render();subscribe();startPresence().catch(console.warn);checkCallReady().catch(console.warn);if(extendedReady)renderNavBadges();
+async function initialize(){ROOT.innerHTML='<div class="loading-screen"><img src="buffalo.webp" alt="Buffalo"><h1>tender<span>.</span></h1><p>Loading your messages...</p></div>';try{await refreshData();applyTheme();render();scheduleChatDayRefresh();subscribe();startPresence().catch(console.warn);checkCallReady().catch(console.warn);if(extendedReady)renderNavBadges();
   const params=new URLSearchParams(window.location.search);
    const targetChat=params.get('chat');
    if(targetChat&&conversations.some(c=>c.id===targetChat))await goTo('chats',targetChat);
@@ -1325,11 +1390,11 @@ function renderMain(){const m=document.getElementById('main');if(!m)return;
  syncDeafenedAudio();
  renderInfoPanel()
 }
-function renderChat(c){const title=namesFor(c),otherId=c.kind!=='group'?(c.conversation_members||[]).find(x=>x.user_id!==user.id)?.user_id:null;return header(title,c.kind==='group'?`${(c.conversation_members||[]).length} members`:'Private conversation',`${otherId?`<button class="round-btn" data-action="open-profile" data-id="${esc(otherId)}" title="View profile" aria-label="View profile">${ico('users')}</button>`:''}${otherId?`<button class="round-btn" data-action="call-start-voice" data-id="${esc(c.id)}" title="Start voice call" aria-label="Start voice call">📞</button><button class="round-btn" data-action="call-start-video" data-id="${esc(c.id)}" title="Start video call" aria-label="Start video call">📹</button>`:''}<button class="round-btn" data-action="search" title="Search messages">${ico('search')}</button><button class="round-btn" data-action="chat-info" title="Conversation info">${ico('info')}</button><button class="round-btn" data-action="toggle-info" title="Toggle member panel">${ico('users')}</button><button class="round-btn" data-action="room-appearance" title="Customize this chat">🎨</button>`)+`<div class="main-body"><div class="chat-history">${pinnedHTML()}<div class="chat-scroll" id="chat-scroll">${activeMessages.length?activeMessages.map(x=>messageHTML(x,'message')).join(''):`<div class="chat-empty"><img src="buffalo.webp" alt="Buffalo"><h3>Start the conversation</h3><p class="hint">Say hi to ${esc(title)}!</p></div>`}</div><button type="button" class="chat-jump-new" id="chat-jump-new" data-action="jump-latest" hidden>↓ New messages · Jump to latest</button>${composer('chat',`Message ${title}`)}</div></div>`}
+function renderChat(c){const title=namesFor(c),otherId=c.kind!=='group'?(c.conversation_members||[]).find(x=>x.user_id!==user.id)?.user_id:null;return header(title,c.kind==='group'?`${(c.conversation_members||[]).length} members`:'Private conversation',`${otherId?`<button class="round-btn" data-action="open-profile" data-id="${esc(otherId)}" title="View profile" aria-label="View profile">${ico('users')}</button>`:''}${otherId?`<button class="round-btn" data-action="call-start-voice" data-id="${esc(c.id)}" title="Start voice call" aria-label="Start voice call">📞</button><button class="round-btn" data-action="call-start-video" data-id="${esc(c.id)}" title="Start video call" aria-label="Start video call">📹</button>`:''}<button class="round-btn" data-action="search" title="Search messages">${ico('search')}</button><button class="round-btn" data-action="chat-info" title="Conversation info">${ico('info')}</button><button class="round-btn" data-action="toggle-info" title="Toggle member panel">${ico('users')}</button><button class="round-btn" data-action="room-appearance" title="Customize this chat">🎨</button>`)+`<div class="main-body"><div class="chat-history">${pinnedHTML()}<div class="chat-scroll" id="chat-scroll">${activeMessages.length?chatStreamHTML(activeMessages,'message'):`<div class="chat-empty"><img src="buffalo.webp" alt="Buffalo"><h3>Start the conversation</h3><p class="hint">Say hi to ${esc(title)}!</p></div>`}</div><button type="button" class="chat-jump-new" id="chat-jump-new" data-action="jump-latest" hidden>↓ New messages · Jump to latest</button>${composer('chat',`Message ${title}`)}</div></div>`}
 function messageHTML(row,target_type='message'){
  const p=pby(row.author_id),mine=row.author_id===user.id;
   const previous=activeMessages[activeMessages.findIndex(x=>x.id===row.id)-1];
-  const grouped=!!(previous&&previous.author_id===row.author_id&&Math.abs(new Date(row.created_at)-new Date(previous.created_at))<300000&&!row.reply_to&&!previous.reply_to);
+  const grouped=!!(previous&&previous.author_id===row.author_id&&chatDayKey(previous.created_at)===chatDayKey(row.created_at)&&Math.abs(new Date(row.created_at)-new Date(previous.created_at))<300000&&!row.reply_to&&!previous.reply_to);
  const reacts=activeReactions.filter(r=>r.target_type===target_type&&r.target_id===row.id);const emojiMap={};reacts.forEach(r=>(emojiMap[r.emoji] ||= []).push(r));
  const reply=row.reply_to?activeMessages.find(x=>x.id===row.reply_to):null;
  const replyHTML=row.reply_to?`<button type="button" class="reply-quote reply-ref" data-action="jump-reply" data-id="${esc(row.reply_to)}" title="Jump to replied message">↳ ${reply?`<strong>${esc(pby(reply.author_id).display_name)}</strong> ${esc((reply.body||'Attachment').slice(0,130))}`:'Original message is outside the loaded history'}</button>`:'';
@@ -1389,7 +1454,7 @@ function renderFriend(p){
 function renderPieceList(discover){const list=pieces.filter(p=>discover?p.is_public:inPiece(p.id));return header(discover?'Discover Pieces':'Your Pieces',discover?'Explore communities made by people':'All your favorite corners of Tender',`<button class="btn sm" data-action="new-piece">${ico('plus')} New Piece</button>`)+`<div class="main-body"><div class="content-pad"><div class="section-row"><div><h1 class="page-title">${discover?'Find your people 🔥':'Your Pieces 🧩'}</h1><p class="page-subtitle">Each Piece has a chat, forum, and gallery. No servers. Just shared interests.</p></div></div><div class="grid grid-3">${list.map(p=>`<article class="card piece-grid-card" tabindex="0" role="button" data-action="open-piece" data-id="${p.id}"><div class="piece-card-banner" style="background:${esc(p.color)}33">${pieceAvatar(p,'piece-icon-card')}</div><div class="piece-card-inner"><h3>${esc(p.name)}</h3><p>${esc(p.description||'A Tender community')}</p><div class="compact-stats"><span class="tag">${p.is_public?'Public':'Private'}</span></div></div></article>`).join('')}</div>${list.length?'':`<div class="notice-inline top-spacer">${discover?'No public Pieces yet. Create the first one!':'You have not joined any Pieces yet. Head to Discover to browse.'}</div>`}</div></div>`}
 function renderPiece(piece){let joined=inPiece(piece.id),own=ownPiece(piece.id);let buttons=`${joined?`<button class="btn sm secondary" data-action="leave-piece" ${own?'disabled title="Owner cannot leave"':''}>${own?'Owner':'Leave'}</button>`:`${piece.is_public?`<button class="btn sm" data-action="join-piece">Join Piece</button>`:''}`}${own?`<button class="round-btn" title="Edit Piece" data-action="edit-piece">${ico('settings')}</button><button class="round-btn" title="Custom roles" data-action="piece-roles">👑</button>`:''}`;
  buttons+=`${piece.is_public?'<button class="round-btn" data-action="copy-piece-link" title="Share Piece invitation card" aria-label="Share Piece invitation card">🔗</button>':''}<button class="round-btn" data-action="toggle-info" title="Members">👥</button><button class="round-btn" data-action="room-appearance" title="Customize this Piece">🎨</button>`;
-  let content='';if(state.pieceTab==='chat') content=`<div class="chat-history piece-chat-history"><div class="chat-scroll">${activeMessages.length?activeMessages.map(m=>messageHTML(m,'piece_message')).join(''):`<div class="chat-empty"><img src="buffalo.webp" alt="Buffalo"><h3>${joined?'No messages yet':'Join this Piece to chat'}</h3><p>${joined?'Say hello to your Piece! 🍗':'Become a member to participate in community chat.'}</p>${!joined&&piece.is_public?'<button type="button" class="btn" data-action="join-piece">Join Piece</button>':''}</div>`}</div><button type="button" class="chat-jump-new" id="chat-jump-new" data-action="jump-latest" hidden>↓ New messages · Jump to latest</button>${composer('piece','Message #'+(selectedChannel(piece.id)?.name||'general'))}</div>`;
+  let content='';if(state.pieceTab==='chat') content=`<div class="chat-history piece-chat-history"><div class="chat-scroll">${activeMessages.length?chatStreamHTML(activeMessages,'piece_message'):`<div class="chat-empty"><img src="buffalo.webp" alt="Buffalo"><h3>${joined?'No messages yet':'Join this Piece to chat'}</h3><p>${joined?'Say hello to your Piece! 🍗':'Become a member to participate in community chat.'}</p>${!joined&&piece.is_public?'<button type="button" class="btn" data-action="join-piece">Join Piece</button>':''}</div>`}</div><button type="button" class="chat-jump-new" id="chat-jump-new" data-action="jump-latest" hidden>↓ New messages · Jump to latest</button>${composer('piece','Message #'+(selectedChannel(piece.id)?.name||'general'))}</div>`;
  if(state.pieceTab==='forum') content=`<div class="section-row"><h2 class="section-heading">Discussions</h2>${joined?`<button class="btn sm" data-action="new-post">${ico('plus')} New post</button>`:''}</div><div class="grid">${activePosts.map(post=>`<article class="post-card" role="button" tabindex="0" data-action="open-post" data-id="${post.id}"><div class="post-meta">${profileName(pby(post.author_id))} · ${relative(post.created_at)}</div><h3>${post.pinned?'📌 ':''}${esc(post.title)}</h3>${post.tags?.length?`<div class="tagline">${post.tags.map(t=>`<span class="tag">#${esc(t)}</span>`).join('')}</div>`:''}<p class="post-body">${esc(post.body.slice(0,240))}${post.body.length>240?'...':''}</p><div class="post-footer">${ico('chat','icon-sm')} ${post.locked?'🔒 Locked':'Read discussion'} ${(own||memberships.some(m=>m.piece_id===post.piece_id&&m.user_id===user.id&&m.role==='moderator'))&&extendedReady?`<button class="emoji-inline" data-action="pin-post" data-id="${post.id}" title="Pin">📌</button><button class="emoji-inline" data-action="lock-post" data-id="${post.id}" title="Lock">🔒</button>`:''}${post.author_id===user.id||own?`<button class="emoji-inline" data-action="delete-post" data-id="${post.id}" title="Delete post">${ico('trash','icon-sm')}</button>`:''}</div></article>`).join('')||'<div class="notice-inline">No discussions yet. Be the first to post.</div>'}</div>`;
  if(state.pieceTab==='gallery')content=`<div class="section-row"><h2 class="section-heading">Gallery</h2>${joined&&piece.is_public?`<button class="btn sm" data-action="new-gallery">${ico('plus')} Upload picture</button>`:''}</div><div class="gallery-grid">${activeGallery.map(photo=>`<article class="gallery-card"><img src="${esc(galleryUrl(photo.image_path))}" alt="${esc(photo.caption||'Community image')}" data-action="enlarge" data-src="${esc(galleryUrl(photo.image_path))}"><div class="gallery-info"><p>${esc(photo.caption)}</p><div class="post-meta">${profileName(pby(photo.author_id))} · ${relative(photo.created_at)}</div><div class="bubble-actions"><button class="emoji-inline" data-action="reaction-menu" data-type="gallery" data-id="${photo.id}">${ico('smile')}</button>${own||photo.author_id===user.id?`<button class="emoji-inline" data-action="delete-gallery" data-id="${photo.id}" data-path="${esc(photo.image_path)}">${ico('trash')}</button>`:''}</div></div></article>`).join('')||'<div class="notice-inline">The gallery is waiting for its first photo.</div>'}</div>`;
   if(state.pieceTab==='events')content=`<div class="section-row"><h2 class="section-heading">Events</h2>${(own||memberships.some(m=>m.piece_id===piece.id&&m.user_id===user.id&&m.role==='moderator'))?`<button class="btn sm" data-action="new-event">+ Create event</button>`:''}</div><div class="grid">${pieceEvents.filter(e=>e.piece_id===piece.id).map(e=>`<article class="post-card"><div class="post-meta">${new Date(e.starts_at).toLocaleString()}</div><h3>📅 ${esc(e.title)}</h3><p>${esc(e.description)}</p></article>`).join('')||'<p class="notice-inline">No upcoming events yet.</p>'}</div>`;
@@ -2186,6 +2251,7 @@ document.addEventListener('change',e=>{
 });
 let dragDepth=0;
 document.addEventListener('play',e=>{if(audioPrefs().deafened&&e.target?.matches?.('audio,video'))syncDeafenedAudio()},true);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshVisibleChatDays()});
 document.addEventListener('scroll',e=>{if(!e.target?.matches?.('.chat-scroll'))return;const pill=document.getElementById('chat-jump-new');if(pill&&e.target.scrollHeight-e.target.scrollTop-e.target.clientHeight<55)pill.hidden=true},true);
 document.addEventListener('dragover',e=>{if(e.dataTransfer?.types?.includes('Files')&&document.querySelector('#composer-form')){e.preventDefault();document.body.classList.add('dragover')}});
 document.addEventListener('dragleave',e=>{if(e.relatedTarget===null)document.body.classList.remove('dragover')});
