@@ -1729,7 +1729,7 @@ function renderSidebar(){
  syncDeafenedAudio();
 }
 
-function header(title,sub='',buttons=''){return `<header class="main-top"><div class="head-left"><button class="round-btn mobile-back" data-action="go-back" title="Back">${ico('back')}</button><div class="title-area"><h2>${esc(title)}</h2><p>${esc(sub)}</p></div></div><div class="head-actions">${buttons}</div></header>`}
+function header(title,sub='',buttons=''){return `<header class="main-top"><div class="head-left"><button class="round-btn mobile-back" data-action="go-back" title="Back">${ico('back')}</button><div class="title-area"><h2>${esc(title)}</h2><p>${esc(sub)}</p></div></div><div class="head-actions">${buttons}<button type="button" class="round-btn tender-inbox-top-button" data-action="tender-inbox-toggle" aria-label="Open Tender Inbox" title="Inbox">📥${unreadAll()?renderBadge(unreadAll()):''}</button></div></header>`}
 // Tender 0.3.4: background updates must not erase in-progress settings edits.
 // Capture only within the SAME section; tab changes are deliberate navigation.
 function captureSettingsView(main){
@@ -1848,7 +1848,31 @@ function tenderDraftKey(area=state.area,selected=state.selected,tab=state.pieceT
  if(['pieces','discover'].includes(area)&&tab==='chat')parts.push(channelId||'general');
  return 'tender-draft:'+user.id+':'+parts.join(':');
 }
-function composer(kind,placeholder,extra=''){const disabled=kind==='piece'&&!inPiece(state.selected);return `<form class="composer-wrap" id="composer-form" data-kind="${kind}">${replyTo?`<div class="composer-reply"><span class="composer-reply-bar"></span><div class="composer-reply-content"><strong>Replying to ${esc(pby(replyTo.author_id).display_name)}</strong><span>${esc((replyTo.body||'Attachment').slice(0,110))}</span></div><button type="button" class="round-btn" data-action="cancel-reply" aria-label="Cancel reply" title="Cancel reply">${ico('x','icon-sm')}</button></div>`:''}<div id="composer-assist" class="composer-assist" hidden></div><div class="composer">${kind==='chat'?`<button type="button" class="round-btn" data-action="attach" title="Attach file">${ico('clip')}</button>`:''}<button type="button" class="round-btn" data-action="emoji-picker" title="Emojis">${ico('smile')}</button><button type="button" class="round-btn" data-action="sticker-picker" title="Stickers">🎨</button><button type="button" class="round-btn" data-action="html-embed" title="HTML + CSS embed">${ico('code','icon-sm')||'&lt;/&gt;'}</button>${kind==='chat'?`<button type="button" class="round-btn composer-extra" data-action="gif-picker" title="GIF">GIF</button><button type="button" class="round-btn composer-extra" data-action="new-poll" title="Poll">📊</button><button type="button" class="round-btn composer-extra" data-action="record-voice" title="Voice message">🎙️</button>`:''}<textarea id="message-box" name="body" maxlength="4000" rows="1" ${disabled?'disabled':''} placeholder="${disabled?'Join this Piece to chat':esc(placeholder)}"></textarea><button class="send-btn" type="submit" ${disabled?'disabled':''} aria-label="Send">${ico('send')}</button></div><div class="composer-footer"><span id="typing-line"></span><span id="file-status" role="status" aria-live="polite"></span><span>${extra||'Enter to send · Shift+Enter for a new line'}</span></div><input type="file" id="message-file" hidden accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,audio/webm,audio/ogg,audio/mp4,audio/mpeg"></form>`}
+function composer(kind,placeholder,extra=''){
+ const disabled=kind==='piece'&&!inPiece(state.selected);
+ return '<form class="composer-wrap" id="composer-form" data-kind="'+kind+'">'+
+ (replyTo?'<div class="composer-reply"><span class="composer-reply-bar"></span><div class="composer-reply-content"><strong>Replying to '+esc(pby(replyTo.author_id).display_name)+'</strong><span>'+esc((replyTo.body||'Attachment').slice(0,110))+'</span></div><button type="button" class="round-btn" data-action="cancel-reply" aria-label="Cancel reply">'+ico('x','icon-sm')+'</button></div>':'')+
+ '<div id="composer-assist" class="composer-assist" hidden></div>'+
+ '<div class="composer tender-v53-composer">'+
+ '<div class="tender-v53-attach-wrap"><button type="button" class="round-btn tender-v53-plus" data-action="composer-plus" aria-expanded="false" aria-label="More message actions" title="More message actions">+</button>'+
+ '<div id="tender-v53-plus-menu" class="tender-v53-plus-menu" hidden role="menu" aria-label="Message attachments and actions">'+
+ '<button type="button" data-action="attach" role="menuitem">📎 <span>Upload a File</span></button>'+
+ (kind==='chat'?'<button type="button" data-action="new-poll" role="menuitem">📊 <span>Create Poll</span></button>':'')+
+ (kind==='chat'?'<button type="button" data-action="record-voice" role="menuitem">🎙️ <span>Record Voice Clip</span></button>':'')+
+ '<button type="button" data-action="html-embed" role="menuitem">⌘ <span>Code HTML/CSS Embed</span></button>'+
+ '<button type="button" data-action="embed-builder" role="menuitem">✨ <span>Build Rich Embed</span></button>'+
+ '</div></div>'+
+ '<textarea id="message-box" name="body" maxlength="4000" rows="1" '+(disabled?'disabled':'')+' placeholder="'+(disabled?'Join this Piece to chat':esc(placeholder))+'"></textarea>'+
+ '<div class="tender-v53-composer-right">'+
+ '<button type="button" class="round-btn tender-v53-media" data-action="gif-picker" title="Share GIF">GIF</button>'+
+ '<button type="button" class="round-btn tender-v53-media" data-action="sticker-picker" title="Stickers">🎨</button>'+
+ '<button type="button" class="round-btn tender-v53-media" data-action="emoji-picker" title="Emojis">'+ico('smile')+'</button>'+
+ '<button class="send-btn" type="submit" '+(disabled?'disabled':'')+' aria-label="Send">'+ico('send')+'</button>'+
+ '</div></div>'+
+ '<div class="composer-footer"><span id="typing-line"></span><span id="file-status" role="status" aria-live="polite"></span><span>'+(extra||'Enter to send · Shift+Enter for a new line')+'</span></div>'+
+ '<input type="file" id="message-file" hidden accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,audio/webm,audio/ogg,audio/mp4,audio/mpeg"></form>';
+}
+
 function renderFriends(){let pending=friendships.filter(f=>f.status==='pending');const incoming=pending.filter(f=>f.recipient===user.id),outgoing=pending.filter(f=>f.requester===user.id),accepted=myFriendIds();return header('Friends','Keep the people who matter close',`<button class="btn sm" data-action="find-friends">${ico('plus')} Add friends</button>`)+`<div class="main-body"><div class="content-pad"><h1 class="page-title">Your circle 🧡</h1><p class="page-subtitle">Your friends, friend requests, and the next great conversation.</p>${incoming.length?`<div class="section-row top-spacer"><h2 class="section-heading">Friend requests</h2></div><div class="card">${incoming.map(f=>friendItem(pby(f.requester),'incoming',f.id)).join('')}</div>`:''}${outgoing.length?`<div class="section-row top-spacer"><h2 class="section-heading">Sent requests</h2></div><div class="card">${outgoing.map(f=>friendItem(pby(f.recipient),'outgoing',f.id)).join('')}</div>`:''}<div class="section-row top-spacer"><h2 class="section-heading">Friends (${accepted.length})</h2></div><div class="card">${accepted.map(id=>friendItem(pby(id),'friend')).join('')||'<div class="notice-inline">No friends yet. Search for people by username and send them a request.</div>'}</div></div></div>`}
 function friendItem(p,kind,fid=''){return `<div class="friend-row">${profileFace(p)}<div class="friend-data">${profileName(p)}<p>@${esc(p.handle)}</p></div>${kind==='incoming'?`<button class="btn sm" data-action="accept-friend" data-id="${fid}">Accept</button>`:kind==='outgoing'?`<span class="tag neutral">Pending</span>`:`<button class="btn sm secondary" data-action="start-dm" data-id="${p.id}">Message</button>`}</div>`}
 function renderFriend(p){
@@ -1913,8 +1937,8 @@ function renderProfileStudioV3(){
  return `<div class="tender-studio-v3" aria-label="Tender Profile Studio">
    <header class="tender-v3-page-title">
     <div><div class="tender-v3-kicker">✦ TENDER STUDIO / CUSTOMIZE YOURSELF</div>
-      <h1>Make it <em>yours.</em></h1>
-      <p>More than a profile. Your own little corner of Tender.</p>
+      <h1>Profile Customization</h1>
+      <p>Edit your profile, colors, layout and widgets in one place.</p>
     </div>
     <div class="tender-v3-top-actions">
      <span class="tender-v3-free-pill">✦ ALL FREE</span>
@@ -2017,11 +2041,11 @@ function tenderStudioPreviewRefresh(){
 }
 
 function renderSettings(){
- const sections=[['profile','user','My Profile'],['account','settings','My Account'],['appearance','palette','Appearance'],['chatbox','message-circle','Chat Box'],['notifications','bell','Notifications'],['privacy','shield','Privacy & Safety'],['accessibility','accessibility','Accessibility']];
+ const sections=[['profile','user','My Profile'],['account','settings','My Account'],['appearance','palette','Appearance'],['chatbox','message-circle','Chat Box'],['privacy','shield','Privacy & Safety'],['accessibility','accessibility','Accessibility']];
  const tab=sections.some(x=>x[0]===state.settingsTab)?state.settingsTab:'profile';
  const nav=sections.map(([id,icon,label])=>`<button type="button" class="settings-nav-item ${tab===id?'active':''}" data-action="settings-tab" data-tab="${id}" aria-current="${tab===id?'page':'false'}">${ico(icon,'icon-sm')}<span>${label}</span></button>`).join('');
  let content='';
- if(tab==='profile')return header('Profile Studio','Every detail. Completely yours. 🍗')+`<div class="main-body tender-studio-v3-page">${renderProfileStudioV3()}</div>`;
+ if(tab==='profile')content=renderProfileStudioV3();
  if(tab==='chatbox')content=`<div class="settings-section-head"><span class="eyebrow">PERSONALIZE</span><h1>Chat Box & Embeds</h1><p>Choose how your messages feel.</p></div>
  <div class="settings-card"><h3>Messaging shortcuts</h3><form id="tender05-chat-prefs-form" class="settings-fields">
  <div class="field"><label>Convert classic emoticons</label><select class="input" name="emoticons"><option value="yes" ${tender05Prefs().emoticons!==false?'selected':''}>Yes — :) becomes 🙂</option><option value="no" ${tender05Prefs().emoticons===false?'selected':''}>No — keep typed punctuation</option></select></div>
