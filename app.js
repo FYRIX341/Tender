@@ -78,6 +78,7 @@ function namesFor(c){let members=c?.conversation_members||[];if(c.kind==='group'
 function avatarFor(c){return c.kind==='group'?`<span class="squad-avatar">👥</span>`:avatars(pby((c.conversation_members||[]).find(m=>m.user_id!==user.id)?.user_id))}
 function inPiece(pid){return memberships.some(m=>m.piece_id===pid && m.user_id===user.id)}
 function ownPiece(pid){return pieces.some(p=>p.id===pid&&p.owner_id===user.id)}
+function canManageChannels(pid){return !!user&&!!pid&&(ownPiece(pid)||memberships.some(m=>m.piece_id===pid&&m.user_id===user.id&&['owner','moderator'].includes(m.role)))}
 const selectedPiece=()=>pieces.find(x=>x.id===state.selected);
 // Tender 0.4 — membership-scoped channels, read cursors and honest live presence.
 // Legacy Piece messages (without channel_id) always belong to #general.
@@ -98,15 +99,15 @@ function railPieceHTML(){
  ${joined.map(p=>`<button type="button" class="rail-piece ${state.selected===p.id&&['pieces','discover'].includes(state.area)?'active':''} ${pieceUnreadCount(p.id)?'has-unread':''}" data-action="rail-piece" data-id="${esc(p.id)}" title="${esc(p.name)}" aria-label="Open Piece ${esc(p.name)}">${pieceAvatar(p)}${pieceUnreadCount(p.id)?`<span class="rail-piece-unread" aria-label="${pieceUnreadCount(p.id)} unread Piece messages">${Math.min(99,pieceUnreadCount(p.id))}</span>`:''}</button>`).join('')}
  </div><button type="button" class="rail-piece-add" data-action="new-piece" title="Create a Piece" aria-label="Create Piece">${ico('plus','icon-sm')}</button>`;
 }
-let unreadRefreshTimer=null;
+let unreadRefreshTimer=null,channelBackendError='';
 async function loadChannelData(){
  if(!user||!db)return;
  try{
   const result=await q('piece_channels').select('*').order('position',{ascending:true}).limit(1000);
-  if(result.error){channelReady=false;pieceChannels=[];channelUnread=[];return}
-  channelReady=true;pieceChannels=result.data||[];
+  if(result.error){channelReady=false;channelBackendError=result.error.message||'Unable to read Piece channels';pieceChannels=[];channelUnread=[];console.warn('Tender channel backend:',result.error);return}
+  channelReady=true;channelBackendError='';pieceChannels=result.data||[];
   await loadChannelUnreads();
- }catch(e){channelReady=false;pieceChannels=[];channelUnread=[];console.warn('Tender channel setup pending',e)}
+ }catch(e){channelReady=false;channelBackendError=e?.message||'Could not reach the channel database';pieceChannels=[];channelUnread=[];console.warn('Tender channel setup pending',e)}
 }
 async function loadChannelUnreads(){
  if(!user||!channelReady)return;
@@ -1034,7 +1035,7 @@ async function boot(){
    if(user)await initialize();else renderAuth();
  }catch(e){ROOT.innerHTML=empty('Could not reach Tender','Check the public Supabase URL and key in config.js.');toast(e.message||'Could not connect.',true)}
 }
-function reset(){stopCallInbox();notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;state.channelId=null;presenceRoster.clear();if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
+function reset(){stopCallInbox();notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;channelBackendError='';state.channelId=null;presenceRoster.clear();if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
 function renderSetup(){ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Your friends. Your spaces. Your flavor.</p></div><div class="login-panel"><div class="eyebrow">Tender setup</div><h2>Almost ready to connect.</h2><p>This website needs a free online Supabase project for accounts, messages and Pieces. It's not a local chat simulator.</p><div class="setup-box"><h3>🍗 Connect the shared database</h3><p>1. Create a free project at <a href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Supabase</a>.<br>2. Run <strong>schema.sql</strong> in the project's SQL editor.<br>3. Copy its Project URL and publishable (anon) key into <strong>config.js</strong> on GitHub.<br>4. Refresh this website. Everyone will connect to the same database.</p><details><summary>Important security information</summary>Only use the public publishable/anon key. Never put a service_role key or other secret in GitHub. Set URL configuration for email confirmation in Supabase Auth.</details></div><p class="hint">Your Tender HTML interface is deployed separately from the database. A GitHub Pages link alone cannot deliver live messaging.</p><a class="btn" href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Connect Supabase ${ico('external')}</a></div></div>`}
 function renderAuth(){state.mobileDetail=false;ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Stay close. Stay crispy. 🍗</p></div><div class="login-panel"><div class="eyebrow">Welcome to Tender</div><h2>${state.loginMode==='login'?'Good to have you back.':'Your people are waiting.'}</h2><p>${state.loginMode==='login'?'Sign in to catch up with your people.':'Create your account to join the conversation.'}</p><div class="login-tabs"><button class="${state.loginMode==='login'?'selected':''}" data-action="auth-tab" data-tab="login">Log in</button><button class="${state.loginMode==='signup'?'selected':''}" data-action="auth-tab" data-tab="signup">Sign up</button></div><form id="auth-form">${state.loginMode==='signup'?`<div class="field"><label for="handle">Username (3–20 letters, numbers, underscores)</label><input class="input" id="handle" name="handle" minlength="3" maxlength="20" pattern="[a-zA-Z0-9_]{3,20}" required autocomplete="username" placeholder="buffalofan"></div><div class="field"><label for="display">Display name</label><input class="input" id="display" name="display_name" maxlength="40" required placeholder="Your name"></div>`:''}<div class="field"><label for="email">Email address</label><input class="input" id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com"></div><div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" minlength="8" autocomplete="${state.loginMode==='login'?'current-password':'new-password'}" required placeholder="At least 8 characters"></div><button class="btn full top-spacer" type="submit">${state.loginMode==='login'?'Log in':'Create account'} ${ico('back')}</button></form><p class="hint top-spacer">Tender is an early beta. Please don't post private information in public Pieces.</p></div></div>`}
 async function authSubmit(form){const data=new FormData(form), email=String(data.get('email')).trim(), password=String(data.get('password'));
@@ -1515,20 +1516,91 @@ function newPieceModal(p=null){
 }
 function channelEditorModal(channel=null,category='TEXT CHANNELS'){
  const piece=selectedPiece();
- if(!piece)return toast('Open a Piece before creating a channel.',true);
-  if(!channelReady)return toast('Channel database unavailable. Apply migration_0_4.sql in Supabase SQL Editor, then reload Tender.',true);
- if(!memberships.some(m=>m.piece_id===piece.id&&m.user_id===user.id&&['owner','moderator'].includes(m.role)))return toast('Only Piece staff can manage channels.',true);
- modal(channel?'Edit #'+channel.name:'Create channel', 'Give this Piece a place for a specific topic.',`
- <form id="channel-form" class="channel-form">
+ if(!piece){toast('Open a Piece before creating a channel.',true);return}
+ if(!canManageChannels(piece.id)){toast('Only Piece owners or moderators can manage channels.',true);return}
+ const setupLink='https://github.com/FYRIX341/Tender/blob/main/migration_0_4.sql';
+ const warning=!channelReady?'<div class="channel-setup-warning" role="status"><strong>⚠ Channel database is not ready</strong><p>Tender could not load the Piece channels. If the migration has not been installed, open <a href="'+setupLink+'" target="_blank" rel="noopener noreferrer">migration_0_4.sql</a>, run it in the Supabase SQL Editor, then reload this page. The form stays open so you can retry.</p>'+(channelBackendError?'<small>Technical detail: '+esc(channelBackendError)+'</small>':'')+'</div>':'';
+ modal(channel?'Edit #'+channel.name:'Create channel','Channels belong to this Piece and stay after reloading.',`
+ <form id="channel-form" class="channel-form" aria-label="${channel?'Edit channel':'Create channel'}">
  <input type="hidden" name="id" value="${esc(channel?.id||'')}">
- <div class="field"><label>Channel name</label><input name="name" class="input" required maxlength="60" autocomplete="off" value="${esc(channel?.name||'')}" placeholder="general-chat"><small class="field-help">Spaces and capitals are okay — Tender converts them to channel-name format.</small></div>
- <div class="field"><label>Channel type</label><select class="input" name="kind"><option value="text" ${channel?.kind!=='announcements'?'selected':''}># Text chat</option><option value="announcements" ${channel?.kind==='announcements'?'selected':''}>📣 Announcements</option></select></div>
- <div class="field"><label>Category</label><input name="category" class="input" maxlength="35" required value="${esc(channel?.category||category)}" placeholder="TEXT CHANNELS"></div>
- <div class="field"><label>Topic</label><textarea name="topic" class="input textarea" maxlength="280" rows="2" placeholder="What is this channel about?">${esc(channel?.topic||'')}</textarea></div>
- <div class="field"><label>Sort order</label><input type="number" name="position" class="input" min="0" max="999" value="${Number(channel?.position||0)}"></div>
- <button class="btn full" type="submit">${channel?'Save channel':'Create channel'}</button>
+ ${warning}
+ <div class="field"><label for="tender-channel-name">Channel name</label><input id="tender-channel-name" name="name" class="input" required maxlength="60" autocomplete="off" value="${esc(channel?.name||'')}" placeholder="e.g. General Chat"><small class="field-help">Spaces and capitals are automatically converted (General Chat → general-chat).</small></div>
+ <div class="field"><label for="tender-channel-kind">Channel type</label><select id="tender-channel-kind" class="input" name="kind"><option value="text" ${channel?.kind!=='announcements'?'selected':''}># Text chat</option><option value="announcements" ${channel?.kind==='announcements'?'selected':''}>📣 Announcements</option></select></div>
+ <div class="field"><label for="tender-channel-category">Category</label><input id="tender-channel-category" name="category" class="input" maxlength="35" required value="${esc(channel?.category||category)}" placeholder="TEXT CHANNELS"></div>
+ <div class="field"><label for="tender-channel-topic">Topic</label><textarea id="tender-channel-topic" name="topic" class="input textarea" maxlength="280" rows="2" placeholder="What is this channel for?">${esc(channel?.topic||'')}</textarea></div>
+ <div class="field"><label for="tender-channel-position">Sort order</label><input id="tender-channel-position" type="number" name="position" class="input" min="0" max="999" value="${Number(channel?.position||0)}"></div>
+ <div class="channel-form-feedback" data-channel-status role="status" aria-live="polite" hidden></div>
+ <div class="channel-form-error" data-channel-error role="alert" hidden></div>
+ <button class="btn full channel-submit-btn" type="submit">${channel?'Save channel':'Create channel'}</button>
  ${channel&&!channel.is_default?`<button class="btn danger full" type="button" data-action="delete-channel" data-id="${esc(channel.id)}">Delete channel</button>`:''}
  </form>`);
+ document.getElementById('tender-channel-name')?.focus();
+}
+function channelErrorMessage(error){
+ const code=String(error?.code||'');
+ const message=String(error?.message||'Something went wrong while saving the channel.');
+ if(code==='23505'||/duplicate key|already exists/i.test(message))return 'A channel with that name already exists in this Piece. Please choose another name.';
+ if(code==='42501'||/row.level.security|permission denied|not authorized/i.test(message))return 'Supabase denied channel creation. You need to own or moderate this Piece and the channel policies from migration_0_4.sql must be installed.';
+ if(code==='42P01'||code==='PGRST205'||/relation .*does not exist|could not find the table|schema cache/i.test(message))return 'The Supabase Piece channels table is missing. Run migration_0_4.sql in the Supabase SQL Editor and reload Tender.';
+ return message;
+}
+function channelWithTimeout(query,ms=16000){
+ return new Promise((resolve,reject)=>{
+  const timer=setTimeout(()=>reject(new Error('Saving is taking too long. Check your connection, then refresh before trying again.')),ms);
+  Promise.resolve(query).then(value=>{clearTimeout(timer);resolve(value)},error=>{clearTimeout(timer);reject(error)});
+ });
+}
+async function submitChannelForm(form){
+ if(form.dataset.submitting==='true')return;
+ const button=form.querySelector('button[type="submit"]'),original=button?.textContent||'Save channel';
+ const errorNode=form.querySelector('[data-channel-error]'),statusNode=form.querySelector('[data-channel-status]');
+ if(errorNode){errorNode.hidden=true;errorNode.textContent=''}
+ if(statusNode){statusNode.hidden=false;statusNode.textContent='Checking channels…'}
+ form.dataset.submitting='true';
+ if(button){button.disabled=true;button.textContent='Please wait…'}
+ try{
+  const d=new FormData(form),piece=selectedPiece();
+  if(!piece||!canManageChannels(piece.id))throw new Error('Only Piece owners or moderators can manage channels.');
+  if(!channelReady)await channelWithTimeout(loadChannelData(),12000);
+  if(!channelReady)throw new Error('Channel database unavailable: '+(channelBackendError||'the table or policy may be missing')+'. Run migration_0_4.sql in Supabase SQL Editor, then reload Tender.');
+  const name=String(d.get('name')||'').trim().normalize('NFKD').toLowerCase().replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40);
+  if(!/^[a-z0-9][a-z0-9_-]{0,39}$/.test(name))throw new Error('Enter a channel name containing letters or numbers.');
+  const id=String(d.get('id')||'');
+  if(pieceChannels.some(x=>x.piece_id===piece.id&&x.name===name&&x.id!==id))throw new Error('A channel named #'+name+' already exists.');
+  const data={piece_id:piece.id,name,kind:d.get('kind')==='announcements'?'announcements':'text',
+   topic:String(d.get('topic')||'').trim().slice(0,280),
+   category:String(d.get('category')||'TEXT CHANNELS').trim().slice(0,35)||'TEXT CHANNELS',
+   position:Math.min(999,Math.max(0,Number(d.get('position'))||0))};
+  if(statusNode)statusNode.textContent=id?'Saving your changes…':'Creating #'+name+'…';
+  let newId=id;
+  if(id){
+   if(!pieceChannels.some(x=>x.id===id&&x.piece_id===piece.id))throw new Error('This channel no longer exists. Reload the page.');
+   const saved=assert(await channelWithTimeout(q('piece_channels').update(data).eq('id',id).eq('piece_id',piece.id).select('id').single()));
+   if(!saved?.id)throw new Error('The server did not confirm the channel update.');
+  }else{
+   const saved=assert(await channelWithTimeout(q('piece_channels').insert(data).select('id').single()));
+   if(!saved?.id)throw new Error('The server did not return an ID for the new channel.');
+   newId=saved.id;
+  }
+  if(statusNode)statusNode.textContent='Confirming the channel was saved…';
+  await channelWithTimeout(loadChannelData(),12000);
+  if(!channelReady||!pieceChannels.some(x=>x.piece_id===piece.id&&x.id===newId))
+   throw new Error('The save was accepted but the channel could not be reloaded. Refresh Tender before trying to create it again.');
+  if(state.selected!==piece.id){closeModal();toast('Channel saved. Reopen the Piece to see it.');return}
+  state.channelId=newId;state.pieceTab='chat';
+  closeModal();await loadActive();render();
+  markChannelRead().catch(console.warn);
+  toast(id?'Channel updated!':'#'+name+' was created!');
+ }catch(error){
+  console.error('Tender channel save:',error);
+  const msg=channelErrorMessage(error);
+  if(errorNode){errorNode.hidden=false;errorNode.textContent=msg}
+  if(statusNode)statusNode.hidden=true;
+  toast('Channel not saved: '+msg,true);
+ }finally{
+  form.dataset.submitting='false';
+  if(button){button.disabled=false;button.textContent=original}
+ }
 }
 function newPostModal(){modal('New discussion','Start a topic in '+selectedPiece().name,`<form id="post-form"><div class="field"><label>Title</label><input class="input" name="title" maxlength="130" minlength="3" required placeholder="What should we discuss?"></div><div class="field"><label>Post</label><textarea class="input textarea" name="body" maxlength="8000" required placeholder="Write something interesting..."></textarea></div><div class="field"><label>Tags (comma-separated, optional)</label><input class="input" name="tags" maxlength="100" placeholder="art, help, questions"></div><button class="btn full" type="submit">Publish discussion</button></form>`)}
 function galleryModal(){modal('Add to gallery','Share something with the Piece.',`<form id="gallery-form"><div class="field"><label>Image (maximum 5 MB)</label><input class="input" name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" required></div><div class="field"><label>Caption</label><textarea class="input textarea" name="caption" maxlength="500" placeholder="What did you make?"></textarea></div><button class="btn full" type="submit">Upload image</button></form>`)}
@@ -1829,31 +1901,7 @@ async function submitForm(form){switch(form.id){
  case'composer-form':return sendMessage(form);
  case'friend-search-form':return safe(async()=>{let h=String(new FormData(form).get('handle')).trim().toLowerCase();let target=assert(await q('profiles').select('id,handle,display_name,avatar_url').eq('handle',h).maybeSingle());let res=document.getElementById('friend-search-results');if(!res)return;if(!target){res.innerHTML='<p class="notice-inline">No user with that username. Double-check their spelling.</p>';return}if(target.id===user.id){res.innerHTML='<p class="notice-inline">That\'s you, Buffalo! 🍗</p>';return}let f=friendships.find(f=>[f.requester,f.recipient].includes(user.id)&&[f.requester,f.recipient].includes(target.id));res.innerHTML=`<div class="friend-row">${profileFace(target)}<div class="friend-data">${profileName(target)}<p>@${esc(target.handle)}</p></div>${f?`<span class="tag">${esc(f.status)}</span>`:`<button class="btn sm" data-action="request-friend" data-id="${target.id}">Add friend</button>`}</div>`;return});
  case'group-form':return safe(async()=>{let data=new FormData(form),name=String(data.get('group_name')).trim(),members=data.getAll('member');let cid=assert(await db.rpc('start_group',{group_name:name,member_ids:members}));closeModal();await refreshData();await goTo('chats',cid);toast('Group created!')});
- case'channel-form':return safe(async()=>{
-  if(!channelReady)throw Error('Channel database unavailable. Apply migration_0_4.sql in Supabase SQL Editor and reload.');
-  const d=new FormData(form),piece=selectedPiece(),staff=memberships.some(m=>m.piece_id===piece?.id&&m.user_id===user.id&&['owner','moderator'].includes(m.role));
-  if(!piece||!staff)throw Error('Only Piece staff can manage channels.');
-  const name=String(d.get('name')||'').trim().normalize('NFKD').toLowerCase().replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40);
-  if(!/^[a-z0-9][a-z0-9_-]{0,39}$/.test(name))throw Error('Channel name needs at least one letter or number.');
-  const data={piece_id:piece.id,name,kind:d.get('kind')==='announcements'?'announcements':'text',topic:String(d.get('topic')||'').trim().slice(0,280),
-   category:String(d.get('category')||'TEXT CHANNELS').trim().slice(0,35)||'TEXT CHANNELS',
-   position:Math.min(999,Math.max(0,Number(d.get('position'))||0))};
-  const id=String(d.get('id')||'');
-  if(pieceChannels.some(c=>c.piece_id===piece.id&&c.name===name&&c.id!==id))throw Error('A channel with this name already exists in this Piece.');
-  if(id){
-   const existing=pieceChannels.find(c=>c.id===id&&c.piece_id===piece.id);
-   if(!existing)throw Error('Channel no longer exists.');
-   assert(await q('piece_channels').update(data).eq('id',id).eq('piece_id',piece.id));
-  }else{
-   const added=assert(await q('piece_channels').insert(data).select('id').single());
-   if(!added?.id)throw Error('Server did not confirm the new channel. Try again.');
-   state.channelId=added.id;
-  }
-  await loadChannelData();
-  if(!channelReady||!pieceChannels.some(c=>c.id===(id||state.channelId)))throw Error('Channel was saved but cannot be loaded. Check database permissions, then reload Tender.');
-  closeModal();state.pieceTab='chat';await loadActive();render();
-  markChannelRead().catch(console.warn);toast(id?'Channel saved!':'New channel created! 🍗');
- });
+ case'channel-form':return submitChannelForm(form);
  case'piece-form':return safe(async()=>{
   const d=new FormData(form),name=String(d.get('name')||'').trim(),description=String(d.get('description')||'').trim();
   const color=String(d.get('color')||'#f47735'),is_public=d.get('visibility')==='public';
