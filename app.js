@@ -160,10 +160,10 @@ async function loadChannelData(){
  if(!user||!db)return;
  try{
   const result=await q('piece_channels').select('*').order('position',{ascending:true}).limit(1000);
-  if(result.error){channelReady=false;channelBackendError=result.error.message||'Unable to read Piece channels';pieceChannels=[];channelUnread=[];console.warn('Tender channel backend:',result.error);return}
+  if(result.error){channelReady=false;channelBackendError=(result.error.code?'['+result.error.code+'] ':'')+(result.error.message||'Unable to read Piece channels');pieceChannels=[];channelUnread=[];console.warn('Tender channel backend:',result.error);return}
   channelReady=true;channelBackendError='';pieceChannels=result.data||[];
   await loadChannelUnreads();
- }catch(e){channelReady=false;channelBackendError=e?.message||'Could not reach the channel database';pieceChannels=[];channelUnread=[];console.warn('Tender channel setup pending',e)}
+ }catch(e){channelReady=false;channelBackendError=(e?.code?'['+e.code+'] ':'')+(e?.message||'Could not reach the channel database');pieceChannels=[];channelUnread=[];console.warn('Tender channel setup pending',e)}
 }
 async function loadChannelUnreads(){
  if(!user||!channelReady)return;
@@ -1515,7 +1515,7 @@ function renderSettings(){
  if(tab==='accessibility')content=`<div class="settings-section-head"><span class="eyebrow">COMFORT</span><h1>Accessibility</h1><p>Adjust readability and motion to suit you.</p></div>
   <div class="settings-card"><h3>Readability & motion</h3><p class="hint">Find font size, density, and reduced-motion controls in Appearance Studio.</p><button class="btn secondary" data-action="settings-tab" data-tab="appearance">Open Appearance Studio</button></div>
   <div class="settings-card"><h3>Keyboard shortcuts</h3><div class="shortcut-row"><kbd>Any letter</kbd><span>Start typing into the current chat</span></div><div class="shortcut-row"><kbd>Enter</kbd><span>Send message while composing</span></div><div class="shortcut-row"><kbd>Shift + Enter</kbd><span>New line</span></div><div class="shortcut-row"><kbd>Esc</kbd><span>Close an open dialog</span></div><div class="shortcut-row"><kbd>Tab</kbd><span>Navigate buttons and inputs</span></div></div>`;
- return header('User Settings','Your space, your rules')+`<div class="main-body settings-page"><div class="settings-layout"><nav class="settings-navigation" aria-label="Settings categories"><div class="settings-nav-label">USER SETTINGS</div>${nav}</nav><section class="settings-content">${content}<div class="settings-footer">Tender 0.4.5 · Stay close. Stay crispy. 🍗</div></section></div></div>`;
+ return header('User Settings','Your space, your rules')+`<div class="main-body settings-page"><div class="settings-layout"><nav class="settings-navigation" aria-label="Settings categories"><div class="settings-nav-label">USER SETTINGS</div>${nav}</nav><section class="settings-content">${content}<div class="settings-footer">Tender 0.4.6 · Stay close. Stay crispy. 🍗</div></section></div></div>`;
 }
 
 let activeLoadVersion=0;
@@ -1613,7 +1613,7 @@ function channelEditorModal(channel=null,category='TEXT CHANNELS'){
  const setupLink='https://github.com/FYRIX341/Tender/blob/main/migration_0_4.sql';
  const warning=!channelReady?'<div class="channel-setup-warning" role="status"><strong>⚠ Channel database is not ready</strong><p>Tender could not load the Piece channels. If the migration has not been installed, open <a href="'+setupLink+'" target="_blank" rel="noopener noreferrer">migration_0_4.sql</a>, run it in the Supabase SQL Editor, then reload this page. The form stays open so you can retry.</p>'+(channelBackendError?'<small>Technical detail: '+esc(channelBackendError)+'</small>':'')+'</div>':'';
  modal(channel?'Edit #'+channel.name:'Create channel','Channels belong to this Piece and stay after reloading.',`
- <form id="channel-form" class="channel-form" aria-label="${channel?'Edit channel':'Create channel'}">
+ <form id="channel-form" class="channel-form" novalidate aria-label="${channel?'Edit channel':'Create channel'}">
  <input type="hidden" name="id" value="${esc(channel?.id||'')}">
  ${warning}
  <div class="field"><label for="tender-channel-name">Channel name</label><input id="tender-channel-name" name="name" class="input" required maxlength="60" autocomplete="off" value="${esc(channel?.name||'')}" placeholder="e.g. General Chat"><small class="field-help">Spaces and capitals are automatically converted (General Chat → general-chat).</small></div>
@@ -1623,7 +1623,8 @@ function channelEditorModal(channel=null,category='TEXT CHANNELS'){
  <div class="field"><label for="tender-channel-position">Sort order</label><input id="tender-channel-position" type="number" name="position" class="input" min="0" max="999" value="${Number(channel?.position||0)}"></div>
  <div class="channel-form-feedback" data-channel-status role="status" aria-live="polite" hidden></div>
  <div class="channel-form-error" data-channel-error role="alert" hidden></div>
- <button class="btn full channel-submit-btn" type="submit">${channel?'Save channel':'Create channel'}</button>
+ <p class="field-help channel-release-marker">Tender 0.4.6 • Channel Repair</p>
+ <button class="btn full channel-submit-btn" type="submit" data-action="channel-submit">${channel?'Save channel':'Create channel'}</button>
  ${channel&&!channel.is_default?`<button class="btn danger full" type="button" data-action="delete-channel" data-id="${esc(channel.id)}">Delete channel</button>`:''}
  </form>`);
  document.getElementById('tender-channel-name')?.focus();
@@ -1632,7 +1633,7 @@ function channelErrorMessage(error){
  const code=String(error?.code||'');
  const message=String(error?.message||'Something went wrong while saving the channel.');
  if(code==='23505'||/duplicate key|already exists/i.test(message))return 'A channel with that name already exists in this Piece. Please choose another name.';
- if(code==='42501'||/row.level.security|permission denied|not authorized/i.test(message))return 'Supabase denied channel creation. You need to own or moderate this Piece and the channel policies from migration_0_4.sql must be installed.';
+ if(code==='42501'||/row.level.security|permission denied|not authorized/i.test(message))return 'Supabase denied channel creation (42501). Check your Piece owner/moderator membership, table grants and RLS policy. '+(error?.hint||'');
  if(code==='42P01'||code==='PGRST205'||/relation .*does not exist|could not find the table|schema cache/i.test(message))return 'The Supabase Piece channels table is missing. Run migration_0_4.sql in the Supabase SQL Editor and reload Tender.';
  return message;
 }
@@ -1685,7 +1686,7 @@ async function submitChannelForm(form){
   toast(id?'Channel updated!':'#'+name+' was created!');
  }catch(error){
   console.error('Tender channel save:',error);
-  const msg=channelErrorMessage(error);
+  const msg=channelErrorMessage(error)+(error?.code&&error.code!=='42501'?' [code '+String(error.code)+']':'');
   if(errorNode){errorNode.hidden=false;errorNode.textContent=msg}
   if(statusNode)statusNode.hidden=true;
   toast('Channel not saved: '+msg,true);
@@ -2171,7 +2172,24 @@ document.addEventListener('dblclick',event=>{
  const handle=event.target.closest?.('[data-split]');if(handle)updateSplitWidth(handle.dataset.split,splitterSpec[handle.dataset.split].initial,true);
 });
 document.addEventListener('submit',event=>{if(event.target.matches('form')){event.preventDefault();submitForm(event.target).catch(e=>{console.error(e);toast(e.message||'Error',true)})}});
-document.addEventListener('click',event=>{if(!event.target.closest?.('.sidebar-account-dock'))closeAccountMenu();let t=event.target.closest('[data-action]');if(!t)return;if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
+document.addEventListener('click',event=>{
+ // Explicitly handle Create Channel clicks; do not rely exclusively on the
+ // form submit event, which browser validation can silently suppress.
+ const channelButton=event.target.closest?.('[data-action="channel-submit"]');
+ if(channelButton){
+  event.preventDefault();
+  const form=channelButton.closest('form#channel-form');
+  if(!form){toast('Channel form missing. Reload Tender.',true);return}
+  submitChannelForm(form).catch(error=>{
+   console.error('Create Channel click failed:',error);
+   toast(error?.message||'Channel submission failed.',true);
+  });
+  return;
+ }
+ if(!event.target.closest?.('.sidebar-account-dock'))closeAccountMenu();
+ let t=event.target.closest('[data-action]');if(!t)return;
+ if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;
+ if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
 document.addEventListener('input',e=>{
  if(e.target.closest?.('#profile-style-form')){
   const form=e.target.closest('#profile-style-form');
