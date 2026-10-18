@@ -37,6 +37,61 @@ const ICONS = {
 const ico=(name,extra='')=>`<span class="ico ${extra}" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||ICONS.info}</svg></span>`;
 const esc=(value='')=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const fmt = iso => {try{return new Date(iso).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});}catch{return ''}};
+
+/* Tender 0.5 composer experience: shortcodes, stickers, safe visual embeds and anti-spam. */
+function tender05Prefs(){
+ try{return JSON.parse(localStorage.getItem('tender-0.5-composer')||'{}')}catch{return {}}
+}
+let tender05SentAt=[];
+function tender05RateAllowed(){
+ const now=Date.now();tender05SentAt=tender05SentAt.filter(t=>now-t<10000);
+ if(tender05SentAt.length>=8){toast('Woah, chill there buddy! Gotta slow down.. 😏',true);return false}
+ return true;
+}
+function tender05RecordSent(){tender05SentAt.push(Date.now())}
+function tender05HTMLPreview(){
+ const form=document.getElementById('tender-html-embed-form');
+ if(!form)return;
+ const box=document.getElementById('tender-html-preview');
+ if(!box)return;
+ const data=new FormData(form);
+ box.srcdoc=window.Tender05.embedDoc({html:String(data.get('html')||''),css:String(data.get('css')||'')});
+}
+function tender05EmbedStudio(){
+ modal('🍗 HTML + CSS Embed Studio','Design a visual message. JavaScript and external loading are disabled for everyone’s safety.',`
+ <form id="tender-html-embed-form" class="tender-html-editor">
+ <div class="field"><label>HTML content</label><textarea class="input textarea" rows="6" name="html" maxlength="2600" required placeholder="&lt;h2&gt;Hello Tender!&lt;/h2&gt;">&lt;h2&gt;🍗 TENDER 0.5&lt;/h2&gt;&lt;p&gt;The content update is here!&lt;/p&gt;</textarea></div>
+ <div class="field"><label>CSS styling</label><textarea class="input textarea" rows="5" name="css" maxlength="900" placeholder="h2 { color: coral; }">h2 { color: #ffa45b; } body { background: #272a39; border-radius: 12px; }</textarea></div>
+ <label class="field-caption">Safe live preview (no scripts or external content)</label>
+ <iframe id="tender-html-preview" class="tender-html-preview" title="Safe HTML embed preview" sandbox="" referrerpolicy="no-referrer"></iframe>
+ <p class="hint">Max 2,600 HTML characters + 900 CSS characters. Images, scripts, iframes, forms and outbound links cannot load inside the embedded design.</p>
+ <button class="btn full" type="submit">Send HTML embed</button>
+ </form>`);
+ tender05HTMLPreview();
+}
+function tender05StickerPicker(){
+ const helper=window.Tender05;
+ modal('🍗 Stickers','Pick a sticker or make an emoji sticker with a custom caption.',`
+ <div class="tender-sticker-picker">
+ ${helper.stickerPresets.map(s=>`<button type="button" class="tender-sticker-item" data-action="send-sticker" data-emoji="${esc(s.emoji)}" data-name="${esc(s.name)}"><span>${esc(s.emoji)}</span><small>${esc(s.name)}</small></button>`).join('')}
+ </div>
+ <form id="tender-sticker-form" class="settings-fields">
+ <div class="settings-card-title"><h3>Make your own sticker</h3><p>Personalized emoji + caption. Everyone in this chat can see it.</p></div>
+ <div class="settings-two-fields">
+  <div class="field"><label>Emoji</label><input class="input" name="emoji" required maxlength="12" placeholder="🐔"></div>
+  <div class="field"><label>Caption</label><input class="input" name="name" required maxlength="40" placeholder="Buffalo Moment"></div>
+ </div>
+ <button class="btn secondary full" type="submit">Send sticker</button>
+ </form>`);
+}
+function tender05SendPayload(prefix,data){
+ const input=document.getElementById('message-box'),form=document.getElementById('composer-form');
+ if(!input||!form){toast('Open a chat or Piece channel first.',true);return}
+ const payload=prefix+JSON.stringify(data);
+ if(payload.length>3900){toast('Embed or sticker is too long for a message.',true);return}
+ closeModal();input.value=payload;form.requestSubmit();
+}
+
 // Tender 0.4.5 — daily chat separators using browser-local calendar days.
 function chatDayKey(input){
  const value=new Date(input);
@@ -713,6 +768,8 @@ function mentionedPlainText(raw){
 }
 function messageText(text){
  if(String(text||'').startsWith('[TENDER_EMBED]'))return richEmbedHTML(text);
+ if(String(text||'').startsWith('[TENDER_HTML]'))return window.Tender05.renderEmbed(String(text).slice('[TENDER_HTML]'.length));
+ if(String(text||'').startsWith('[TENDER_STICKER]'))return window.Tender05.renderSticker(String(text).slice('[TENDER_STICKER]'.length));
  const raw=String(text||'');
  let result=raw.split(/(https:\/\/[^\s<]+)/gi).map(part=>{
   if(!/^https:\/\//i.test(part))return mentionedPlainText(part);
@@ -1399,7 +1456,7 @@ function messageHTML(row,target_type='message'){
  const reply=row.reply_to?activeMessages.find(x=>x.id===row.reply_to):null;
  const replyHTML=row.reply_to?`<button type="button" class="reply-quote reply-ref" data-action="jump-reply" data-id="${esc(row.reply_to)}" title="Jump to replied message">↳ ${reply?`<strong>${esc(pby(reply.author_id).display_name)}</strong> ${esc((reply.body||'Attachment').slice(0,130))}`:'Original message is outside the loaded history'}</button>`:'';
  const gif=giftGif(row.body);
- return `<div data-message-id="${esc(row.id)}" role="group" tabindex="0" class="chat-bubble-wrap ${mine?'mine':''} ${grouped?'message-grouped':''} ${row.pending?'bubble-pending':''}">${profileFace(p)}<div class="bubble-content">${!grouped?`<div class="bubble-name">${profileName(p)}</div>`:''}${replyHTML}<div class="bubble">${messageText(row.body||'')}${gif}${attachmentHTML(row)}${row.poll_id?pollHTML(row.poll_id):''}</div><div class="bubble-meta">${fmt(row.created_at)} ${row.edited_at?'· edited':''} ${row.pending?'· Sending…':''} ${readReceiptHTML(row)}</div>${Object.keys(emojiMap).length?`<div class="bubble-reactions">${Object.entries(emojiMap).map(([emoji,recs])=>`<button class="react-chip ${recs.some(r=>r.author_id===user.id)?'mine-react':''}" data-action="react" data-type="${target_type}" data-id="${row.id}" data-emoji="${esc(emoji)}">${esc(emoji)} ${recs.length}</button>`).join('')}</div>`:''}<div class="bubble-actions" aria-label="Message actions">${!row.pending&&(target_type==='message'||pieceRepliesReady)?`<button type="button" class="emoji-inline reply-quick-action" data-action="reply-message" data-id="${esc(row.id)}" title="Reply to message" aria-label="Reply to ${esc(p.display_name||'member')}">${ico('chat','icon-sm')}<span>Reply</span></button>`:''}<button class="emoji-inline" data-action="reaction-menu" data-type="${target_type}" data-id="${row.id}" title="React">${ico('smile','icon-sm')}</button>${target_type==='message'&&!row.pending?`<button class="emoji-inline" data-action="bookmark-message" data-id="${row.id}" title="Bookmark">${bookmarks.some(b=>b.message_id===row.id)?'★':'☆'}</button><button class="emoji-inline" data-action="forward-message" data-id="${row.id}" title="Forward text">↗</button>`:''}${mine&&!row.pending?`<button class="emoji-inline" data-action="edit-message" data-id="${row.id}" title="Edit">${ico('edit','icon-sm')}</button><button class="emoji-inline" data-action="pin-message" data-id="${row.id}" title="Pin">${row.is_pinned?'📌':'📍'}</button><button class="emoji-inline" data-action="delete-message" data-id="${row.id}" data-type="${target_type}" title="Delete">${ico('trash','icon-sm')}</button>`:''}</div></div></div>`}
+ return `<div data-message-id="${esc(row.id)}" role="group" tabindex="0" class="chat-bubble-wrap ${mine?'mine':''} ${grouped?'message-grouped':''} ${row.pending?'bubble-pending':''}">${profileFace(p)}<div class="bubble-content">${!grouped?`<div class="bubble-name">${profileName(p)}</div>`:''}${replyHTML}<div class="bubble">${messageText(row.body||'')}${row.edited_at?` <span class="inline-edited" title="Edited ${esc(new Date(row.edited_at).toLocaleString())}">(edited)</span>`:''}${gif}${attachmentHTML(row)}${row.poll_id?pollHTML(row.poll_id):''}</div><div class="bubble-meta">${fmt(row.created_at)} ${row.edited_at?'':''} ${row.pending?'· Sending…':''} ${readReceiptHTML(row)}</div>${Object.keys(emojiMap).length?`<div class="bubble-reactions">${Object.entries(emojiMap).map(([emoji,recs])=>`<button class="react-chip ${recs.some(r=>r.author_id===user.id)?'mine-react':''}" data-action="react" data-type="${target_type}" data-id="${row.id}" data-emoji="${esc(emoji)}">${esc(emoji)} ${recs.length}</button>`).join('')}</div>`:''}<div class="bubble-actions" aria-label="Message actions">${!row.pending&&(target_type==='message'||pieceRepliesReady)?`<button type="button" class="emoji-inline reply-quick-action" data-action="reply-message" data-id="${esc(row.id)}" title="Reply to message" aria-label="Reply to ${esc(p.display_name||'member')}">${ico('chat','icon-sm')}<span>Reply</span></button>`:''}<button class="emoji-inline" data-action="reaction-menu" data-type="${target_type}" data-id="${row.id}" title="React">${ico('smile','icon-sm')}</button>${target_type==='message'&&!row.pending?`<button class="emoji-inline" data-action="bookmark-message" data-id="${row.id}" title="Bookmark">${bookmarks.some(b=>b.message_id===row.id)?'★':'☆'}</button><button class="emoji-inline" data-action="forward-message" data-id="${row.id}" title="Forward text">↗</button>`:''}${mine&&!row.pending?`<button class="emoji-inline" data-action="edit-message" data-id="${row.id}" title="Edit">${ico('edit','icon-sm')}</button><button class="emoji-inline" data-action="pin-message" data-id="${row.id}" title="Pin">${row.is_pinned?'📌':'📍'}</button><button class="emoji-inline" data-action="delete-message" data-id="${row.id}" data-type="${target_type}" title="Delete">${ico('trash','icon-sm')}</button>`:''}</div></div></div>`}
 function updateComposerReply(){
  const form=document.getElementById('composer-form');if(!form?.querySelector||!form.insertAdjacentHTML)return;
  form.querySelector('.composer-reply')?.remove();
@@ -1425,7 +1482,7 @@ function tenderDraftKey(area=state.area,selected=state.selected,tab=state.pieceT
  if(['pieces','discover'].includes(area)&&tab==='chat')parts.push(channelId||'general');
  return 'tender-draft:'+user.id+':'+parts.join(':');
 }
-function composer(kind,placeholder,extra=''){const disabled=kind==='piece'&&!inPiece(state.selected);return `<form class="composer-wrap" id="composer-form" data-kind="${kind}">${replyTo?`<div class="composer-reply"><span class="composer-reply-bar"></span><div class="composer-reply-content"><strong>Replying to ${esc(pby(replyTo.author_id).display_name)}</strong><span>${esc((replyTo.body||'Attachment').slice(0,110))}</span></div><button type="button" class="round-btn" data-action="cancel-reply" aria-label="Cancel reply" title="Cancel reply">${ico('x','icon-sm')}</button></div>`:''}<div id="composer-assist" class="composer-assist" hidden></div><div class="composer">${kind==='chat'?`<button type="button" class="round-btn" data-action="attach" title="Attach file">${ico('clip')}</button>`:''}<button type="button" class="round-btn" data-action="emoji-picker" title="Emojis">${ico('smile')}</button>${kind==='chat'?`<button type="button" class="round-btn composer-extra" data-action="gif-picker" title="GIF">GIF</button><button type="button" class="round-btn composer-extra" data-action="new-poll" title="Poll">📊</button><button type="button" class="round-btn composer-extra" data-action="record-voice" title="Voice message">🎙️</button>`:''}<textarea id="message-box" name="body" maxlength="4000" rows="1" ${disabled?'disabled':''} placeholder="${disabled?'Join this Piece to chat':esc(placeholder)}"></textarea><button class="send-btn" type="submit" ${disabled?'disabled':''} aria-label="Send">${ico('send')}</button></div><div class="composer-footer"><span id="typing-line"></span><span id="file-status" role="status" aria-live="polite"></span><span>${extra||'Enter to send · Shift+Enter for a new line'}</span></div><input type="file" id="message-file" hidden accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,audio/webm,audio/ogg,audio/mp4,audio/mpeg"></form>`}
+function composer(kind,placeholder,extra=''){const disabled=kind==='piece'&&!inPiece(state.selected);return `<form class="composer-wrap" id="composer-form" data-kind="${kind}">${replyTo?`<div class="composer-reply"><span class="composer-reply-bar"></span><div class="composer-reply-content"><strong>Replying to ${esc(pby(replyTo.author_id).display_name)}</strong><span>${esc((replyTo.body||'Attachment').slice(0,110))}</span></div><button type="button" class="round-btn" data-action="cancel-reply" aria-label="Cancel reply" title="Cancel reply">${ico('x','icon-sm')}</button></div>`:''}<div id="composer-assist" class="composer-assist" hidden></div><div class="composer">${kind==='chat'?`<button type="button" class="round-btn" data-action="attach" title="Attach file">${ico('clip')}</button>`:''}<button type="button" class="round-btn" data-action="emoji-picker" title="Emojis">${ico('smile')}</button><button type="button" class="round-btn" data-action="sticker-picker" title="Stickers">🎨</button><button type="button" class="round-btn" data-action="html-embed" title="HTML + CSS embed">${ico('code','icon-sm')||'&lt;/&gt;'}</button>${kind==='chat'?`<button type="button" class="round-btn composer-extra" data-action="gif-picker" title="GIF">GIF</button><button type="button" class="round-btn composer-extra" data-action="new-poll" title="Poll">📊</button><button type="button" class="round-btn composer-extra" data-action="record-voice" title="Voice message">🎙️</button>`:''}<textarea id="message-box" name="body" maxlength="4000" rows="1" ${disabled?'disabled':''} placeholder="${disabled?'Join this Piece to chat':esc(placeholder)}"></textarea><button class="send-btn" type="submit" ${disabled?'disabled':''} aria-label="Send">${ico('send')}</button></div><div class="composer-footer"><span id="typing-line"></span><span id="file-status" role="status" aria-live="polite"></span><span>${extra||'Enter to send · Shift+Enter for a new line'}</span></div><input type="file" id="message-file" hidden accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,audio/webm,audio/ogg,audio/mp4,audio/mpeg"></form>`}
 function renderFriends(){let pending=friendships.filter(f=>f.status==='pending');const incoming=pending.filter(f=>f.recipient===user.id),outgoing=pending.filter(f=>f.requester===user.id),accepted=myFriendIds();return header('Friends','Keep the people who matter close',`<button class="btn sm" data-action="find-friends">${ico('plus')} Add friends</button>`)+`<div class="main-body"><div class="content-pad"><h1 class="page-title">Your circle 🧡</h1><p class="page-subtitle">Your friends, friend requests, and the next great conversation.</p>${incoming.length?`<div class="section-row top-spacer"><h2 class="section-heading">Friend requests</h2></div><div class="card">${incoming.map(f=>friendItem(pby(f.requester),'incoming',f.id)).join('')}</div>`:''}${outgoing.length?`<div class="section-row top-spacer"><h2 class="section-heading">Sent requests</h2></div><div class="card">${outgoing.map(f=>friendItem(pby(f.recipient),'outgoing',f.id)).join('')}</div>`:''}<div class="section-row top-spacer"><h2 class="section-heading">Friends (${accepted.length})</h2></div><div class="card">${accepted.map(id=>friendItem(pby(id),'friend')).join('')||'<div class="notice-inline">No friends yet. Search for people by username and send them a request.</div>'}</div></div></div>`}
 function friendItem(p,kind,fid=''){return `<div class="friend-row">${profileFace(p)}<div class="friend-data">${profileName(p)}<p>@${esc(p.handle)}</p></div>${kind==='incoming'?`<button class="btn sm" data-action="accept-friend" data-id="${fid}">Accept</button>`:kind==='outgoing'?`<span class="tag neutral">Pending</span>`:`<button class="btn sm secondary" data-action="start-dm" data-id="${p.id}">Message</button>`}</div>`}
 function renderFriend(p){
@@ -1761,11 +1818,14 @@ function applySlashCommand(body,kind){
   default:return {error:'Unknown command. Use /help to see available commands.'};
  }
 }
-async function sendMessage(form){let text=String(new FormData(form).get('body')||'').trim();const command=text.startsWith('/')?applySlashCommand(text,form.dataset.kind):null;if(command?.error){toast(command.error,true);return}if(command?.handled){const field=form.querySelector('#message-box');if(field)field.value='';return}if(command?.text)text=command.text;let file=document.getElementById('message-file')?.files?.[0]||recordedVoice||null;if(!text&&!file)return;
+async function sendMessage(form){let text=String(new FormData(form).get('body')||'').trim();const command=text.startsWith('/')?applySlashCommand(text,form.dataset.kind):null;if(command?.error){toast(command.error,true);return}if(command?.handled){const field=form.querySelector('#message-box');if(field)field.value='';return}if(command?.text)text=command.text;
+ if(!text.startsWith('[TENDER_')&&window.Tender05)text=window.Tender05.expand(text,tender05Prefs().emoticons!==false);
+ if(!tender05RateAllowed())return;
+ let file=document.getElementById('message-file')?.files?.[0]||recordedVoice||null;if(!text&&!file)return;
  if(state.busy)return;const kind=form.dataset.kind,table=kind==='chat'?'messages':'piece_messages',target=state.selected,area=state.area,channelAtSend=kind==='piece'?state.channelId:null;
  const original=text,replyId=replyTo?.id||null;const tmp=crypto.randomUUID();const pending={id:tmp,created_at:new Date().toISOString(),author_id:user.id,body:text,pending:true,conversation_id:kind==='chat'?target:null,piece_id:kind==='piece'?target:null,channel_id:kind==='piece'?channelAtSend:null,attachment_path:file?file.name:null,pendingFile:file?URL.createObjectURL(file):null,reply_to:replyId};
  const field=form.querySelector('#message-box');if(field)field.value='';localStorage.removeItem(tenderDraftKey(area,target,kind==='piece'?'chat':state.pieceTab,channelAtSend));if(form.querySelector('#message-file'))form.querySelector('#message-file').value='';recordedVoice=null;replyTo=null;updateComposerReply();
- activeMessages.push(pending);syncActiveStream(true);document.getElementById('message-box')?.focus();
+ tender05RecordSent();activeMessages.push(pending);syncActiveStream(true);document.getElementById('message-box')?.focus();
  await safe(async()=>{let attachment_path=null;try{
  if(file){const status=document.getElementById('file-status');if(status)status.textContent='Uploading attachment…';if(kind!=='chat')throw Error('Upload attachments in DMs/groups, or use the Gallery in Pieces.');if(file.size>5*1024*1024)throw Error('Maximum attachment size is 5 MB.');if(!['image/png','image/jpeg','image/webp','image/gif','application/pdf','audio/webm','audio/ogg','audio/mp4','audio/mpeg'].includes(file.type))throw Error('Unsupported file type.');attachment_path=`${target}/${user.id}/${crypto.randomUUID()}-${file.name.replace(/[^a-z0-9_.-]/gi,'_')}`;assert(await db.storage.from('tender-chat').upload(attachment_path,file,{contentType:file.type,upsert:false}));}
  const chosenChannel=kind==='piece'&&channelReady?pieceChannels.find(c=>c.id===channelAtSend&&c.piece_id===target)||channelsFor(target).find(c=>c.is_default):null;
@@ -1901,6 +1961,9 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='custom-emoji'){customEmojiModal();return}
  if(a==='gif-picker'){gifModal();return}
  if(a==='new-poll'){if(!extendedReady)return toast('Run the 0.2 SQL migration first.',true);pollModal();return}
+ if(a==='sticker-picker'){tender05StickerPicker();return}
+ if(a==='html-embed'){tender05EmbedStudio();return}
+ if(a==='send-sticker'){tender05SendPayload('[TENDER_STICKER]',{emoji:String(el.dataset.emoji||'🍗'),name:String(el.dataset.name||'Sticker')});return}
  if(a==='search'){searchModal();return}
  if(a==='bookmarks'){await openBookmarks();return}
  if(a==='blocked-list'){modal('Blocked users','Blocking stops DMs from that account.',`<div class="search-results">${blockedUsers.map(b=>`<button class="saved-row" data-action="toggle-block" data-id="${b.blocked_id}">Unblock ${esc(pby(b.blocked_id).display_name)}</button>`).join('')||'<p class="hint">Nobody blocked.</p>'}</div>`);return}
@@ -1992,6 +2055,16 @@ async function submitForm(form){switch(form.id){
     if(wallpaper==='image' && (!/^https:\/\//i.test(image)||validUrl(image)==='#'))throw Error('Choose an HTTPS image URL.');
     localStorage.setItem(key,JSON.stringify({wallpaper,image:image.slice(0,1200)}));closeModal();applyLocalAppearance();toast('Wallpaper saved!');return}
  case'composer-form':return sendMessage(form);
+ case'tender-html-embed-form':{
+  const d=new FormData(form),html=String(d.get('html')||''),css=String(d.get('css')||'');
+  if(!html.trim())throw Error('Add some HTML first.');
+  tender05SendPayload('[TENDER_HTML]',{html:html.slice(0,2600),css:css.slice(0,900)});return;
+ }
+ case'tender-sticker-form':{
+  const d=new FormData(form),emoji=String(d.get('emoji')||'').trim(),name=String(d.get('name')||'').trim();
+  if(!emoji||!name)throw Error('Choose an emoji and a caption.');
+  tender05SendPayload('[TENDER_STICKER]',{emoji:emoji.slice(0,12),name:name.slice(0,40)});return;
+ }
  case'friend-search-form':return safe(async()=>{let h=String(new FormData(form).get('handle')).trim().toLowerCase();let target=assert(await q('profiles').select('id,handle,display_name,avatar_url').eq('handle',h).maybeSingle());let res=document.getElementById('friend-search-results');if(!res)return;if(!target){res.innerHTML='<p class="notice-inline">No user with that username. Double-check their spelling.</p>';return}if(target.id===user.id){res.innerHTML='<p class="notice-inline">That\'s you, Buffalo! 🍗</p>';return}let f=friendships.find(f=>[f.requester,f.recipient].includes(user.id)&&[f.requester,f.recipient].includes(target.id));res.innerHTML=`<div class="friend-row">${profileFace(target)}<div class="friend-data">${profileName(target)}<p>@${esc(target.handle)}</p></div>${f?`<span class="tag">${esc(f.status)}</span>`:`<button class="btn sm" data-action="request-friend" data-id="${target.id}">Add friend</button>`}</div>`;return});
  case'group-form':return safe(async()=>{let data=new FormData(form),name=String(data.get('group_name')).trim(),members=data.getAll('member');let cid=assert(await db.rpc('start_group',{group_name:name,member_ids:members}));closeModal();await refreshData();await goTo('chats',cid);toast('Group created!')});
  case'channel-form':return submitChannelForm(form);
@@ -2191,6 +2264,7 @@ document.addEventListener('click',event=>{
  if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;
  if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
 document.addEventListener('input',e=>{
+ if(e.target.closest?.('#tender-html-embed-form')){tender05HTMLPreview();return}
  if(e.target.closest?.('#profile-style-form')){
   const form=e.target.closest('#profile-style-form');
   const color=field=>tenderSafeColor(form.querySelector('[name="'+field+'"]')?.value);
