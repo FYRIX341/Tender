@@ -1554,7 +1554,7 @@ function subscribe(){
  tenderChatSocketState='connecting';
  tenderStartChatSync();
  tenderInboxReminderTimer=setInterval(()=>{tenderInboxCheckDue().catch(console.warn)},30000);
- tenderInboxCheckDue().catch(console.warn);
+ tenderInboxLoad().then(()=>{renderNavBadges();return tenderInboxCheckDue()}).catch(console.warn);
  realtimeChannel=db.channel('tender-live-'+user.id)
  .on('postgres_changes',{event:'*',schema:'public',table:'messages'},e=>scheduleReconcile(true,'messages',e))
  .on('postgres_changes',{event:'*',schema:'public',table:'piece_messages'},e=>{scheduleReconcile(true,'piece_messages',e);scheduleChannelUnreadRefresh();})
@@ -1585,7 +1585,7 @@ function render(){if(!user)return renderAuth();
   const date=new Date(my.deletion_requested_at||Date.now()),deadline=new Date(date.getTime()+30*86400000);
   ROOT.innerHTML=`<div class="login-layout tender-lifecycle-screen"><div class="login-panel"><div class="eyebrow">Tender account</div><h2>Deletion requested</h2><p>Your account is frozen while this request is pending.</p><p class="hint">Cancellation is available until ${esc(deadline.toLocaleDateString())}. Permanent deletion requires our server-side cleanup service and is not automatic until that service is deployed.</p><button class="btn full" data-action="tender05-cancel-delete">Cancel deletion</button><button class="btn secondary full top-spacer" data-action="logout">Log out</button></div></div>`;return;
  }
- ROOT.innerHTML=`<div class="screen ${state.mobileDetail?'in-detail':''} ${['pieces','discover'].includes(state.area)&&state.selected?'piece-workspace':''}" id="app-screen"><nav class="rail"><div class="rail-brand" title="Tender"><img src="buffalo.webp" alt="Buffalo"></div>${navItem('chats','chat','Chats')}${navItem('friends','users','Friends')}${navItem('pieces','pieces','Pieces')}${navItem('discover','compass','Discover')}<div class="rail-piece-zone">${railPieceHTML()}</div><div class="rail-bottom"><button class="rail-btn" data-action="open-alerts" title="Activity inbox">${ico('bell')}${renderBadge(unreadAll())}</button><button type="button" class="rail-btn rail-toggle" title="Expand or collapse sidebar" data-action="toggle-rail">${ico('pieces')}<span class="rail-label">Expand rail</span></button><button type="button" class="rail-btn" title="Show or hide member panel" data-action="toggle-info">${ico('users')}<span class="rail-label">Members</span></button></div><button class="rail-btn mobile-only ${state.area==='settings'?'active':''}" data-action="area" data-area="settings" aria-label="Settings">${ico('settings')}<span class="rail-label">Settings</span></button></nav><aside class="sidebar" id="sidebar"></aside><div class="splitter splitter-sidebar" data-split="sidebar" role="separator" aria-label="Resize conversation list" aria-orientation="vertical" aria-valuemin="210" aria-valuemax="420" tabindex="0"></div><main class="main" id="main"></main><div class="splitter splitter-info" data-split="info" role="separator" aria-label="Resize member list" aria-orientation="vertical" aria-valuemin="190" aria-valuemax="430" tabindex="0"></div><aside class="info-panel" id="info-panel" aria-label="Conversation details"></aside></div>`;
+ ROOT.innerHTML=`<div class="screen ${state.mobileDetail?'in-detail':''} ${['pieces','discover'].includes(state.area)&&state.selected?'piece-workspace':''}" id="app-screen"><nav class="rail"><div class="rail-brand" title="Tender"><img src="buffalo.webp" alt="Buffalo"></div>${navItem('chats','chat','Chats')}${navItem('friends','users','Friends')}${navItem('pieces','pieces','Pieces')}${navItem('discover','compass','Discover')}<div class="rail-piece-zone">${railPieceHTML()}</div><div class="rail-bottom"><button type="button" class="rail-btn rail-toggle" title="Expand or collapse sidebar" data-action="toggle-rail">${ico('pieces')}<span class="rail-label">Expand rail</span></button><button type="button" class="rail-btn" title="Show or hide member panel" data-action="toggle-info">${ico('users')}<span class="rail-label">Members</span></button></div><button class="rail-btn mobile-only ${state.area==='settings'?'active':''}" data-action="area" data-area="settings" aria-label="Settings">${ico('settings')}<span class="rail-label">Settings</span></button></nav><aside class="sidebar" id="sidebar"></aside><div class="splitter splitter-sidebar" data-split="sidebar" role="separator" aria-label="Resize conversation list" aria-orientation="vertical" aria-valuemin="210" aria-valuemax="420" tabindex="0"></div><main class="main" id="main"></main><div class="splitter splitter-info" data-split="info" role="separator" aria-label="Resize member list" aria-orientation="vertical" aria-valuemin="190" aria-valuemax="430" tabindex="0"></div><aside class="info-panel" id="info-panel" aria-label="Conversation details"></aside></div>`;
  const screen=document.getElementById('app-screen');
  screen.classList.toggle('rail-expanded',localStorage.getItem('tender-rail-expanded')==='1');
  screen.style.setProperty('--tender-sidebar-width',readSplitWidth('sidebar')+'px');
@@ -2227,7 +2227,7 @@ async function tenderInboxSaveReminder(form){
  if(tenderInbox.open){tenderInbox.tab='reminders';tenderInboxRender()}
 }
 async function tenderInboxCheckDue(){
- if(!user||!db||document.visibilityState==='hidden')return;
+ if(!user||!db||!tenderInbox.ready||document.visibilityState==='hidden')return;
  const now=new Date().toISOString();
  const result=await q('tender_inbox_reminders').select('*').eq('user_id',user.id).is('notified_at',null).lte('remind_at',now).order('remind_at',{ascending:true}).limit(8);
  if(result.error)return;
@@ -2243,7 +2243,7 @@ async function tenderInboxMarkRead(){
  if(!tenderInbox.ready)throw Error('Complete the Tender 0.5.3 database migration to mark all Inbox alerts as read.');
  assert(await db.rpc('tender_inbox_mark_all_read'));
  notifications.forEach(n=>{n.is_read=true});tenderInbox.mentions.forEach(m=>{m.is_read=true});
- renderNavBadges();renderSidebar();tenderInboxRender();toast('Inbox marked as read. ✓');
+ await loadChannelUnreads();renderPieceRail();renderNavBadges();renderSidebar();tenderInboxRender();toast('Inbox marked as read. ✓');
 }
 async function tenderInboxJumpTo(type,id,cid,pid,channel){
  if(!user)return;
