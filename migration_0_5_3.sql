@@ -7,7 +7,7 @@ BEGIN;
 -- A guessed message UUID is never enough to read or save private content.
 CREATE OR REPLACE FUNCTION public.tender_inbox_can_access(kind text,mid uuid,uid uuid DEFAULT auth.uid())
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $tender$
- SELECT uid IS NOT NULL AND mid IS NOT NULL AND (
+ SELECT uid IS NOT NULL AND uid=auth.uid() AND mid IS NOT NULL AND (
   (kind='message' AND EXISTS(
    SELECT 1 FROM public.messages m
    WHERE m.id=mid AND public.is_chat_member(m.conversation_id,uid)
