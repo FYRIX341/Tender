@@ -187,6 +187,86 @@ function myFriendIds(){return friendships.filter(f=>f.status==='accepted').map(f
 function getConversation(id){return conversations.find(c=>c.id===id)};
 function namesFor(c){let members=c?.conversation_members||[];if(c.kind==='group')return c.title;let other=members.find(m=>m.user_id!==user.id);return pby(other?.user_id).display_name||'Direct message'}
 function avatarFor(c){return c.kind==='group'?`<span class="squad-avatar">👥</span>`:avatars(pby((c.conversation_members||[]).find(m=>m.user_id!==user.id)?.user_id))}
+// Tender 0.5: optional database-backed stranger DM requests and inbox.
+let tender05Ready=false,tender05Requests=[],tender05PieceTags=[];
+async function tender05LoadData(){
+ tender05Ready=false;tender05Requests=[];tender05PieceTags=[];
+ if(!db||!user)return;
+ try{
+  const probe=await q('profiles').select('dm_policy,account_state,banner_mode,equipped_piece_id').eq('id',user.id).maybeSingle();
+  if(probe.error)return;
+  tender05Ready=true;
+  const [requests,tags]=await Promise.all([
+   q('tender_dm_requests').select('*').order('created_at',{ascending:false}).limit(100),
+   q('tender_piece_tags').select('*').limit(250)
+  ]);
+  if(!requests.error)tender05Requests=requests.data||[];
+  if(!tags.error)tender05PieceTags=tags.data||[];
+ }catch(e){console.warn('Tender 0.5 optional database features:',e)}
+}
+function tender05RequestCount(){return tender05Requests.filter(r=>r.recipient_id===user?.id&&r.status==='pending').length}
+function tender05RequestModal(){
+ if(!tender05Ready){toast('Message requests will be available after migration_0_5.sql is installed.',true);return}
+ const pending=tender05Requests.filter(r=>r.recipient_id===user.id&&r.status==='pending');
+ const rows=pending.map(r=>{
+  const sender=pby(r.sender_id);
+  const mutual=sharedPublicPieces(r.sender_id).map(p=>p.name).slice(0,4);
+  const links=(r.body.match(/https?:\/\/\S+/gi)||[]).length;
+  return `<article class="tender-request-card">
+   <div class="tender-request-author">${avatars(sender)}<div><strong>${esc(sender.display_name)}</strong><small>@${esc(sender.handle||'member')} · ${relative(r.created_at)}</small></div></div>
+   <p>${esc(r.body)}</p>
+   ${mutual.length?`<small class="hint">Shared Pieces: ${esc(mutual.join(', '))}</small>`:''}
+   ${links?'<small class="tender-request-warning">⚠ This message contains a link. Open links only if you trust the sender.</small>':''}
+   <div class="tender-request-actions">
+   <button class="btn sm" data-action="accept-dm-request" data-id="${esc(r.id)}">Accept</button>
+   <button class="btn secondary sm" data-action="decline-dm-request" data-id="${esc(r.id)}">Decline</button>
+   <button class="btn secondary sm" data-action="report-dm-request" data-id="${esc(r.id)}">Report</button>
+   <button class="btn danger sm" data-action="block-dm-request" data-id="${esc(r.sender_id)}">Block</button>
+   </div></article>`;
+ }).join('');
+ modal('💌 Message Requests',pending.length+' pending · Accept a request before its sender joins your normal DMs.',
+  `<div class="tender-requests">${rows||'<div class="notice-inline">No pending requests. Stay crispy! 🍗</div>'}</div>
+  ${pending.length>1?'<button type="button" class="btn secondary full top-spacer" data-action="decline-all-dm-requests">Decline all pending requests</button>':''}`);
+}
+function tender05ContactModal(recipient){
+ const person=pby(recipient);
+ modal('💌 Message request','This user accepts messages as requests. They can accept, decline or block you.',
+ `<form id="tender-dm-request-form">
+ <input type="hidden" name="recipient" value="${esc(recipient)}">
+ <div class="field"><label>Message to ${esc(person.display_name)}</label><textarea name="body" class="input textarea" maxlength="600" minlength="1" rows="4" required placeholder="Say hello!"></textarea></div>
+ <p class="hint">Only send messages to people who want to hear from you. Do not include personal information.</p>
+ <button class="btn full" type="submit">Send request</button></form>`);
+}
+async function tender05Contact(id,text=''){
+ if(!tender05Ready){
+  const cid=assert(await db.rpc('start_dm',{other_id:id}));
+  closeModal();await refreshData();await goTo('chats',cid);
+  return;
+ }
+ const payload=assert(await db.rpc('tender_contact_user',{other_id:id,initial_text:text}));
+ if(payload.kind==='compose_request'){tender05ContactModal(id);return}
+ if(payload.kind==='request'){closeModal();await tender05LoadData();toast('Message request sent! 🍗');return}
+ if(payload.kind==='conversation'){
+  closeModal();await refreshData();await goTo('chats',payload.id);return;
+ }
+ throw Error('Tender did not return a valid contact result');
+}
+async function tender05AcceptRequest(id){
+ const cid=assert(await db.rpc('tender_accept_dm_request',{request_id:id}));
+ await refreshData();closeModal();renderSidebar();await goTo('chats',cid);toast('Message request accepted!');
+}
+async function tender05DeclineRequest(id){
+ assert(await db.rpc('tender_decline_dm_request',{request_id:id}));
+ await tender05LoadData();tender05RequestModal();renderSidebar();toast('Message request declined.');
+}
+function tender05ReportModal(id){
+ modal('Report message request','Flag suspicious or unwanted requests. A report is stored for future moderation review.',
+ `<form id="tender-report-request-form">
+ <input type="hidden" name="request_id" value="${esc(id)}">
+ <div class="field"><label>Why are you reporting this?</label><textarea name="reason" required minlength="8" maxlength="500" class="input textarea" rows="4" placeholder="Describe the problem briefly."></textarea></div>
+ <button type="submit" class="btn danger full">Submit report</button></form>`);
+}
+
 function inPiece(pid){return memberships.some(m=>m.piece_id===pid && m.user_id===user.id)}
 function ownPiece(pid){return pieces.some(p=>p.id===pid&&p.owner_id===user.id)}
 function canManageChannels(pid){return !!user&&!!pid&&(ownPiece(pid)||memberships.some(m=>m.piece_id===pid&&m.user_id===user.id&&['owner','moderator'].includes(m.role)))}
@@ -1184,7 +1264,7 @@ async function boot(){
    if(user)await initialize();else renderAuth();
  }catch(e){ROOT.innerHTML=empty('Could not reach Tender','Check the public Supabase URL and key in config.js.');toast(e.message||'Could not connect.',true)}
 }
-function reset(){clearTimeout(chatDayRefreshTimer);chatDayRefreshTimer=null;stopCallInbox();notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;channelBackendError='';state.channelId=null;presenceRoster.clear();presenceConnectionReady=false;if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
+function reset(){clearTimeout(chatDayRefreshTimer);chatDayRefreshTimer=null;stopCallInbox();notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;channelBackendError='';state.channelId=null;presenceRoster.clear();presenceConnectionReady=false;tender05Requests=[];tender05PieceTags=[];tender05Ready=false;if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
 function renderSetup(){ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Your friends. Your spaces. Your flavor.</p></div><div class="login-panel"><div class="eyebrow">Tender setup</div><h2>Almost ready to connect.</h2><p>This website needs a free online Supabase project for accounts, messages and Pieces. It's not a local chat simulator.</p><div class="setup-box"><h3>🍗 Connect the shared database</h3><p>1. Create a free project at <a href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Supabase</a>.<br>2. Run <strong>schema.sql</strong> in the project's SQL editor.<br>3. Copy its Project URL and publishable (anon) key into <strong>config.js</strong> on GitHub.<br>4. Refresh this website. Everyone will connect to the same database.</p><details><summary>Important security information</summary>Only use the public publishable/anon key. Never put a service_role key or other secret in GitHub. Set URL configuration for email confirmation in Supabase Auth.</details></div><p class="hint">Your Tender HTML interface is deployed separately from the database. A GitHub Pages link alone cannot deliver live messaging.</p><a class="btn" href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Connect Supabase ${ico('external')}</a></div></div>`}
 function renderAuth(){state.mobileDetail=false;ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Stay close. Stay crispy. 🍗</p></div><div class="login-panel"><div class="eyebrow">Welcome to Tender</div><h2>${state.loginMode==='login'?'Good to have you back.':'Your people are waiting.'}</h2><p>${state.loginMode==='login'?'Sign in to catch up with your people.':'Create your account to join the conversation.'}</p><div class="login-tabs"><button class="${state.loginMode==='login'?'selected':''}" data-action="auth-tab" data-tab="login">Log in</button><button class="${state.loginMode==='signup'?'selected':''}" data-action="auth-tab" data-tab="signup">Sign up</button></div><form id="auth-form">${state.loginMode==='signup'?`<div class="field"><label for="handle">Username (3–20 letters, numbers, underscores)</label><input class="input" id="handle" name="handle" minlength="3" maxlength="20" pattern="[a-zA-Z0-9_]{3,20}" required autocomplete="username" placeholder="buffalofan"></div><div class="field"><label for="display">Display name</label><input class="input" id="display" name="display_name" maxlength="40" required placeholder="Your name"></div>`:''}<div class="field"><label for="email">Email address</label><input class="input" id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com"></div><div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" minlength="8" autocomplete="${state.loginMode==='login'?'current-password':'new-password'}" required placeholder="At least 8 characters"></div><button class="btn full top-spacer" type="submit">${state.loginMode==='login'?'Log in':'Create account'} ${ico('back')}</button></form><p class="hint top-spacer">Tender is an early beta. Please don't post private information in public Pieces.</p></div></div>`}
 async function authSubmit(form){const data=new FormData(form), email=String(data.get('email')).trim(), password=String(data.get('password'));
@@ -1197,7 +1277,7 @@ async function initialize(){ROOT.innerHTML='<div class="loading-screen"><img src
    const invitation=params.get('piece');
   if(invitation&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invitation)&&pieces.some(p=>p.id===invitation))await goTo('pieces',invitation);
  }catch(e){toast(e.message||'Unable to load the app',true);ROOT.innerHTML=empty('Something went wrong','Could not load Tender. Try refreshing.') }}
-async function refreshData(){if(!user)return;const [a,b,c,d,e]=await Promise.all([q('profiles').select('*').order('created_at',{ascending:false}).limit(300),q('friendships').select('*'),q('conversations').select('*,conversation_members(user_id)').order('created_at',{ascending:false}),q('pieces').select('*').order('created_at',{ascending:false}).limit(100),q('piece_members').select('*')]);profiles=assert(a)||[];my=profiles.find(x=>x.id===user.id)||{id:user.id,handle:'member',display_name:user.email||'Account'};friendships=assert(b)||[];conversations=assert(c)||[];pieces=assert(d)||[];memberships=assert(e)||[];await refreshExtras();await loadChannelData();}
+async function refreshData(){if(!user)return;const [a,b,c,d,e]=await Promise.all([q('profiles').select('*').order('created_at',{ascending:false}).limit(300),q('friendships').select('*'),q('conversations').select('*,conversation_members(user_id)').order('created_at',{ascending:false}),q('pieces').select('*').order('created_at',{ascending:false}).limit(100),q('piece_members').select('*')]);profiles=assert(a)||[];my=profiles.find(x=>x.id===user.id)||{id:user.id,handle:'member',display_name:user.email||'Account'};friendships=assert(b)||[];conversations=assert(c)||[];pieces=assert(d)||[];memberships=assert(e)||[];await refreshExtras();await loadChannelData();await tender05LoadData();}
 function unsub(){unsubTyping();if(reconcileTimer)clearTimeout(reconcileTimer);if(realtimeChannel&&db)db.removeChannel(realtimeChannel);realtimeChannel=null;if(realtimeRefreshTimer)clearTimeout(realtimeRefreshTimer)}
 function subscribe(){
  unsub();if(!user)return;
@@ -1355,6 +1435,7 @@ function renderSidebar(){
  const savedListScroll=el.querySelector('.sidebar-content')?.scrollTop||0;
  el.innerHTML=`<div class="sidebar-top">${state.area==='chats'?`
    <button type="button" class="sidebar-friends-top ${state.area==='friends'?'selected':''}" data-action="area" data-area="friends">${ico('users')}<span>Friends</span>${unreadFriends()?renderBadge(unreadFriends()):''}</button>
+    ${tender05RequestCount()?`<button class="sidebar-friends-top tender-request-link" type="button" data-action="message-requests">💌<span>Message Requests</span>${renderBadge(tender05RequestCount())}</button>`:'' }
    <div class="sidebar-title dm-heading"><span>DIRECT MESSAGES</span><button class="plus-btn" aria-label="New direct message" title="New direct message" data-action="new-chat">${ico('plus')}</button></div>`:
    `<div class="eyebrow">${eyebrow}</div><div class="sidebar-title"><h2>${title}</h2>${newAction?`<button class="plus-btn" aria-label="Create" title="Create" data-action="${newAction}">${ico('plus')}</button>`:''}</div>`}
    ${state.area!=='settings'?`<label class="searchbox">${ico('search','icon-sm')}<input id="sidebar-search" value="${esc(state.search)}" placeholder="Search ${state.area==='chats'?'DMs':state.area==='friends'?'friends':'Pieces'}..." aria-label="Search"></label>`:''}
@@ -2031,7 +2112,14 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='enlarge'){MODALS.innerHTML=`<div class="backdrop-img" data-action="close-modal"><img src="${esc(validUrl(el.dataset.src))}" alt="Gallery picture"></div>`;return}
  if(a==='open-attachment'){let url=assert(await db.storage.from('tender-chat').createSignedUrl(el.dataset.path,60)).signedUrl;window.open(validUrl(url),'_blank','noopener,noreferrer');return}
  if(a==='logout'){await safe(async()=>{await finishTenderCall();assert(await db.auth.signOut());unsub();reset();renderAuth()});return}
- if(a==='start-dm')await safe(async()=>{let cid=assert(await db.rpc('start_dm',{other_id:id}));closeModal();await refreshData();await goTo('chats',cid)});
+ if(a==='start-dm'){await safe(async()=>{await tender05Contact(id)});return}
+ if(a==='message-requests'){tender05RequestModal();return}
+ if(a==='accept-dm-request'){await safe(()=>tender05AcceptRequest(id));return}
+ if(a==='decline-dm-request'){await safe(()=>tender05DeclineRequest(id));return}
+ if(a==='decline-all-dm-requests'){await safe(async()=>{const pending=tender05Requests.filter(r=>r.recipient_id===user.id&&r.status==='pending');for(const row of pending)assert(await db.rpc('tender_decline_dm_request',{request_id:row.id}));await tender05LoadData();closeModal();renderSidebar();toast('Requests declined.')});return}
+ if(a==='report-dm-request'){tender05ReportModal(id);return}
+ if(a==='block-dm-request'){await safe(async()=>{if(!extendedReady)throw Error('Blocking requires the safety database.');if(!await tenderConfirm('Block this sender?','They will no longer be able to request or send messages.','Block user'))return;const response=await q('user_blocks').upsert({blocker_id:user.id,blocked_id:id},{onConflict:'blocker_id,blocked_id'});assert(response);await tender05LoadData();closeModal();renderSidebar();toast('Sender blocked.')});return}
+
  if(a==='accept-friend')await safe(async()=>{assert(await q('friendships').update({status:'accepted'}).eq('id',id));await refreshData();render();toast('Friend request accepted!')});
  if(a==='remove-friend') {if(!await tenderConfirm('Remove friend?','They will be removed from your friends list. You can add them back later.','Remove friend'))return;await safe(async()=>{let f=friendships.find(f=>f.status==='accepted'&&[f.requester,f.recipient].includes(id));if(f)assert(await q('friendships').delete().eq('id',f.id));await refreshData();await goTo('friends');toast('Friend removed.')})}
  if(a==='join-piece')await safe(async()=>{assert(await db.rpc('join_piece',{pid:state.selected}));await refreshData();await loadActive();render();toast('Joined the Piece! 🍗')});
@@ -2055,6 +2143,8 @@ async function submitForm(form){switch(form.id){
     if(wallpaper==='image' && (!/^https:\/\//i.test(image)||validUrl(image)==='#'))throw Error('Choose an HTTPS image URL.');
     localStorage.setItem(key,JSON.stringify({wallpaper,image:image.slice(0,1200)}));closeModal();applyLocalAppearance();toast('Wallpaper saved!');return}
  case'composer-form':return sendMessage(form);
+ case'tender-dm-request-form':return safe(async()=>{const d=new FormData(form),recipient=String(d.get('recipient')||''),body=String(d.get('body')||'').trim();if(!body)throw Error('Write a message to send.');await tender05Contact(recipient,body)});
+ case'tender-report-request-form':return safe(async()=>{const d=new FormData(form),reason=String(d.get('reason')||'').trim(),request_id=String(d.get('request_id')||'');if(reason.length<8)throw Error('Please describe the issue in at least 8 characters.');assert(await q('tender_safety_reports').insert({reporter_id:user.id,request_id,reason}));closeModal();toast('Report saved for moderator review.')});
  case'tender-html-embed-form':{
   const d=new FormData(form),html=String(d.get('html')||''),css=String(d.get('css')||'');
   if(!html.trim())throw Error('Add some HTML first.');
