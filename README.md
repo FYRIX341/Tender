@@ -6,6 +6,21 @@ Tender is a responsive social messaging app with **Buffalo** the mascot. Chat wi
 
 **[🍗 Open Tender securely](https://fyrix341.github.io/Tender/)** · [Source code](https://github.com/FYRIX341/Tender)
 
+## 📥 Tender 0.5.3 — Inbox & Message Formatting
+
+**Tender now has an IN-APP CHANGELOG**: open the 📥 button in the conversation top bar → **Updates** to see Major, Minor and Patch releases with artwork, or → **News** for Tender announcements. The in-app views replace the need to browse GitHub release Markdown files. Historical Markdown files remain in GitHub only as development records.
+
+- **Message formatting**: use `# Heading`, `## Subheading`, `**bold**`, `***bold italic***`, `__underline__`, `~~strikethrough~~`, quote blocks, lists, horizontal rules and inline/code blocks. All user markup is escaped before rendering.
+- **One + button for chat tools**: Upload a File, Create Poll (DM/group), Record Voice Clip (DM/group), HTML/CSS Embed, and Rich Embed. GIF, Stickers and Emoji remain on the **right** of the composer.
+- **Inbox tabs**: Unread, Mentions, Bookmarks, Reminders, Updates and News. Jump to a message in a DM, group chat or Piece, even if it's older than your latest 150 messages.
+- **Right-click messages** to bookmark them or create a reminder. Reminders are private, synced to the account and shown in Tender when due while the app is open or next opened (not mobile push).
+- **Profile Studio inside Settings**: same functional layout with a calmer background, no oversized "Make it yours" slogan.
+- **Mark all as read** also resets unread Piece-channel indicators.
+
+**Database setup required:** back up Supabase first, then run **[migration_0_5_3.sql](migration_0_5_3.sql)** in the *same* Supabase project as Tender. This adds RLS-protected bookmarks, reminders, and new incoming mention records, without erasing old messages. The Inbox's Updates and News work even before the migration, but cross-chat bookmarks/reminders/mentions require it.
+
+**Note:** Existing older @mentions are not automatically backfilled; incoming mentions will be collected after the migration. News posts are curated from real Tender changes, not fabricated announcements.
+
 ## 🎨 Tender 0.5.2 — Profile Studio & Live Chats
 
 **Profile Tags:** Pick a joined Piece Tag straight from your own profile and remove it whenever you want.

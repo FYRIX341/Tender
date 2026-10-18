@@ -98,4 +98,31 @@ assert.ok(studioHTML.includes('data-action="tender-v3-randomize"'),'Surprise Me 
 assert.ok(!studioHTML.includes('settings-profile-preview'),'Old profile editor is not reused');
 
 
+const script053=read('tender053.js');
+new vm.Script(script053,{filename:'tender053.js'});
+const win053={};
+vm.runInNewContext(script053,{window:win053},{timeout:1000});
+const md053=win053.Tender053;
+assert.ok(md053.format('# hi').includes('<h1'));
+assert.ok(md053.format('**Bold**').includes('<strong'));
+assert.ok(md053.format('***both***').includes('<em'));
+assert.ok(md053.format('__underline__').includes('<u'));
+assert.ok(md053.format('~~strike~~').includes('<del'));
+assert.ok(md053.format('---').includes('<hr'));
+assert.ok(!md053.format('<script>alert(1)</script>').includes('<script>'),'raw HTML escaped');
+assert.ok(!md053.format('**<img src=x>**').includes('<img'),'nested HTML escaped');
+assert.ok(md053.updates.some(x=>x.kind==='MAJOR UPDATE'),'major release visible');
+assert.ok(md053.updates.every(x=>x.image),'update artwork present');
+assert.ok(md053.news.every(x=>x.title&&x.image),'news artwork present');
+assert.ok(index.indexOf('tender053.js')<index.indexOf('app.js'),'safe renderer loads first');
+assert.ok(app.includes('window.Tender053.format(raw,safePlain)'),'messages use Markdown');
+assert.ok(app.includes('tender-inbox-toggle'),'topbar Inbox button');
+assert.ok(app.includes('composer-plus'),'unified plus menu');
+assert.ok(app.includes('function tenderInboxContent()'),'in-app Inbox views');
+const sql053=read('migration_0_5_3.sql');
+assert.ok(sql053.includes('ENABLE ROW LEVEL SECURITY'),'inbox access rules');
+assert.ok(sql053.includes('tender_inbox_capture_mentions'),'mention index trigger');
+assert.ok(sql053.includes('tender_inbox_mark_all_read'),'mark-read RPC');
+assert.ok(sql053.trimEnd().endsWith('COMMIT;'),'transactional migration');
+assert.equal((sql053.split('$tender$').length-1)%2,0,'balanced SQL tags');
 console.log('Tender 0.5 smoke checks passed');
