@@ -284,7 +284,7 @@ DO $tender$ BEGIN
 END $tender$;
 CREATE INDEX IF NOT EXISTS tender_forum_post_channel_idx ON public.piece_posts(channel_id,created_at DESC);
 CREATE OR REPLACE FUNCTION public.tender_channel_send_guard()
-RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE channel_kind text;
 BEGIN
  IF NEW.channel_id IS NOT NULL THEN
@@ -297,7 +297,7 @@ BEGIN
   END IF;
  END IF;
  RETURN NEW;
-END $;
+END $$;
 DROP TRIGGER IF EXISTS tender_channel_send_guard_trigger ON public.piece_messages;
 CREATE TRIGGER tender_channel_send_guard_trigger BEFORE INSERT ON public.piece_messages
  FOR EACH ROW EXECUTE FUNCTION public.tender_channel_send_guard();
@@ -334,7 +334,7 @@ CREATE TABLE IF NOT EXISTS public.tender_thread_posts(
 CREATE INDEX IF NOT EXISTS tender_thread_posts_idx ON public.tender_thread_posts(thread_id,created_at);
 
 CREATE OR REPLACE FUNCTION public.tender_thread_allowed(thread_uuid uuid)
-RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
  SELECT EXISTS(
   SELECT 1 FROM public.tender_threads t WHERE t.id=thread_uuid
    AND ((t.conversation_id IS NOT NULL AND public.is_chat_member(t.conversation_id))
@@ -343,10 +343,10 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $
     SELECT 1 FROM public.tender_thread_members m WHERE m.thread_id=t.id AND m.user_id=auth.uid()
    ))
  );
-$;
+$$;
 CREATE OR REPLACE FUNCTION public.tender_create_thread(
  root_kind text,root_id uuid,thread_title text,secret boolean DEFAULT false,invited uuid[] DEFAULT '{}'::uuid[]
-) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $
+) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE conv uuid; pid uuid; chid uuid; tid uuid; member_id uuid;
 BEGIN
  IF auth.uid() IS NULL OR root_id IS NULL THEN RAISE EXCEPTION 'Sign in first'; END IF;
@@ -372,7 +372,7 @@ BEGIN
    END LOOP;
  END IF;
  RETURN tid;
-END $;
+END $$;
 REVOKE ALL ON FUNCTION public.tender_create_thread(text,uuid,text,boolean,uuid[]) FROM PUBLIC,anon;
 GRANT EXECUTE ON FUNCTION public.tender_create_thread(text,uuid,text,boolean,uuid[]) TO authenticated;
 
@@ -400,14 +400,14 @@ CREATE POLICY "tender thread posts delete" ON public.tender_thread_posts FOR DEL
  USING(author_id=auth.uid());
 
 CREATE OR REPLACE FUNCTION public.tender_guard_thread_rate()
-RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE total integer;
 BEGIN
  SELECT count(*) INTO total FROM public.tender_thread_posts p
  WHERE p.author_id=NEW.author_id AND p.created_at>now()-interval '10 seconds';
  IF total>=8 THEN RAISE EXCEPTION 'Woah, chill there buddy! Gotta slow down.. 😏'; END IF;
  RETURN NEW;
-END $;
+END $$;
 DROP TRIGGER IF EXISTS tender_thread_rate_trigger ON public.tender_thread_posts;
 CREATE TRIGGER tender_thread_rate_trigger BEFORE INSERT ON public.tender_thread_posts
  FOR EACH ROW EXECUTE FUNCTION public.tender_guard_thread_rate();
