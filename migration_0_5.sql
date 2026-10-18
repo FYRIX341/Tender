@@ -97,9 +97,8 @@ BEGIN
  VALUES(auth.uid(),other_id,text_body,'pending')
  ON CONFLICT(sender_id,recipient_id) DO UPDATE
  SET body=EXCLUDED.body,status='pending',created_at=now(),responded_at=NULL
- WHERE public.tender_dm_requests.status='pending'
-    OR public.tender_dm_requests.responded_at IS NULL
-    OR public.tender_dm_requests.responded_at<now()-interval '7 days'
+ WHERE (public.tender_dm_requests.status='pending' AND public.tender_dm_requests.created_at<now()-interval '60 seconds')
+    OR (public.tender_dm_requests.status='declined' AND public.tender_dm_requests.responded_at<now()-interval '7 days')
  RETURNING id INTO request_id;
  IF request_id IS NULL THEN RAISE EXCEPTION 'Wait before sending another message request'; END IF;
  RETURN jsonb_build_object('kind','request','id',request_id);
@@ -144,6 +143,26 @@ BEGIN
     SELECT 1 FROM public.conversation_members m JOIN public.profiles p ON p.id=m.user_id
     WHERE m.conversation_id=NEW.conversation_id AND p.account_state<>'active'
    ) THEN RAISE EXCEPTION 'Cannot message an inactive account'; END IF;
+   IF EXISTS(
+    SELECT 1 FROM public.conversations c
+    JOIN public.conversation_members peer ON peer.conversation_id=c.id AND peer.user_id<>NEW.author_id
+    JOIN public.profiles profile ON profile.id=peer.user_id
+    WHERE c.id=NEW.conversation_id AND c.kind='dm'
+    AND (profile.dm_policy='none' OR
+      (profile.dm_policy='friends' AND NOT EXISTS(
+       SELECT 1 FROM public.friendships f
+       WHERE f.status='accepted' AND
+       ((f.requester=NEW.author_id AND f.recipient=peer.user_id)
+         OR(f.recipient=NEW.author_id AND f.requester=peer.user_id))
+      )))
+   ) THEN RAISE EXCEPTION 'The recipient has changed their DM privacy settings'; END IF;
+   IF EXISTS(
+    SELECT 1 FROM public.conversation_members peer
+    JOIN public.user_blocks b ON
+      ((b.blocker_id=peer.user_id AND b.blocked_id=NEW.author_id)
+       OR (b.blocker_id=NEW.author_id AND b.blocked_id=peer.user_id))
+    WHERE peer.conversation_id=NEW.conversation_id AND peer.user_id<>NEW.author_id
+   ) THEN RAISE EXCEPTION 'One of the conversation members blocked messaging'; END IF;
  END IF;
  SELECT
    (SELECT count(*) FROM public.messages m WHERE m.author_id=NEW.author_id AND m.created_at>now()-interval '10 seconds')
@@ -423,5 +442,30 @@ DO $tender$ BEGIN
   END IF;
  END IF;
 END $tender$;
+
+-- Explicit PostgREST privileges: RLS still limits access to each row.
+REVOKE ALL ON public.tender_threads,public.tender_thread_members,public.tender_thread_posts,
+ public.tender_profile_guestbook,public.tender_piece_tags,public.tender_safety_reports FROM PUBLIC,anon;
+GRANT SELECT ON public.tender_threads,public.tender_thread_members TO authenticated;
+GRANT SELECT,INSERT,UPDATE,DELETE ON public.tender_thread_posts,public.tender_profile_guestbook TO authenticated;
+GRANT SELECT,INSERT,UPDATE ON public.tender_piece_tags TO authenticated;
+GRANT SELECT,INSERT ON public.tender_safety_reports TO authenticated;
+
+-- Don't let arbitrary clients advertise another Piece's tag via direct profile update.
+-- Validates every attempted profile update, regardless of call path.
+CREATE OR REPLACE FUNCTION public.tender_guard_equipped_tag()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $tender$
+BEGIN
+ IF NEW.equipped_piece_id IS NOT NULL AND NOT EXISTS(
+  SELECT 1 FROM public.tender_piece_tags tag
+  JOIN public.piece_members member ON member.piece_id=tag.piece_id
+  WHERE tag.piece_id=NEW.equipped_piece_id AND member.user_id=NEW.id
+ ) THEN RAISE EXCEPTION 'You must belong to that Piece before equipping its tag'; END IF;
+ RETURN NEW;
+END;
+$tender$;
+DROP TRIGGER IF EXISTS tender_guard_equipped_tag_trigger ON public.profiles;
+CREATE TRIGGER tender_guard_equipped_tag_trigger BEFORE INSERT OR UPDATE OF equipped_piece_id ON public.profiles
+ FOR EACH ROW EXECUTE FUNCTION public.tender_guard_equipped_tag();
 
 COMMIT;
