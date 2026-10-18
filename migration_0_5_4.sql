@@ -143,9 +143,9 @@ BEGIN
  ), inserted AS (
   INSERT INTO public.tender_inbox_mentions(
    user_id,author_id,target_type,message_id,
-   conversation_id,piece_id,channel_id,body_excerpt,created_at)
+   conversation_id,piece_id,channel_id,body_excerpt,created_at,is_read)
   SELECT viewer,b.author_id,b.target_type,b.message_id,
-         b.conversation_id,b.piece_id,b.channel_id,left(b.body,380),b.created_at
+         b.conversation_id,b.piece_id,b.channel_id,left(b.body,380),b.created_at,true
   FROM batch b
   WHERE b.author_id<>viewer AND b.body ~* handle_pattern
   ON CONFLICT(user_id,target_type,message_id) DO NOTHING
