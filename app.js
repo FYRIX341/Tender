@@ -1495,7 +1495,7 @@ async function initialize(){ROOT.innerHTML='<div class="loading-screen"><img src
   if(invitation&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invitation)&&pieces.some(p=>p.id===invitation))await goTo('pieces',invitation);
  }catch(e){toast(e.message||'Unable to load the app',true);ROOT.innerHTML=empty('Something went wrong','Could not load Tender. Try refreshing.') }}
 async function refreshData(){if(!user)return;const [a,b,c,d,e]=await Promise.all([q('profiles').select('*').order('created_at',{ascending:false}).limit(300),q('friendships').select('*'),q('conversations').select('*,conversation_members(user_id)').order('created_at',{ascending:false}),q('pieces').select('*').order('created_at',{ascending:false}).limit(100),q('piece_members').select('*')]);profiles=assert(a)||[];my=profiles.find(x=>x.id===user.id)||{id:user.id,handle:'member',display_name:user.email||'Account'};friendships=assert(b)||[];conversations=assert(c)||[];pieces=assert(d)||[];memberships=assert(e)||[];await refreshExtras();await loadChannelData();await tender05LoadData();}
-function unsub(){unsubTyping();if(tenderInboxReminderTimer)clearInterval(tenderInboxReminderTimer);tenderInboxReminderTimer=null;tenderStopChatSync();if(reconcileTimer)clearTimeout(reconcileTimer);if(realtimeChannel&&db)db.removeChannel(realtimeChannel);realtimeChannel=null;if(realtimeRefreshTimer)clearTimeout(realtimeRefreshTimer)}
+function unsub(){unsubTyping();if(tenderInboxMentionChannel&&db)db.removeChannel(tenderInboxMentionChannel);tenderInboxMentionChannel=null;if(tenderInboxReminderTimer)clearInterval(tenderInboxReminderTimer);tenderInboxReminderTimer=null;tenderStopChatSync();if(reconcileTimer)clearTimeout(reconcileTimer);if(realtimeChannel&&db)db.removeChannel(realtimeChannel);realtimeChannel=null;if(realtimeRefreshTimer)clearTimeout(realtimeRefreshTimer)}
 
 /* 0.5.2: realtime resilience.
  * Poll only the most recent message in the currently visible conversation.
@@ -1554,7 +1554,7 @@ function subscribe(){
  tenderChatSocketState='connecting';
  tenderStartChatSync();
  tenderInboxReminderTimer=setInterval(()=>{tenderInboxCheckDue().catch(console.warn)},30000);
- tenderInboxLoad().then(()=>{renderNavBadges();return tenderInboxCheckDue()}).catch(console.warn);
+ tenderInboxLoad().then(()=>{renderNavBadges();tenderInboxSubscribeMentions();return tenderInboxCheckDue()}).catch(console.warn);
  realtimeChannel=db.channel('tender-live-'+user.id)
  .on('postgres_changes',{event:'*',schema:'public',table:'messages'},e=>scheduleReconcile(true,'messages',e))
  .on('postgres_changes',{event:'*',schema:'public',table:'piece_messages'},e=>{scheduleReconcile(true,'piece_messages',e);scheduleChannelUnreadRefresh();})
@@ -1567,7 +1567,6 @@ function subscribe(){
  .on('postgres_changes',{event:'*',schema:'public',table:'piece_events'},e=>scheduleReconcile(true))
  .on('postgres_changes',{event:'*',schema:'public',table:'piece_channels'},e=>scheduleReconcile(false))
  .on('postgres_changes',{event:'*',schema:'public',table:'tender_dm_requests',filter:'recipient_id=eq.'+user.id},()=>{tender05LoadData().then(()=>renderSidebar()).catch(console.warn)})
- .on('postgres_changes',{event:'INSERT',schema:'public',table:'tender_inbox_mentions',filter:'user_id=eq.'+user.id},()=>{tenderInboxLoad().then(()=>{if(tenderInbox.open)tenderInboxRender();renderNavBadges()}).catch(console.warn)})
  .on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:'user_id=eq.'+user.id},e=>{if(e.new){if(!notifications.some(n=>n.id===e.new.id))notifications.unshift(e.new);showBrowserNotification(e.new).catch(console.warn);if(e.new.conversation_id===state.selected&&state.area==='chats'&&document.visibilityState==='visible'){markRead(state.selected).catch(console.warn)}renderNavBadges();renderSidebar();if(tenderInbox.open)tenderInboxRender()}setTimeout(()=>scheduleReconcile(false),220)})
  .subscribe(status=>{
   tenderChatSocketState=status;
@@ -2044,7 +2043,15 @@ function tenderStudioPreviewRefresh(){
 }
 
 let tenderInbox={open:false,tab:'unread',filter:'all',ready:false,saves:[],reminders:[],mentions:[],messageMap:new Map()};
-let tenderInboxReminderTimer=null;
+let tenderInboxReminderTimer=null,tenderInboxMentionChannel=null;
+function tenderInboxSubscribeMentions(){
+ if(!tenderInbox.ready||!user||!db||tenderInboxMentionChannel)return;
+ tenderInboxMentionChannel=db.channel('tender-mentions-'+user.id)
+  .on('postgres_changes',{event:'INSERT',schema:'public',table:'tender_inbox_mentions',filter:'user_id=eq.'+user.id},()=>{
+    tenderInboxLoad().then(()=>{if(tenderInbox.open)tenderInboxRender();renderNavBadges()}).catch(console.warn)
+  }).subscribe();
+}
+
 function tenderInboxHost(){
  let host=document.getElementById('tender-inbox-host');
  if(!host){host=document.createElement('div');host.id='tender-inbox-host';host.className='tender-inbox-host';host.hidden=true;document.body.append(host)}
@@ -2058,6 +2065,7 @@ async function tenderInboxLoad(){
   q('tender_inbox_mentions').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(150)
  ]);
  tenderInbox.ready=!saves.error&&!reminders.error&&!mentions.error;
+ if(tenderInbox.ready)tenderInboxSubscribeMentions();
  if(!saves.error)tenderInbox.saves=saves.data||[];
  if(!reminders.error)tenderInbox.reminders=reminders.data||[];
  if(!mentions.error)tenderInbox.mentions=mentions.data||[];
