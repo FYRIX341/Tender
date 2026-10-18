@@ -1258,7 +1258,7 @@ function syncActiveStream(scrollOnce=false){
    const html=entry.kind==='day'?chatDaySeparatorHTML(entry):messageHTML(entry.row,type);
    let node=old.get(entry.key);
    if(!node){template.innerHTML=html;node=template.content.firstElementChild}
-   else if(node.__tenderRender!==html&&!node.querySelector('.tender-inline-edit-form')){
+   else if(node.__tenderRender!==html&&!(tenderInlineEdit?.id===entry.row?.id&&node.querySelector('.tender-inline-edit-form'))){
     template.innerHTML=html;const updated=template.content.firstElementChild;
     node.replaceWith(updated);node=updated;
    }
