@@ -2183,6 +2183,134 @@ function tenderInboxSetTab(tab){
  tenderInbox.tab=tab;tenderInboxRender();
 }
 
+async function tenderInboxSaveMessage(type,id){
+ if(!user||!id||!['message','piece_message'].includes(type))return;
+ if(!tenderInbox.ready){
+  if(type==='message'&&extendedReady){
+   const existing=bookmarks.find(b=>b.message_id===id&&b.user_id===user.id);
+   if(existing){assert(await q('bookmarks').delete().eq('message_id',id).eq('user_id',user.id));bookmarks=bookmarks.filter(b=>b!==existing)}
+   else{assert(await q('bookmarks').insert({user_id:user.id,message_id:id}));bookmarks.push({user_id:user.id,message_id:id})}
+   toast(existing?'Bookmark removed.':'Message bookmarked!');syncActiveStream();return;
+  }
+  throw Error('Run migration_0_5_3.sql in Supabase before saving Piece messages.');
+ }
+ const existing=tenderInbox.saves.find(r=>r.target_type===type&&r.message_id===id);
+ if(existing)assert(await q('tender_inbox_saves').delete().eq('user_id',user.id).eq('target_type',type).eq('message_id',id));
+ else assert(await q('tender_inbox_saves').insert({user_id:user.id,target_type:type,message_id:id}));
+ await tenderInboxLoad();if(tenderInbox.open)tenderInboxRender();
+ if(state.area==='chats'||state.pieceTab==='chat')syncActiveStream();
+ toast(existing?'Bookmark removed.':'Saved to Inbox bookmarks! 🔖');
+}
+async function tenderInboxReminderModal(type,id){
+ if(!tenderInbox.ready){const probe=await q('tender_inbox_reminders').select('id').limit(1);if(probe.error)throw Error('Reminders require migration_0_5_3.sql in Supabase.');tenderInbox.ready=true}
+ if(!['message','piece_message'].includes(type))throw Error('Choose a chat message first.');
+ const row=activeMessages.find(x=>x.id===id)||tenderInbox.messageMap.get(type+':'+id);
+ const local=new Date(Date.now()+3600000);
+ const localValue=new Date(local.getTime()-local.getTimezoneOffset()*60000).toISOString().slice(0,16);
+ modal('⏰ Create Message Reminder','Tender will show an in-app reminder while you are signed in, or when you next open Tender after the reminder is due.',
+  `<form id="tender-inbox-reminder-form"><input type="hidden" name="message_id" value="${esc(id)}"><input type="hidden" name="target_type" value="${esc(type)}">
+   <div class="tender-reminder-message">${esc((row?.body||'Saved message').slice(0,250))}</div>
+   <div class="field"><label>Remind me at</label><input class="input" type="datetime-local" name="remind_at" min="${new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16)}" value="${localValue}" required></div>
+   <p class="hint">In-app reminders require Tender to be open or reopened. System push notifications are not enabled by this feature.</p>
+   <button type="submit" class="btn full">Save Reminder</button></form>`);
+}
+async function tenderInboxSaveReminder(form){
+ const d=new FormData(form),type=String(d.get('target_type')||''),id=String(d.get('message_id')||'');
+ const at=new Date(String(d.get('remind_at')||''));if(!Number.isFinite(at.getTime())||at.getTime()<=Date.now()+10000)throw Error('Choose a future reminder time.');
+ if(at.getTime()>Date.now()+365*86400000)throw Error('Reminders can be scheduled up to one year ahead.');
+ assert(await q('tender_inbox_reminders').insert({user_id:user.id,target_type:type,message_id:id,remind_at:at.toISOString()}));
+ closeModal();await tenderInboxLoad();toast('Reminder saved in your Inbox! ⏰');
+ if(tenderInbox.open){tenderInbox.tab='reminders';tenderInboxRender()}
+}
+async function tenderInboxCheckDue(){
+ if(!user||!db||document.visibilityState==='hidden')return;
+ const now=new Date().toISOString();
+ const result=await q('tender_inbox_reminders').select('*').eq('user_id',user.id).is('notified_at',null).lte('remind_at',now).order('remind_at',{ascending:true}).limit(8);
+ if(result.error)return;
+ for(const item of result.data||[]){
+  const saved=await q('tender_inbox_reminders').update({notified_at:now}).eq('id',item.id).eq('user_id',user.id).is('notified_at',null).select('id');
+  if(saved.error||!saved.data?.length)continue;
+  toast('⏰ Tender reminder is due! Open Inbox → Reminders.');
+  if(tenderInbox.open)await tenderInboxLoad();
+ }
+ if(tenderInbox.open)tenderInboxRender();
+}
+async function tenderInboxMarkRead(){
+ if(!tenderInbox.ready)throw Error('Complete the Tender 0.5.3 database migration to mark all Inbox alerts as read.');
+ assert(await db.rpc('tender_inbox_mark_all_read'));
+ notifications.forEach(n=>{n.is_read=true});tenderInbox.mentions.forEach(m=>{m.is_read=true});
+ renderNavBadges();renderSidebar();tenderInboxRender();toast('Inbox marked as read. ✓');
+}
+async function tenderInboxJumpTo(type,id,cid,pid,channel){
+ if(!user)return;
+ if(type!=='piece_message'&&pid&&!cid)type='piece_message';
+ let row=null;
+ if(id){
+  const table=type==='piece_message'?'piece_messages':'messages';
+  const response=await q(table).select('*').eq('id',id).maybeSingle();
+  if(response.error)throw response.error;
+  row=response.data;
+  if(!row)throw Error('Message is unavailable or you no longer have access.');
+  cid=row.conversation_id||cid;pid=row.piece_id||pid;channel=row.channel_id||channel;
+ }
+ tenderInboxClose();
+ if(type==='piece_message'){
+  if(!pid)throw Error('This Piece message has no readable Piece.');
+  await goTo('pieces',pid);
+  const selected=pieceChannels.find(c=>c.id===channel&&c.piece_id===pid);
+  if(selected&&selected.kind!=='forum'&&channel!==state.channelId){
+   state.channelId=channel;state.pieceTab='chat';await loadActive();renderSidebar();renderMain();
+  }
+  markChannelRead().catch(console.warn);
+ }else if(cid){
+  await goTo('chats',cid);
+ }else{await goTo('friends');return}
+ if(row){
+  if(!activeMessages.some(m=>m.id===id)){
+   const table=type==='piece_message'?'piece_messages':'messages';
+   const column=type==='piece_message'?'piece_id':'conversation_id',owner=type==='piece_message'?pid:cid;
+   let older=q(table).select('*').eq(column,owner).lte('created_at',row.created_at);
+   let newer=q(table).select('*').eq(column,owner).gt('created_at',row.created_at);
+   if(type==='piece_message'&&channel){
+    older=older.eq('channel_id',channel);newer=newer.eq('channel_id',channel);
+   }
+   const [first,last]=await Promise.all([older.order('created_at',{ascending:false}).limit(60),newer.order('created_at',{ascending:true}).limit(60)]);
+   if(first.error||last.error)throw first.error||last.error;
+   const all=[...(first.data||[]).reverse(),row,...(last.data||[])],ids=new Set();
+   activeMessages=all.filter(m=>{if(ids.has(m.id))return false;ids.add(m.id);return true;});
+   activeReactions=[];
+   await prepareAttachmentUrls();syncActiveStream();
+  }
+  const item=[...document.querySelectorAll('#main .chat-scroll [data-message-id]')].find(el=>el.dataset.messageId===id);
+  if(item){item.scrollIntoView({behavior:'smooth',block:'center'});item.classList.add('reply-target-highlight');setTimeout(()=>item.classList.remove('reply-target-highlight'),1800)}
+  else toast('Message opened, but it could not be located in the visible history.',true);
+  const mention=tenderInbox.mentions.find(m=>m.target_type===type&&m.message_id===id&&!m.is_read);
+  if(mention){
+   await q('tender_inbox_mentions').update({is_read:true}).eq('id',mention.id).eq('user_id',user.id);
+   mention.is_read=true;
+  }
+ }
+}
+function tenderInboxContextMenu(event){
+ const entry=event.target.closest?.('#main .chat-scroll [data-message-id]');
+ if(!entry||!user||entry.classList.contains('bubble-pending'))return;
+ const id=entry.dataset.messageId,type=state.area==='chats'?'message':'piece_message';
+ if(!activeMessages.some(m=>m.id===id))return;
+ event.preventDefault();
+ const el=document.getElementById('tender-inbox-context')||document.createElement('div');el.id='tender-inbox-context';
+ el.className='tender-inbox-context';el.setAttribute('role','menu');
+ el.innerHTML=`<button type="button" data-action="tender-inbox-save" data-type="${type}" data-id="${esc(id)}" role="menuitem">🔖 Bookmark Message</button>
+  <button type="button" data-action="tender-inbox-create-reminder" data-type="${type}" data-id="${esc(id)}" role="menuitem">⏰ Create Reminder</button>
+  <button type="button" data-action="reply-message" data-id="${esc(id)}" role="menuitem">↩ Reply</button>`;
+ if(!el.parentElement)document.body.append(el);
+ el.style.left=Math.max(8,Math.min(event.clientX,innerWidth-215))+'px';
+ el.style.top=Math.max(8,Math.min(event.clientY,innerHeight-155))+'px';
+ el.hidden=false;
+}
+function tenderInboxCloseContext(){
+ const menu=document.getElementById('tender-inbox-context');if(menu)menu.hidden=true;
+}
+
 function renderSettings(){
  const sections=[['profile','user','My Profile'],['account','settings','My Account'],['appearance','palette','Appearance'],['chatbox','message-circle','Chat Box'],['privacy','shield','Privacy & Safety'],['accessibility','accessibility','Accessibility']];
  const tab=sections.some(x=>x[0]===state.settingsTab)?state.settingsTab:'profile';
