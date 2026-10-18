@@ -195,9 +195,9 @@ function getConversation(id){return conversations.find(c=>c.id===id)};
 function namesFor(c){let members=c?.conversation_members||[];if(c.kind==='group')return c.title;let other=members.find(m=>m.user_id!==user.id);return pby(other?.user_id).display_name||'Direct message'}
 function avatarFor(c){return c.kind==='group'?`<span class="squad-avatar">👥</span>`:avatars(pby((c.conversation_members||[]).find(m=>m.user_id!==user.id)?.user_id))}
 // Tender 0.5: optional database-backed stranger DM requests and inbox.
-let tender05Ready=false,tender05Requests=[],tender05PieceTags=[];
+let tender05Ready=false,tender05Requests=[],tender05PieceTags=[],tender05MutualFriends=new Map();
 async function tender05LoadData(){
- tender05Ready=false;tender05Requests=[];tender05PieceTags=[];
+ tender05Ready=false;tender05Requests=[];tender05PieceTags=[];tender05MutualFriends=new Map();
  if(!db||!user)return;
  try{
   const probe=await q('profiles').select('dm_policy,account_state,banner_mode,equipped_piece_id').eq('id',user.id).maybeSingle();
@@ -209,6 +209,11 @@ async function tender05LoadData(){
   ]);
   if(!requests.error)tender05Requests=requests.data||[];
   if(!tags.error)tender05PieceTags=tags.data||[];
+  const pending=tender05Requests.filter(r=>r.recipient_id===user.id&&r.status==='pending').slice(0,10);
+  await Promise.all(pending.map(async request=>{
+   const result=await db.rpc('tender_mutual_friends',{other_id:request.sender_id});
+   if(!result.error)tender05MutualFriends.set(request.sender_id,result.data||[]);
+  }));
  }catch(e){console.warn('Tender 0.5 optional database features:',e)}
 }
 async function tender05Lifecycle(action){
@@ -250,12 +255,13 @@ function tender05RequestModal(){
  const pending=tender05Requests.filter(r=>r.recipient_id===user.id&&r.status==='pending');
  const rows=pending.map(r=>{
   const sender=pby(r.sender_id);
-  const mutual=sharedPublicPieces(r.sender_id).map(p=>p.name).slice(0,4);
+  const mutual=sharedPublicPieces(r.sender_id).map(p=>p.name).slice(0,4),mutualFriends=tender05MutualFriends.get(r.sender_id)||[];
   const links=(r.body.match(/https?:\/\/\S+/gi)||[]).length;
   return `<article class="tender-request-card">
    <div class="tender-request-author">${avatars(sender)}<div><strong>${esc(sender.display_name)}</strong><small>@${esc(sender.handle||'member')} · ${relative(r.created_at)}</small></div></div>
    <p>${esc(r.body)}</p>
-   ${mutual.length?`<small class="hint">Shared Pieces: ${esc(mutual.join(', '))}</small>`:''}
+   ${mutualFriends.length?`<small class="hint">👥 Mutual friends: ${esc(mutualFriends.map(x=>x.display_name).join(', '))}</small>`:''}
+   ${mutual.length?`<small class="hint">🧩 Shared Pieces: ${esc(mutual.join(', '))}</small>`:''}
    ${links?'<small class="tender-request-warning">⚠ This message contains a link. Open links only if you trust the sender.</small>':''}
    <div class="tender-request-actions">
    <button class="btn sm" data-action="accept-dm-request" data-id="${esc(r.id)}">Accept</button>
@@ -1427,7 +1433,7 @@ async function boot(){
    if(user)await initialize();else renderAuth();
  }catch(e){ROOT.innerHTML=empty('Could not reach Tender','Check the public Supabase URL and key in config.js.');toast(e.message||'Could not connect.',true)}
 }
-function reset(){clearTimeout(chatDayRefreshTimer);chatDayRefreshTimer=null;stopCallInbox();notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;channelBackendError='';state.channelId=null;presenceRoster.clear();presenceConnectionReady=false;tender05Requests=[];tender05PieceTags=[];tender05Ready=false;if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
+function reset(){clearTimeout(chatDayRefreshTimer);chatDayRefreshTimer=null;stopCallInbox();notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;channelBackendError='';state.channelId=null;presenceRoster.clear();presenceConnectionReady=false;tender05Requests=[];tender05PieceTags=[];tender05Ready=false;tender05MutualFriends=new Map();if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
 function renderSetup(){ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Your friends. Your spaces. Your flavor.</p></div><div class="login-panel"><div class="eyebrow">Tender setup</div><h2>Almost ready to connect.</h2><p>This website needs a free online Supabase project for accounts, messages and Pieces. It's not a local chat simulator.</p><div class="setup-box"><h3>🍗 Connect the shared database</h3><p>1. Create a free project at <a href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Supabase</a>.<br>2. Run <strong>schema.sql</strong> in the project's SQL editor.<br>3. Copy its Project URL and publishable (anon) key into <strong>config.js</strong> on GitHub.<br>4. Refresh this website. Everyone will connect to the same database.</p><details><summary>Important security information</summary>Only use the public publishable/anon key. Never put a service_role key or other secret in GitHub. Set URL configuration for email confirmation in Supabase Auth.</details></div><p class="hint">Your Tender HTML interface is deployed separately from the database. A GitHub Pages link alone cannot deliver live messaging.</p><a class="btn" href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Connect Supabase ${ico('external')}</a></div></div>`}
 function renderAuth(){state.mobileDetail=false;ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Stay close. Stay crispy. 🍗</p></div><div class="login-panel"><div class="eyebrow">Welcome to Tender</div><h2>${state.loginMode==='login'?'Good to have you back.':'Your people are waiting.'}</h2><p>${state.loginMode==='login'?'Sign in to catch up with your people.':'Create your account to join the conversation.'}</p><div class="login-tabs"><button class="${state.loginMode==='login'?'selected':''}" data-action="auth-tab" data-tab="login">Log in</button><button class="${state.loginMode==='signup'?'selected':''}" data-action="auth-tab" data-tab="signup">Sign up</button></div><form id="auth-form">${state.loginMode==='signup'?`<div class="field"><label for="handle">Username (3–20 letters, numbers, underscores)</label><input class="input" id="handle" name="handle" minlength="3" maxlength="20" pattern="[a-zA-Z0-9_]{3,20}" required autocomplete="username" placeholder="buffalofan"></div><div class="field"><label for="display">Display name</label><input class="input" id="display" name="display_name" maxlength="40" required placeholder="Your name"></div>`:''}<div class="field"><label for="email">Email address</label><input class="input" id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com"></div><div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" minlength="8" autocomplete="${state.loginMode==='login'?'current-password':'new-password'}" required placeholder="At least 8 characters"></div><button class="btn full top-spacer" type="submit">${state.loginMode==='login'?'Log in':'Create account'} ${ico('back')}</button></form><p class="hint top-spacer">Tender is an early beta. Please don't post private information in public Pieces.</p></div></div>`}
 async function authSubmit(form){const data=new FormData(form), email=String(data.get('email')).trim(), password=String(data.get('password'));
