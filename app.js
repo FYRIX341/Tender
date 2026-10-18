@@ -1936,6 +1936,7 @@ function newPieceModal(p=null){
  <div class="field"><label>Community theme</label><select class="input" name="theme_style">${['classic','aurora','sunset','midnight','neon'].map(v=>`<option value="${v}" ${p?.theme_style===v?'selected':''}>${v}</option>`).join('')}</select></div>
  <div class="field"><label>Piece name font</label><select class="input" name="name_style">${nameStyles.map(v=>`<option value="${v}" ${p?.name_style===v?'selected':''}>${v}</option>`).join('')}</select></div></div>
  <div class="field"><label>Welcome message for new members</label><textarea name="channel_welcome" class="input textarea" maxlength="300" rows="2" placeholder="Welcome to our community!">${esc(p?.channel_welcome||'')}</textarea></div>`:''}
+ ${tender05Ready?`<div class="field"><label>⏳ Piece slow mode</label><select class="input" name="message_cooldown_seconds">${[[0,'Off'],[2,'2 seconds'],[5,'5 seconds'],[10,'10 seconds'],[15,'15 seconds'],[30,'30 seconds'],[60,'60 seconds'],[120,'120 seconds']].map(([n,l])=>`<option value="${n}" ${Number(p?.message_cooldown_seconds||0)===n?'selected':''}>${l}</option>`).join('')}</select><p class="hint">Regular members wait between Piece messages. Moderators bypass this cooldown.</p></div>`:''}
    <div class="field"><label>Visibility</label><select class="input" name="visibility">
      <option value="public" ${!p||p.is_public?'selected':''}>Public · Discoverable</option>
      <option value="private" ${p&&!p.is_public?'selected':''}>Private · Members only</option>
@@ -2466,6 +2467,7 @@ async function submitForm(form){switch(form.id){
   const emoji=String(d.get('icon_emoji')||'🍗').trim().slice(0,12)||'🍗';
   const mode=d.get('icon_mode');
   const updated={name,description,color,is_public};
+  if(tender05Ready)updated.message_cooldown_seconds=Math.min(120,Math.max(0,Number(d.get("message_cooldown_seconds"))||0));
   if(visualReady){
    const shape=String(d.get('icon_shape')||'rounded'),theme=String(d.get('theme_style')||'classic'),font=String(d.get('name_style')||'classic');
    Object.assign(updated,{color_secondary:tenderSafeColor(d.get('color_secondary'),'#293758'),
@@ -2486,7 +2488,7 @@ async function submitForm(form){switch(form.id){
   }else{
     const id=assert(await db.rpc('create_piece',{piece_name:name,piece_description:description,piece_color:color,piece_public:is_public}));
     state.selected=id;state.area='pieces';state.pieceTab='chat';state.channelId=null;
-    if(image?.size||mode==='emoji'||emoji!=='🍗'||visualReady){
+    if(image?.size||mode==='emoji'||emoji!=='🍗'||visualReady||tender05Ready){
       try{
         const icon=image?.size?(await uploadPublicAsset(image,'tender-banners',3145728,mime,'piece-avatar-'+id)).url:emoji;
         const details=visualReady?{...updated,icon}:{icon};
