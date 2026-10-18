@@ -6,7 +6,15 @@ Tender is a responsive social messaging app with **Buffalo** the mascot. Chat wi
 
 **[🍗 Open Tender securely](https://fyrix341.github.io/Tender/)** · [Source code](https://github.com/FYRIX341/Tender)
 
-## ✨ Tender 0.4.2 — Channels & Layout
+## ✨ Tender 0.4.3 — Channel Repair & Charcoal UI
+
+**Tender 0.4.3 addresses the "Create channel does nothing" bug** with a more reliable form, persistent errors, a visible saving state, a timeout for stuck requests, and server-side confirmation before success is shown. The channel editor now opens even if the database isn't ready, and explains which existing Supabase migration is required. Owners can open the editor even when their membership row is absent, although the database must still authorize the write.
+
+**UI overhaul:** Older CSS was forcing near-black surfaces despite newer gray styling. The refreshed Discord-inspired charcoal palette now consistently styles the server rail, conversation sidebar, chat, message box, toolbar, member panel, settings, and dialogs. Light theme remains supported.
+
+**Important:** Actual multi-user channels require the existing `migration_0_4.sql` applied to your connected Supabase project. GitHub Pages deployment cannot change the database. Check the [0.4.3 release notes](RELEASE_0_4_3.md) for setup and troubleshooting.
+
+### Previous release: 0.4.2 — Channels & Layout
 
 **Tender 0.4.2 improves Piece channel creation and switches to a tighter Discord-inspired workspace** while retaining Tender’s identity. Staff can create channels using the main **+** button or a category **+**, and channel names containing spaces and capitals are converted into safe channel slugs automatically. Clear errors are shown for duplicates, unavailable database schema and save failures. Piece chat removes most of the oversized header so the conversation gets the space it deserves.
 
@@ -33,7 +41,7 @@ The **automatic additive Supabase migrations** preserve accounts, chats, Pieces 
 - **Call a friend:** Start a real voice or video call in a private DM, share your screen, mute/deafen, and set different voice and stream volumes. Requires microphone/camera permission and an HTTPS browser with WebRTC.
 - **Stay in the loop:** See in-app notifications while using Tender, including incoming call prompts.
 
-For details, see the [0.4.2 update notes](RELEASE_0_4_2.md), [0.4.1 update notes](RELEASE_0_4_1.md), [0.4 release notes](RELEASE_0_4.md), [0.3.5 update notes](RELEASE_0_3_5.md), [0.3.4 hotfix notes](RELEASE_0_3_4.md), [0.3.3 release notes](RELEASE_0_3_3.md), [0.3.2 changelog](RELEASE_0_3_2.md), and [0.3.1 changelog](RELEASE_0_3_1.md).
+For details, see the [0.4.3 update notes](RELEASE_0_4_3.md), [0.4.2 update notes](RELEASE_0_4_2.md), [0.4.1 update notes](RELEASE_0_4_1.md), [0.4 release notes](RELEASE_0_4.md), [0.3.5 update notes](RELEASE_0_3_5.md), [0.3.4 hotfix notes](RELEASE_0_3_4.md), [0.3.3 release notes](RELEASE_0_3_3.md), [0.3.2 changelog](RELEASE_0_3_2.md), and [0.3.1 changelog](RELEASE_0_3_1.md).
 
 ## 📱 Made for desktop and mobile
 
