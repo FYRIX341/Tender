@@ -1822,7 +1822,7 @@ function messageHTML(row,target_type='message'){
  const reply=row.reply_to?activeMessages.find(x=>x.id===row.reply_to):null;
  const replyHTML=row.reply_to?`<button type="button" class="reply-quote reply-ref" data-action="jump-reply" data-id="${esc(row.reply_to)}" title="Jump to replied message">↳ ${reply?`<strong>${esc(pby(reply.author_id).display_name)}</strong> ${esc((reply.body||'Attachment').slice(0,130))}`:'Original message is outside the loaded history'}</button>`:'';
  const gif=giftGif(row.body);
- return `<div data-message-id="${esc(row.id)}" role="group" tabindex="0" class="chat-bubble-wrap ${mine?'mine':''} ${grouped?'message-grouped':''} ${row.pending?'bubble-pending':''}">${profileFace(p)}<div class="bubble-content">${!grouped?`<div class="bubble-name">${profileName(p)}</div>`:''}${replyHTML}<div class="bubble">${messageText(row.body||'')}${row.edited_at?` <span class="inline-edited" title="Edited ${esc(new Date(row.edited_at).toLocaleString())}">(edited)</span>`:''}${gif}${attachmentHTML(row)}${row.poll_id?pollHTML(row.poll_id):''}</div><div class="bubble-meta">${fmt(row.created_at)} ${row.edited_at?'':''} ${row.pending?'· Sending…':''} ${readReceiptHTML(row)}</div>${Object.keys(emojiMap).length?`<div class="bubble-reactions">${Object.entries(emojiMap).map(([emoji,recs])=>`<button class="react-chip ${recs.some(r=>r.author_id===user.id)?'mine-react':''}" data-action="react" data-type="${target_type}" data-id="${row.id}" data-emoji="${esc(emoji)}">${esc(emoji)} ${recs.length}</button>`).join('')}</div>`:''}<div class="bubble-actions" aria-label="Message actions">${!row.pending&&(target_type==='message'||pieceRepliesReady)?`<button type="button" class="emoji-inline reply-quick-action" data-action="reply-message" data-id="${esc(row.id)}" title="Reply to message" aria-label="Reply to ${esc(p.display_name||'member')}">${ico('chat','icon-sm')}<span>Reply</span></button>`:''}<button class="emoji-inline" data-action="reaction-menu" data-type="${target_type}" data-id="${row.id}" title="React">${ico('smile','icon-sm')}</button>${target_type==='message'&&!row.pending?`<button class="emoji-inline" data-action="bookmark-message" data-id="${row.id}" title="Bookmark">${bookmarks.some(b=>b.message_id===row.id)?'★':'☆'}</button><button class="emoji-inline" data-action="forward-message" data-id="${row.id}" title="Forward text">↗</button>`:''}${!row.pending?`<button class="emoji-inline" data-action="tender05-translate" data-id="${esc(row.id)}" title="Translate">🌍</button>`:''}${!row.pending&&tender05Ready?`<button class="emoji-inline" data-action="tender05-thread-chooser" data-type="${target_type}" data-id="${esc(row.id)}" title="Message threads">🧵</button>`:''}${mine&&!row.pending?`<button class="emoji-inline" data-action="edit-message" data-id="${row.id}" title="Edit">${ico('edit','icon-sm')}</button><button class="emoji-inline" data-action="pin-message" data-id="${row.id}" title="Pin">${row.is_pinned?'📌':'📍'}</button><button class="emoji-inline" data-action="delete-message" data-id="${row.id}" data-type="${target_type}" title="Delete">${ico('trash','icon-sm')}</button>`:''}</div></div></div>`}
+ return `<div data-message-id="${esc(row.id)}" role="group" tabindex="0" class="chat-bubble-wrap ${mine?'mine':''} ${grouped?'message-grouped':''} ${row.pending?'bubble-pending':''}">${profileFace(p)}<div class="bubble-content">${!grouped?`<div class="bubble-name">${profileName(p)}</div>`:''}${replyHTML}<div class="bubble">${messageText(row.body||'')}${row.edited_at?` <span class="inline-edited" title="Edited ${esc(new Date(row.edited_at).toLocaleString())}">(edited)</span>`:''}${gif}${attachmentHTML(row)}${row.poll_id?pollHTML(row.poll_id):''}</div><div class="bubble-meta">${fmt(row.created_at)} ${row.edited_at?'':''} ${row.pending?'· Sending…':''} ${readReceiptHTML(row)}</div>${Object.keys(emojiMap).length?`<div class="bubble-reactions">${Object.entries(emojiMap).map(([emoji,recs])=>`<button class="react-chip ${recs.some(r=>r.author_id===user.id)?'mine-react':''}" data-action="react" data-type="${target_type}" data-id="${row.id}" data-emoji="${esc(emoji)}">${esc(emoji)} ${recs.length}</button>`).join('')}</div>`:''}<div class="bubble-actions" aria-label="Message actions">${!row.pending&&(target_type==='message'||pieceRepliesReady)?`<button type="button" class="emoji-inline reply-quick-action" data-action="reply-message" data-id="${esc(row.id)}" title="Reply to message" aria-label="Reply to ${esc(p.display_name||'member')}">${ico('chat','icon-sm')}<span>Reply</span></button>`:''}<button class="emoji-inline" data-action="reaction-menu" data-type="${target_type}" data-id="${row.id}" title="React">${ico('smile','icon-sm')}</button>${!row.pending?`<button class="emoji-inline" data-action="tender-inbox-save" data-type="${target_type}" data-id="${esc(row.id)}" title="Bookmark message">${tenderInbox.saves.some(b=>b.target_type===target_type&&b.message_id===row.id)||target_type==='message'&&bookmarks.some(b=>b.message_id===row.id)?'★':'☆'}</button>`:''}${target_type==='message'&&!row.pending?`<button class="emoji-inline" data-action="forward-message" data-id="${esc(row.id)}" title="Forward text">↗</button>`:''}${!row.pending?`<button class="emoji-inline" data-action="tender05-translate" data-id="${esc(row.id)}" title="Translate">🌍</button>`:''}${!row.pending&&tender05Ready?`<button class="emoji-inline" data-action="tender05-thread-chooser" data-type="${target_type}" data-id="${esc(row.id)}" title="Message threads">🧵</button>`:''}${mine&&!row.pending?`<button class="emoji-inline" data-action="edit-message" data-id="${row.id}" title="Edit">${ico('edit','icon-sm')}</button><button class="emoji-inline" data-action="pin-message" data-id="${row.id}" title="Pin">${row.is_pinned?'📌':'📍'}</button><button class="emoji-inline" data-action="delete-message" data-id="${row.id}" data-type="${target_type}" title="Delete">${ico('trash','icon-sm')}</button>`:''}</div></div></div>`}
 function updateComposerReply(){
  const form=document.getElementById('composer-form');if(!form?.querySelector||!form.insertAdjacentHTML)return;
  form.querySelector('.composer-reply')?.remove();
@@ -2618,6 +2618,25 @@ async function sendMessage(form){let text=String(new FormData(form).get('body')|
 }
 const galleryUrl=path=>db.storage.from('tender-gallery').getPublicUrl(path).data.publicUrl;
 async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=el.dataset.tab;try{
+
+ if(a==='composer-plus'){
+  const menu=document.getElementById('tender-v53-plus-menu');
+  if(menu){menu.hidden=!menu.hidden;el.setAttribute('aria-expanded',String(!menu.hidden))}
+  return;
+ }
+ if(a==='embed-builder'){embedModal();return}
+ if(a==='tender-inbox-toggle'||a==='open-alerts'){if(tenderInbox.open)tenderInboxClose();else await safe(()=>tenderInboxOpen());return}
+ if(a==='tender-inbox-close'){tenderInboxClose();return}
+ if(a==='tender-inbox-tab'){tenderInboxSetTab(id);return}
+ if(a==='tender-inbox-filter'){tenderInbox.filter=id;tenderInboxRender();return}
+ if(a==='tender-inbox-mark-read'){await safe(()=>tenderInboxMarkRead());return}
+ if(a==='tender-inbox-jump'){await safe(()=>tenderInboxJumpTo(el.dataset.type,id,el.dataset.cid,el.dataset.pid,el.dataset.channel));return}
+ if(a==='tender-inbox-save'){tenderInboxCloseContext();await safe(()=>tenderInboxSaveMessage(el.dataset.type,id));return}
+ if(a==='tender-inbox-create-reminder'){tenderInboxCloseContext();await safe(()=>tenderInboxReminderModal(el.dataset.type,id));return}
+ if(a==='tender-inbox-remove-reminder'){
+  await safe(async()=>{assert(await q('tender_inbox_reminders').delete().eq('id',id).eq('user_id',user.id));await tenderInboxLoad();tenderInboxRender();toast('Reminder dismissed.')});return;
+ }
+
  if(a==='account-menu-toggle'){
   const menu=document.getElementById('tender-account-menu');
   if(menu){menu.hidden=!menu.hidden;el.setAttribute('aria-expanded',String(!menu.hidden));}
@@ -2763,7 +2782,7 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
   if(a==='jump-reply'){jumpToReply(id);return}
  if(a==='edit-message'){let m=activeMessages.find(x=>x.id===id);if(!m)return;modal('Edit message','Update your message.',`<form id="edit-message-form"><input name="id" type="hidden" value="${id}"><textarea name="body" class="input textarea" maxlength="4000" required>${esc(m.body)}</textarea><button class="btn full" type="submit">Save changes</button></form>`);return}
  if(a==='pin-message'){if(!extendedReady)return toast('Run the 0.2 SQL migration first.',true);await safe(async()=>{const m=activeMessages.find(x=>x.id===id);assert(await q('messages').update({is_pinned:!m.is_pinned}).eq('id',id));m.is_pinned=!m.is_pinned;renderMain()});return}
- if(a==='bookmark-message'){if(!extendedReady)return toast('Run the 0.2 SQL migration first.',true);await safe(async()=>{const b=bookmarks.find(x=>x.message_id===id);if(b){assert(await q('bookmarks').delete().eq('message_id',id).eq('user_id',user.id));bookmarks=bookmarks.filter(x=>x!==b)}else{assert(await q('bookmarks').insert({message_id:id,user_id:user.id}));bookmarks.push({message_id:id,user_id:user.id})}renderMain()});return}
+ if(a==='bookmark-message'){await safe(()=>tenderInboxSaveMessage('message',id));return}
  if(a==='forward-message'){let m=activeMessages.find(x=>x.id===id);if(!m)return;modal('Forward message','Forward text to another conversation. Attachments are not forwarded.',`<form id="forward-form"><input name="message_id" type="hidden" value="${id}"><select class="input" name="conversation_id">${conversations.filter(x=>x.id!==state.selected).map(c=>`<option value="${c.id}">${esc(namesFor(c))}</option>`).join('')}</select><button class="btn full" type="submit">Forward text</button></form>`);return}
  if(a==='poll-vote'){if(!extendedReady)return;await safe(async()=>{const poll=activePolls.find(p=>p.id===id);const index=Number(el.dataset.index);if(!poll||index<0||index>=poll.options.length)return;const existing=activePollVotes.find(v=>v.poll_id===id&&v.user_id===user.id);if(existing)existing.option_index=index;else activePollVotes.push({poll_id:id,user_id:user.id,option_index:index});renderMain();assert(await q('poll_votes').upsert({poll_id:id,user_id:user.id,option_index:index},{onConflict:'poll_id,user_id'}));await loadPolls();renderMain()});return}
  if(a==='record-voice'){await toggleVoiceRecording();return}
@@ -2914,6 +2933,7 @@ async function submitForm(form){switch(form.id){
     if(wallpaper==='image' && (!/^https:\/\//i.test(image)||validUrl(image)==='#'))throw Error('Choose an HTTPS image URL.');
     localStorage.setItem(key,JSON.stringify({wallpaper,image:image.slice(0,1200)}));closeModal();applyLocalAppearance();toast('Wallpaper saved!');return}
  case'composer-form':return sendMessage(form);
+ case'tender-inbox-reminder-form':return safe(()=>tenderInboxSaveReminder(form));
  case'tender05-translate-form':return safe(async()=>{
   const d=new FormData(form);await tender05TranslateOnDevice(String(d.get('id')||''),String(d.get('source')||'en'),String(d.get('target')||'ro'));
  });
@@ -3158,6 +3178,8 @@ document.addEventListener('dblclick',event=>{
 });
 document.addEventListener('submit',event=>{if(event.target.matches('form')){event.preventDefault();submitForm(event.target).catch(e=>{console.error(e);toast(e.message||'Error',true)})}});
 document.addEventListener('click',event=>{
+ if(!event.target.closest?.('.tender-v53-attach-wrap')){const m=document.getElementById('tender-v53-plus-menu');if(m)m.hidden=true}
+ if(!event.target.closest?.('#tender-inbox-context'))tenderInboxCloseContext();
  // Explicitly handle Create Channel clicks; do not rely exclusively on the
  // form submit event, which browser validation can silently suppress.
  const channelButton=event.target.closest?.('[data-action="channel-submit"]');
@@ -3175,6 +3197,8 @@ document.addEventListener('click',event=>{
  let t=event.target.closest('[data-action]');if(!t)return;
  if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;
  if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
+document.addEventListener('contextmenu',tenderInboxContextMenu);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){tenderInboxCloseContext();if(tenderInbox.open)tenderInboxClose();const m=document.getElementById('tender-v53-plus-menu');if(m)m.hidden=true}});
 document.addEventListener('input',e=>{
  if(e.target.closest?.('.tender-studio-v3')){tenderStudioPreviewRefresh();return}
  if(e.target.closest?.('#tender-html-embed-form')){tender05HTMLPreview();return}
