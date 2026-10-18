@@ -1258,7 +1258,7 @@ function syncActiveStream(scrollOnce=false){
    const html=entry.kind==='day'?chatDaySeparatorHTML(entry):messageHTML(entry.row,type);
    let node=old.get(entry.key);
    if(!node){template.innerHTML=html;node=template.content.firstElementChild}
-   else if(node.__tenderRender!==html){
+   else if(node.__tenderRender!==html&&!node.querySelector('.tender-inline-edit-form')){
     template.innerHTML=html;const updated=template.content.firstElementChild;
     node.replaceWith(updated);node=updated;
    }
@@ -1816,7 +1816,74 @@ function renderMain(){const m=document.getElementById('main');if(!m)return;
  renderInfoPanel()
 }
 function renderChat(c){const title=namesFor(c),otherId=c.kind!=='group'?(c.conversation_members||[]).find(x=>x.user_id!==user.id)?.user_id:null;return header(title,c.kind==='group'?`${(c.conversation_members||[]).length} members`:'Private conversation',`${otherId?`<button class="round-btn" data-action="open-profile" data-id="${esc(otherId)}" title="View profile" aria-label="View profile">${ico('users')}</button>`:''}${otherId?`<button class="round-btn" data-action="call-start-voice" data-id="${esc(c.id)}" title="Start voice call" aria-label="Start voice call">📞</button><button class="round-btn" data-action="call-start-video" data-id="${esc(c.id)}" title="Start video call" aria-label="Start video call">📹</button>`:''}<button class="round-btn" data-action="search" title="Search messages">${ico('search')}</button><button class="round-btn" data-action="chat-info" title="Conversation info">${ico('info')}</button><button class="round-btn" data-action="toggle-info" title="Toggle member panel">${ico('users')}</button><button class="round-btn" data-action="room-appearance" title="Customize this chat">🎨</button>`)+`<div class="main-body"><div class="chat-history">${pinnedHTML()}<div class="chat-scroll" id="chat-scroll">${activeMessages.length?chatStreamHTML(activeMessages,'message'):`<div class="chat-empty"><img src="buffalo.webp" alt="Buffalo"><h3>Start the conversation</h3><p class="hint">Say hi to ${esc(title)}!</p></div>`}</div><button type="button" class="chat-jump-new" id="chat-jump-new" data-action="jump-latest" hidden>↓ New messages · Jump to latest</button>${composer('chat',`Message ${title}`)}</div></div>`}
+
+/* Tender 0.5.4 — message editing lives inside the original bubble. */
+let tenderInlineEdit=null;
+function tenderInlineEditHTML(row,type){
+ const edit=tenderInlineEdit;
+ if(!edit||edit.id!==row.id||edit.type!==type)return '';
+ return '<form id="tender-inline-edit-form" class="tender-inline-edit-form" data-message-id="'+esc(row.id)+'" data-type="'+esc(type)+'">'+
+  '<label for="tender-inline-edit-textarea">Edit message</label>'+
+  '<textarea id="tender-inline-edit-textarea" name="body" rows="2" maxlength="4000" required spellcheck="true" aria-label="Edit message">'+esc(edit.draft)+'</textarea>'+
+  '<div class="tender-inline-edit-bottom"><span>Enter to save · Shift+Enter for a new line · Esc to cancel</span>'+
+  '<div class="tender-inline-edit-actions"><button type="button" class="btn secondary sm" data-action="tender-inline-edit-cancel">Cancel</button>'+
+  '<button type="submit" class="btn sm" '+(edit.saving?'disabled':'')+'>Save changes</button></div></div></form>';
+}
+function tenderEditStart(id,type){
+ const row=activeMessages.find(m=>m.id===id);
+ if(!row||row.author_id!==user?.id||row.pending)return toast('Only your sent messages can be edited.',true);
+ if(type!=='message'&&type!=='piece_message')return;
+ if(String(row.body||'').startsWith('[TENDER_'))return toast('Special embeds and stickers cannot be edited here.',true);
+ tenderInlineEdit={id,type,draft:String(row.body||''),original:String(row.body||''),saving:false};
+ syncActiveStream();
+ const field=document.getElementById('tender-inline-edit-textarea');
+ if(field){field.focus();field.setSelectionRange(field.value.length,field.value.length)}
+}
+function tenderEditCancel(){
+ if(!tenderInlineEdit)return;
+ tenderInlineEdit=null;
+ syncActiveStream();
+}
+async function tenderEditSubmit(form){
+ const edit=tenderInlineEdit;
+ if(!edit||edit.saving)return;
+ const id=String(form.dataset.messageId||''),type=String(form.dataset.type||'');
+ if(edit.id!==id||edit.type!==type)throw Error('The message being edited changed. Please try again.');
+ const body=String(form.elements.namedItem('body')?.value||'').trim();
+ if(!body)throw Error('An edited message cannot be empty.');
+ if(body.length>4000)throw Error('Messages can be up to 4,000 characters.');
+ if(body===edit.original){tenderEditCancel();return}
+ edit.saving=true;
+ const button=form.querySelector('[type="submit"]');
+ if(button){button.disabled=true;button.textContent='Saving…'}
+ try{
+  let savedAt=null;
+  const rpc=await db.rpc('tender_edit_own_message',{target_kind:type,target_id:id,new_body:body});
+  if(!rpc.error){savedAt=rpc.data||new Date().toISOString()}
+  else if(type==='message'&&(rpc.error.code==='PGRST202'||/tender_edit_own_message.*not found|schema cache/i.test(rpc.error.message||''))){
+   // Older installations can edit DMs through the existing 0.2 RLS policy.
+   // Always RETURN the updated row so an RLS-denied, zero-row write fails visibly.
+   const fallback=await q('messages').update({body,edited_at:new Date().toISOString()})
+    .eq('id',id).eq('author_id',user.id).select('id,edited_at').single();
+   const row=assert(fallback);if(!row)throw Error('No message was updated. Check your message permissions.');
+   savedAt=row.edited_at;
+  }else if(type==='piece_message'&&(rpc.error.code==='PGRST202'||/schema cache/i.test(rpc.error.message||''))){
+   throw Error('Editing Piece messages requires migration_0_5_4.sql in Supabase.');
+  }else throw rpc.error;
+  const existing=activeMessages.find(m=>m.id===id);
+  if(existing){existing.body=body;existing.edited_at=savedAt||new Date().toISOString()}
+  tenderInlineEdit=null;
+  syncActiveStream();
+  toast('Message edited! ✏️');
+ }catch(error){
+  edit.saving=false;
+  if(button){button.disabled=false;button.textContent='Save changes'}
+  throw error;
+ }
+}
+
 function messageHTML(row,target_type='message'){
+ const editing=tenderInlineEdit?.id===row.id&&tenderInlineEdit?.type===target_type;
  const p=pby(row.author_id),mine=row.author_id===user.id;
   const previous=activeMessages[activeMessages.findIndex(x=>x.id===row.id)-1];
   const grouped=!!(previous&&previous.author_id===row.author_id&&chatDayKey(previous.created_at)===chatDayKey(row.created_at)&&Math.abs(new Date(row.created_at)-new Date(previous.created_at))<300000&&!row.reply_to&&!previous.reply_to);
@@ -1824,7 +1891,7 @@ function messageHTML(row,target_type='message'){
  const reply=row.reply_to?activeMessages.find(x=>x.id===row.reply_to):null;
  const replyHTML=row.reply_to?`<button type="button" class="reply-quote reply-ref" data-action="jump-reply" data-id="${esc(row.reply_to)}" title="Jump to replied message">↳ ${reply?`<strong>${esc(pby(reply.author_id).display_name)}</strong> ${esc((reply.body||'Attachment').slice(0,130))}`:'Original message is outside the loaded history'}</button>`:'';
  const gif=giftGif(row.body);
- return `<div data-message-id="${esc(row.id)}" role="group" tabindex="0" class="chat-bubble-wrap ${mine?'mine':''} ${grouped?'message-grouped':''} ${row.pending?'bubble-pending':''}">${profileFace(p)}<div class="bubble-content">${!grouped?`<div class="bubble-name">${profileName(p)}</div>`:''}${replyHTML}<div class="bubble">${messageText(row.body||'')}${row.edited_at?` <span class="inline-edited" title="Edited ${esc(new Date(row.edited_at).toLocaleString())}">(edited)</span>`:''}${gif}${attachmentHTML(row)}${row.poll_id?pollHTML(row.poll_id):''}</div><div class="bubble-meta">${fmt(row.created_at)} ${row.edited_at?'':''} ${row.pending?'· Sending…':''} ${readReceiptHTML(row)}</div>${Object.keys(emojiMap).length?`<div class="bubble-reactions">${Object.entries(emojiMap).map(([emoji,recs])=>`<button class="react-chip ${recs.some(r=>r.author_id===user.id)?'mine-react':''}" data-action="react" data-type="${target_type}" data-id="${row.id}" data-emoji="${esc(emoji)}">${esc(emoji)} ${recs.length}</button>`).join('')}</div>`:''}<div class="bubble-actions" aria-label="Message actions">${!row.pending&&(target_type==='message'||pieceRepliesReady)?`<button type="button" class="emoji-inline reply-quick-action" data-action="reply-message" data-id="${esc(row.id)}" title="Reply to message" aria-label="Reply to ${esc(p.display_name||'member')}">${ico('chat','icon-sm')}<span>Reply</span></button>`:''}<button class="emoji-inline" data-action="reaction-menu" data-type="${target_type}" data-id="${row.id}" title="React">${ico('smile','icon-sm')}</button>${!row.pending?`<button class="emoji-inline" data-action="tender-inbox-save" data-type="${target_type}" data-id="${esc(row.id)}" title="Bookmark message">${tenderInbox.saves.some(b=>b.target_type===target_type&&b.message_id===row.id)||target_type==='message'&&bookmarks.some(b=>b.message_id===row.id)?'★':'☆'}</button>`:''}${target_type==='message'&&!row.pending?`<button class="emoji-inline" data-action="forward-message" data-id="${esc(row.id)}" title="Forward text">↗</button>`:''}${!row.pending?`<button class="emoji-inline" data-action="tender05-translate" data-id="${esc(row.id)}" title="Translate">🌍</button>`:''}${!row.pending&&tender05Ready?`<button class="emoji-inline" data-action="tender05-thread-chooser" data-type="${target_type}" data-id="${esc(row.id)}" title="Message threads">🧵</button>`:''}${mine&&!row.pending?`<button class="emoji-inline" data-action="edit-message" data-id="${row.id}" title="Edit">${ico('edit','icon-sm')}</button><button class="emoji-inline" data-action="pin-message" data-id="${row.id}" title="Pin">${row.is_pinned?'📌':'📍'}</button><button class="emoji-inline" data-action="delete-message" data-id="${row.id}" data-type="${target_type}" title="Delete">${ico('trash','icon-sm')}</button>`:''}</div></div></div>`}
+ return `<div data-message-id="${esc(row.id)}" role="group" tabindex="0" class="chat-bubble-wrap ${mine?'mine':''} ${grouped?'message-grouped':''} ${row.pending?'bubble-pending':''}">${profileFace(p)}<div class="bubble-content">${!grouped?`<div class="bubble-name">${profileName(p)}</div>`:''}${replyHTML}<div class="bubble ${editing?'tender-inline-editing':''}">${editing?tenderInlineEditHTML(row,target_type):messageText(row.body||'')}${!editing&&row.edited_at?` <span class="inline-edited" title="Edited ${esc(new Date(row.edited_at).toLocaleString())}">(edited)</span>`:''}${gif}${attachmentHTML(row)}${row.poll_id?pollHTML(row.poll_id):''}</div><div class="bubble-meta">${fmt(row.created_at)} ${row.edited_at?'':''} ${row.pending?'· Sending…':''} ${readReceiptHTML(row)}</div>${Object.keys(emojiMap).length?`<div class="bubble-reactions">${Object.entries(emojiMap).map(([emoji,recs])=>`<button class="react-chip ${recs.some(r=>r.author_id===user.id)?'mine-react':''}" data-action="react" data-type="${target_type}" data-id="${row.id}" data-emoji="${esc(emoji)}">${esc(emoji)} ${recs.length}</button>`).join('')}</div>`:''}<div class="bubble-actions" aria-label="Message actions">${!row.pending&&(target_type==='message'||pieceRepliesReady)?`<button type="button" class="emoji-inline reply-quick-action" data-action="reply-message" data-id="${esc(row.id)}" title="Reply to message" aria-label="Reply to ${esc(p.display_name||'member')}">${ico('chat','icon-sm')}<span>Reply</span></button>`:''}<button class="emoji-inline" data-action="reaction-menu" data-type="${target_type}" data-id="${row.id}" title="React">${ico('smile','icon-sm')}</button>${!row.pending?`<button class="emoji-inline" data-action="tender-inbox-save" data-type="${target_type}" data-id="${esc(row.id)}" title="Bookmark message">${tenderInbox.saves.some(b=>b.target_type===target_type&&b.message_id===row.id)||target_type==='message'&&bookmarks.some(b=>b.message_id===row.id)?'★':'☆'}</button>`:''}${target_type==='message'&&!row.pending?`<button class="emoji-inline" data-action="forward-message" data-id="${esc(row.id)}" title="Forward text">↗</button>`:''}${!row.pending?`<button class="emoji-inline" data-action="tender05-translate" data-id="${esc(row.id)}" title="Translate">🌍</button>`:''}${!row.pending&&tender05Ready?`<button class="emoji-inline" data-action="tender05-thread-chooser" data-type="${target_type}" data-id="${esc(row.id)}" title="Message threads">🧵</button>`:''}${mine&&!row.pending?`<button class="emoji-inline" data-action="edit-message" data-type="${target_type}" data-id="${row.id}" title="Edit inline">${ico('edit','icon-sm')}</button><button class="emoji-inline" data-action="pin-message" data-id="${row.id}" title="Pin">${row.is_pinned?'📌':'📍'}</button><button class="emoji-inline" data-action="delete-message" data-id="${row.id}" data-type="${target_type}" title="Delete">${ico('trash','icon-sm')}</button>`:''}</div></div></div>`}
 function updateComposerReply(){
  const form=document.getElementById('composer-form');if(!form?.querySelector||!form.insertAdjacentHTML)return;
  form.querySelector('.composer-reply')?.remove();
@@ -2792,7 +2859,8 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='reply-message'){selectReply(id);return}
  if(a==='jump-latest'){const sc=document.querySelector('#main .chat-scroll');sc?.scrollTo({top:sc.scrollHeight,behavior:'smooth'});el.hidden=true;return}
   if(a==='jump-reply'){jumpToReply(id);return}
- if(a==='edit-message'){let m=activeMessages.find(x=>x.id===id);if(!m)return;modal('Edit message','Update your message.',`<form id="edit-message-form"><input name="id" type="hidden" value="${id}"><textarea name="body" class="input textarea" maxlength="4000" required>${esc(m.body)}</textarea><button class="btn full" type="submit">Save changes</button></form>`);return}
+ if(a==='edit-message'){tenderEditStart(id,el.dataset.type|| (state.area==='chats'?'message':'piece_message'));return}
+ if(a==='tender-inline-edit-cancel'){tenderEditCancel();return}
  if(a==='pin-message'){if(!extendedReady)return toast('Run the 0.2 SQL migration first.',true);await safe(async()=>{const m=activeMessages.find(x=>x.id===id);assert(await q('messages').update({is_pinned:!m.is_pinned}).eq('id',id));m.is_pinned=!m.is_pinned;renderMain()});return}
  if(a==='bookmark-message'){await safe(()=>tenderInboxSaveMessage('message',id));return}
  if(a==='forward-message'){let m=activeMessages.find(x=>x.id===id);if(!m)return;modal('Forward message','Forward text to another conversation. Attachments are not forwarded.',`<form id="forward-form"><input name="message_id" type="hidden" value="${id}"><select class="input" name="conversation_id">${conversations.filter(x=>x.id!==state.selected).map(c=>`<option value="${c.id}">${esc(namesFor(c))}</option>`).join('')}</select><button class="btn full" type="submit">Forward text</button></form>`);return}
@@ -3105,7 +3173,7 @@ async function submitForm(form){switch(form.id){
     if(Object.prototype.hasOwnProperty.call(upd,'presence_mode'))await publishPresence();
     toast('Preferences saved! 🍗');
  });
- case'edit-message-form':return safe(async()=>{const d=new FormData(form),id=String(d.get('id')),body=String(d.get('body')).trim();assert(await q('messages').update({body,edited_at:new Date().toISOString()}).eq('id',id));closeModal();await loadActive();renderMain();toast('Message edited.')});
+ case'tender-inline-edit-form':return safe(()=>tenderEditSubmit(form));
  case'forward-form':return safe(async()=>{const d=new FormData(form),id=String(d.get('message_id')),cid=String(d.get('conversation_id'));if(!cid)throw Error('Choose a conversation');const m=activeMessages.find(x=>x.id===id);if(!m)throw Error('Message no longer available');assert(await q('messages').insert({conversation_id:cid,author_id:user.id,body:'↗ Forwarded: '+m.body}));closeModal();toast('Message forwarded!')});
  case'gif-form':{const u=String(new FormData(form).get('url')).trim();if(!giftGif(u))return toast('Use a direct media.giphy.com or media.tenor.com GIF image URL.',true);closeModal();const field=document.getElementById('message-box');if(field){field.value=(field.value?field.value+'\n':'')+u;field.focus();}return}
  case'global-search-form':return safe(async()=>{
@@ -3211,8 +3279,20 @@ document.addEventListener('click',event=>{
  if(t.dataset.action==='close-on-backdrop'&&event.target!==t)return;
  if(t.dataset.action==='request-friend'){safe(async()=>{assert(await q('friendships').insert({requester:user.id,recipient:t.dataset.id,status:'pending'}));toast('Friend request sent!');await refreshData();closeModal();render()});return}handleAction(t)});
 document.addEventListener('contextmenu',tenderInboxContextMenu);
+document.addEventListener('keydown',event=>{
+ if(!event.target?.matches?.('#tender-inline-edit-textarea'))return;
+ if(event.isComposing)return;
+ if(event.key==='Escape'){
+  event.preventDefault();event.stopImmediatePropagation();tenderEditCancel();return;
+ }
+ if(event.key==='Enter'&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey){
+  event.preventDefault();event.stopImmediatePropagation();
+  event.target.closest('form')?.requestSubmit();
+ }
+},true);
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches?.('[data-tender-spoiler]')){e.preventDefault();e.target.classList.toggle('revealed');return}if(e.key==='Escape'){tenderInboxCloseContext();if(tenderInbox.open)tenderInboxClose();const m=document.getElementById('tender-v53-plus-menu');if(m)m.hidden=true}});
 document.addEventListener('input',e=>{
+ if(e.target.matches?.('#tender-inline-edit-textarea')&&tenderInlineEdit){tenderInlineEdit.draft=e.target.value;return}
  if(e.target.closest?.('.tender-studio-v3')){tenderStudioPreviewRefresh();return}
  if(e.target.closest?.('#tender-html-embed-form')){tender05HTMLPreview();return}
  if(e.target.closest?.('#profile-style-form')){
