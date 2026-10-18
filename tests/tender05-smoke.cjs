@@ -155,4 +155,22 @@ assert.equal((migration054.split('$tender$').length-1)%2,0,'0.5.4 SQL dollar quo
 assert.ok(migration054.trimEnd().endsWith('COMMIT;'),'0.5.4 migration is transactional');
 assert.ok(!/(DROP TABLE|TRUNCATE TABLE|DELETE FROM public\.messages|DELETE FROM public\.piece_messages)/i.test(migration054),'no destructive chat operations');
 
+// Render the actual new in-bubble form (not just a string presence check).
+const inlineStart=app.indexOf('function tenderInlineEditHTML(');
+const inlineEnd=app.indexOf('\nfunction tenderEditStart(',inlineStart);
+assert.ok(inlineStart>=0&&inlineEnd>inlineStart,'inline editor source exists');
+const testEscape=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const editRenderer=vm.runInNewContext('('+app.slice(inlineStart,inlineEnd)+')',{tenderInlineEdit:{id:'id1',type:'message',draft:'<img src=x onerror=alert(1)>',saving:false},esc:testEscape},{timeout:1000});
+const editHtml=editRenderer({id:'id1'},'message');
+assert.ok(editHtml.includes('id="tender-inline-edit-textarea"'),'editor is in original bubble');
+assert.ok(editHtml.includes('Enter to save'),'keyboard shortcuts visible');
+assert.ok(editHtml.includes('tender-inline-edit-cancel'),'cancel action available');
+assert.ok(!editHtml.includes('<img'),'raw markup never injected into editor');
+assert.ok(editHtml.includes('&lt;img'),'draft is safely escaped');
+const cardStart=app.indexOf('function tenderInboxNewsCard(');
+const cardEnd=app.indexOf('\nfunction tenderInboxArticleHost(',cardStart);
+assert.ok(cardStart>=0&&cardEnd>cardStart,'article-card renderer exists');
+const articleCard=vm.runInNewContext('('+app.slice(cardStart,cardEnd)+')',{esc:testEscape},{timeout:1000});
+assert.ok(articleCard(win053.Tender053.updates[0],true).includes('data-action="tender-inbox-article"'),'updates are clickable');
+assert.ok(articleCard(win053.Tender053.news[0],false).includes('data-kind="news"'),'news articles clickable');
 console.log('Tender 0.5 smoke checks passed');
