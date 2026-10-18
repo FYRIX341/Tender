@@ -6,7 +6,17 @@ Tender is a responsive social messaging app with **Buffalo** the mascot. Chat wi
 
 **[🍗 Open Tender securely](https://fyrix341.github.io/Tender/)** · [Source code](https://github.com/FYRIX341/Tender)
 
-## ✨ Tender 0.4.4 — Live Profile Presence
+## ✨ Tender 0.4.5 — Daily Chat Dates
+
+**Tender 0.4.5 gives conversations Discord-style day separators.** When the message history crosses into a new calendar day, a slim horizontal divider appears automatically. Recent dates read **Today, October 18, 2026** or **Yesterday, October 17, 2026** (as appropriate for your browser's local date), while older messages use their full date.
+
+Daily dividers appear in **DMs, group conversations and Piece channels**. Multiple messages from one day stay together under a single divider. They also work while messages arrive live, and the date labels refresh after midnight or when returning to the tab. Tender no longer visually merges messages sent by the same person across two different days.
+
+The change is entirely frontend-based, preserves all past messages, and does not need a database migration. [Read the 0.4.5 release notes](RELEASE_0_4_5.md).
+
+### Previous release: 0.4.4 — Live Profile Presence
+
+
 
 **Tender 0.4.4 fixes false Online badges on profiles.** The old profile badge used the last saved status preference, which stayed `online` after a user disconnected. The updated full profile, DM profile side panel, friend profile page and mini profile now use the existing live Supabase presence roster.
 
@@ -49,7 +59,7 @@ The **automatic additive Supabase migrations** preserve accounts, chats, Pieces 
 - **Call a friend:** Start a real voice or video call in a private DM, share your screen, mute/deafen, and set different voice and stream volumes. Requires microphone/camera permission and an HTTPS browser with WebRTC.
 - **Stay in the loop:** See in-app notifications while using Tender, including incoming call prompts.
 
-For details, see the [0.4.4 update notes](RELEASE_0_4_4.md), [0.4.3 update notes](RELEASE_0_4_3.md), [0.4.2 update notes](RELEASE_0_4_2.md), [0.4.1 update notes](RELEASE_0_4_1.md), [0.4 release notes](RELEASE_0_4.md), [0.3.5 update notes](RELEASE_0_3_5.md), [0.3.4 hotfix notes](RELEASE_0_3_4.md), [0.3.3 release notes](RELEASE_0_3_3.md), [0.3.2 changelog](RELEASE_0_3_2.md), and [0.3.1 changelog](RELEASE_0_3_1.md).
+For details, see the [0.4.5 update notes](RELEASE_0_4_5.md), [0.4.4 update notes](RELEASE_0_4_4.md), [0.4.3 update notes](RELEASE_0_4_3.md), [0.4.2 update notes](RELEASE_0_4_2.md), [0.4.1 update notes](RELEASE_0_4_1.md), [0.4 release notes](RELEASE_0_4.md), [0.3.5 update notes](RELEASE_0_3_5.md), [0.3.4 hotfix notes](RELEASE_0_3_4.md), [0.3.3 release notes](RELEASE_0_3_3.md), [0.3.2 changelog](RELEASE_0_3_2.md), and [0.3.1 changelog](RELEASE_0_3_1.md).
 
 ## 📱 Made for desktop and mobile
 

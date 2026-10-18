@@ -1379,3 +1379,49 @@ html[data-tender-theme="light"] .profile-presence.offline{
 html[data-tender-theme="light"] .profile-presence.offline:before{
  background:#818995!important;
 }
+
+/* Tender 0.4.5 — Discord-like, accessible daily message separators. */
+.chat-scroll > .chat-day-separator{
+ width:100%;
+ flex:0 0 auto;
+ align-self:stretch;
+ display:flex;
+ align-items:center;
+ gap:12px;
+ margin:21px 0 11px;
+ padding:0 8px;
+ color:var(--muted,#b5bac1);
+ text-align:center;
+ font-size:12px;
+ font-weight:750;
+ line-height:1.4;
+ letter-spacing:.005em;
+ user-select:none;
+}
+.chat-scroll > .chat-day-separator:first-child{margin-top:10px}
+.chat-day-separator::before,
+.chat-day-separator::after{
+ content:'';
+ display:block;
+ flex:1 1 0;
+ min-width:0;
+ height:1px;
+ background:var(--stroke,#40434b);
+ opacity:.9;
+}
+.chat-day-separator > span{
+ display:inline-block;
+ flex:0 0 auto;
+ white-space:nowrap;
+ color:inherit;
+}
+html[data-tender-theme="light"] .chat-day-separator{
+ color:#727887;
+}
+html[data-tender-theme="light"] .chat-day-separator::before,
+html[data-tender-theme="light"] .chat-day-separator::after{
+ background:#d6dae5;
+}
+@media(max-width:760px){
+ .chat-scroll > .chat-day-separator{font-size:11px;gap:8px;margin:19px 0 10px;padding:0 5px}
+}
