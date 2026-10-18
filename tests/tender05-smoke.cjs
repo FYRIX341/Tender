@@ -98,4 +98,15 @@ assert.ok(studioHTML.includes('data-action="tender-v3-randomize"'),'Surprise Me 
 assert.ok(!studioHTML.includes('settings-profile-preview'),'Old profile editor is not reused');
 
 
+const script053=read('tender053.js');
+new vm.Script(script053,{filename:'tender053.js'});
+const win053={};
+vm.runInNewContext(script053,{window:win053},{timeout:1000});
+const md053=win053.Tender053;
+assert.ok(md053.format('# hi').includes('<h1'));
+assert.ok(md053.format('**Bold**').includes('<strong'));
+assert.ok(md053.format('***both***').includes('<em'));
+assert.ok(md053.format('__underline__').includes('<u'));
+assert.ok(md053.format('~~strike~~').includes('<del'));
+assert.ok(md053.format('---').includes('<hr'));
 console.log('Tender 0.5 smoke checks passed');
