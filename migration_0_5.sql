@@ -147,15 +147,20 @@ BEGIN
  IF NOT EXISTS(SELECT 1 FROM public.profiles WHERE id=NEW.author_id AND account_state='active') THEN
    RAISE EXCEPTION 'Your account is inactive';
  END IF;
- IF TG_TABLE_NAME='piece_messages' AND NOT public.is_piece_mod(NEW.piece_id) THEN
-   IF EXISTS (
-    SELECT 1 FROM public.pieces p JOIN public.piece_messages old
-      ON old.piece_id=p.id
-    WHERE p.id=NEW.piece_id AND old.author_id=NEW.author_id
-      AND p.message_cooldown_seconds>0
-      AND old.created_at>now()-(p.message_cooldown_seconds*interval '1 second')
-   ) THEN
-     RAISE EXCEPTION 'Piece slow mode: wait before sending another message';
+ -- IMPORTANT: PL/pgSQL boolean expressions are not guaranteed to short-circuit.
+ -- A direct-message row has no piece_id column, so never access NEW.piece_id
+ -- in the same condition that tests TG_TABLE_NAME.
+ IF TG_TABLE_NAME='piece_messages' THEN
+   IF NOT public.is_piece_mod(NEW.piece_id) THEN
+     IF EXISTS (
+      SELECT 1 FROM public.pieces p JOIN public.piece_messages old
+        ON old.piece_id=p.id
+      WHERE p.id=NEW.piece_id AND old.author_id=NEW.author_id
+        AND p.message_cooldown_seconds>0
+        AND old.created_at>now()-(p.message_cooldown_seconds*interval '1 second')
+     ) THEN
+       RAISE EXCEPTION 'Piece slow mode: wait before sending another message';
+     END IF;
    END IF;
  END IF;
  IF TG_TABLE_NAME='messages' THEN

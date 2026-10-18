@@ -42,4 +42,14 @@ for(const delimiter of ['$$','$tender$']){
  assert.equal(count%2,0,'SQL dollar-quote delimiter '+delimiter+' must be balanced');
 }
 assert.ok(!sql.includes(' AS $\n'),'do not deploy broken SQL function delimiters');
+assert.ok(!sql.includes("TG_TABLE_NAME='piece_messages' AND NOT public.is_piece_mod(NEW.piece_id)"),
+ 'Piece-specific column must never be read in a short-circuit expression');
+const hotfix=read('migration_0_5_1.sql');
+assert.match(hotfix,/IF TG_TABLE_NAME='piece_messages' THEN\s+IF NOT public\.is_piece_mod\(NEW\.piece_id\) THEN/,
+ 'Hotfix scopes piece_id to Piece messages only');
+assert.ok(hotfix.includes('CREATE OR REPLACE FUNCTION public.tender_guard_message_rate()'),
+ "Hotfix replaces the existing function, not the user's tables");
+assert.ok(!/(DROP TABLE|TRUNCATE|DELETE FROM)/i.test(hotfix),'Hotfix must not remove data');
+assert.ok(hotfix.includes('BEGIN;') && hotfix.trimEnd().endsWith('COMMIT;'),'Hotfix is transactional');
+
 console.log('Tender 0.5 smoke checks passed');

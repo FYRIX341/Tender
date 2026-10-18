@@ -6,6 +6,12 @@ Tender is a responsive social messaging app with **Buffalo** the mascot. Chat wi
 
 **[🍗 Open Tender securely](https://fyrix341.github.io/Tender/)** · [Source code](https://github.com/FYRIX341/Tender)
 
+## 🔧 Tender 0.5.1 — DM / Emoji Hotfix
+
+**If you receive `record "new" has no field "piece_id"` when sending DMs**, run the short [migration_0_5_1.sql](migration_0_5_1.sql) hotfix in your existing Tender Supabase project. It repairs an anti-spam trigger that incorrectly evaluated a Piece-only column for DM messages. This does **not** delete account data or require the full 0.5 migration again.
+
+[See instructions and root cause](RELEASE_0_5_1.md).
+
 ## 🍗 Tender 0.5 Alpha — CONTENT UPDATE
 
 **Major alpha release.** The 0.5 source introduces message requests, DM privacy, public and private threads, safe HTML/CSS embeds, emoji shortcodes, custom stickers, the new Profile Studio with free color banners and widgets, Piece Tags, forum channels, and more.
