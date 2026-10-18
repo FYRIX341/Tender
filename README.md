@@ -6,7 +6,15 @@ Tender is a responsive social messaging app with **Buffalo** the mascot. Chat wi
 
 **[🍗 Open Tender securely](https://fyrix341.github.io/Tender/)** · [Source code](https://github.com/FYRIX341/Tender)
 
-## ✨ Tender 0.4.3 — Channel Repair & Charcoal UI
+## ✨ Tender 0.4.4 — Live Profile Presence
+
+**Tender 0.4.4 fixes false Online badges on profiles.** The old profile badge used the last saved status preference, which stayed `online` after a user disconnected. The updated full profile, DM profile side panel, friend profile page and mini profile now use the existing live Supabase presence roster.
+
+When nobody is connected, the profile visibly says **Offline** with a gray indicator. Live connections show Online, Idle, or Do Not Disturb as selected. Invisible users appear Offline. Badges already on screen update as users connect or disconnect, without needing to close and reopen their profile. Your own badge also waits for a successful presence connection before saying Online.
+
+See the [0.4.4 release notes](RELEASE_0_4_4.md) for the technical fix and test cases.
+
+### Previous release: 0.4.3 — Channel Repair & Charcoal UI
 
 **Tender 0.4.3 addresses the "Create channel does nothing" bug** with a more reliable form, persistent errors, a visible saving state, a timeout for stuck requests, and server-side confirmation before success is shown. The channel editor now opens even if the database isn't ready, and explains which existing Supabase migration is required. Owners can open the editor even when their membership row is absent, although the database must still authorize the write.
 
@@ -41,7 +49,7 @@ The **automatic additive Supabase migrations** preserve accounts, chats, Pieces 
 - **Call a friend:** Start a real voice or video call in a private DM, share your screen, mute/deafen, and set different voice and stream volumes. Requires microphone/camera permission and an HTTPS browser with WebRTC.
 - **Stay in the loop:** See in-app notifications while using Tender, including incoming call prompts.
 
-For details, see the [0.4.3 update notes](RELEASE_0_4_3.md), [0.4.2 update notes](RELEASE_0_4_2.md), [0.4.1 update notes](RELEASE_0_4_1.md), [0.4 release notes](RELEASE_0_4.md), [0.3.5 update notes](RELEASE_0_3_5.md), [0.3.4 hotfix notes](RELEASE_0_3_4.md), [0.3.3 release notes](RELEASE_0_3_3.md), [0.3.2 changelog](RELEASE_0_3_2.md), and [0.3.1 changelog](RELEASE_0_3_1.md).
+For details, see the [0.4.4 update notes](RELEASE_0_4_4.md), [0.4.3 update notes](RELEASE_0_4_3.md), [0.4.2 update notes](RELEASE_0_4_2.md), [0.4.1 update notes](RELEASE_0_4_1.md), [0.4 release notes](RELEASE_0_4.md), [0.3.5 update notes](RELEASE_0_3_5.md), [0.3.4 hotfix notes](RELEASE_0_3_4.md), [0.3.3 release notes](RELEASE_0_3_3.md), [0.3.2 changelog](RELEASE_0_3_2.md), and [0.3.1 changelog](RELEASE_0_3_1.md).
 
 ## 📱 Made for desktop and mobile
 
