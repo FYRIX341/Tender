@@ -182,6 +182,11 @@ BEGIN
  UPDATE public.notifications SET is_read=true WHERE user_id=auth.uid() AND is_read=false;
  UPDATE public.tender_inbox_mentions SET is_read=true WHERE user_id=auth.uid() AND is_read=false
   AND public.tender_inbox_can_access(target_type,message_id,auth.uid());
+ INSERT INTO public.piece_channel_reads(channel_id,user_id,last_read_at)
+ SELECT ch.id,auth.uid(),now() FROM public.piece_channels ch
+ JOIN public.piece_members pm ON pm.piece_id=ch.piece_id AND pm.user_id=auth.uid()
+ WHERE ch.kind<>'forum'
+ ON CONFLICT(channel_id,user_id) DO UPDATE SET last_read_at=EXCLUDED.last_read_at;
 END;
 $tender$;
 REVOKE ALL ON FUNCTION public.tender_inbox_mark_all_read() FROM PUBLIC,anon;
