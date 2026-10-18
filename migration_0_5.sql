@@ -15,10 +15,15 @@ ALTER TABLE public.profiles
  ADD COLUMN IF NOT EXISTS profile_layout text NOT NULL DEFAULT 'classic',
  ADD COLUMN IF NOT EXISTS profile_widgets jsonb NOT NULL DEFAULT '["about","status","pieces"]'::jsonb,
  ADD COLUMN IF NOT EXISTS equipped_piece_id uuid REFERENCES public.pieces(id) ON DELETE SET NULL;
-DO $tender$ BEGIN
+DO $tender$
+BEGIN
  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='tender_banner_color_valid') THEN
   ALTER TABLE public.profiles ADD CONSTRAINT tender_banner_color_valid
-   CHECK (banner_color ~ '^#[0-9a-fA-F]{6}
+   CHECK (banner_color ~ '^#[0-9a-fA-F]{6}$') NOT VALID;
+ END IF;
+END;
+$tender$;
+ALTER TABLE public.profiles VALIDATE CONSTRAINT tender_banner_color_valid;
 
 -- Piece owners may choose a community slow-mode cooldown (0 disables it).
 ALTER TABLE public.pieces ADD COLUMN IF NOT EXISTS message_cooldown_seconds integer NOT NULL DEFAULT 0
