@@ -1537,3 +1537,62 @@ html[data-tender-workspace="snow"] .profile-presence{color:#2b5a48}
  .tender-html-preview{height:150px}
  .tender-call-overlay{max-height:95dvh}
 }
+
+/* Tender 0.5: threads, pinned messages, translations and profile studio layout */
+.tender-thread-root{padding:12px;border-left:3px solid var(--orange);border-radius:6px;background:var(--surface);margin-bottom:12px}
+.tender-thread-root strong{font-size:13px}.tender-thread-root p{font-size:12px;color:var(--muted);margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere}
+.tender-thread-list,.tender-thread-posts,.tender-pinned-list{display:grid;gap:8px;max-height:52vh;overflow-y:auto}
+.tender-thread-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:1px solid var(--stroke);border-radius:9px;background:var(--surface);color:var(--text);padding:12px;cursor:pointer}
+.tender-thread-row:hover,.tender-thread-row:focus-visible{background:var(--surface2);outline:2px solid var(--orange)}
+.tender-thread-row>span{font-size:23px}.tender-thread-row>div{flex:1;display:grid;gap:4px;min-width:0}
+.tender-thread-row strong{font-size:13px;overflow:hidden;text-overflow:ellipsis}.tender-thread-row small{font-size:10px;color:var(--muted)}
+.tender-thread-invites{display:grid;gap:8px;max-height:180px;overflow-y:auto;background:var(--surface);border-radius:9px;padding:12px}
+.tender-thread-invites label{display:flex;align-items:center;gap:8px;font-size:12px}
+.tender-thread-invites input{accent-color:var(--orange)}
+.tender-thread-post{padding:11px 13px;border:1px solid var(--stroke);border-radius:8px;background:var(--surface)}
+.tender-thread-post strong{font-size:12px}.tender-thread-post small{font-size:10px;color:var(--muted)}
+.tender-thread-post p{margin-top:6px;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55}
+.tender-thread-posts{margin-bottom:17px}
+.tender-pinned-trigger{display:block;width:100%;cursor:pointer;text-align:left}
+.tender-pinned-trigger:hover{filter:brightness(1.1)}
+.tender-pinned-row{display:block;text-align:left;padding:12px 14px;background:var(--surface);border:1px solid var(--stroke);border-radius:8px;color:var(--text);cursor:pointer}
+.tender-pinned-row:hover{background:var(--surface2)}.tender-pinned-row strong{font-size:12px}.tender-pinned-row small{font-size:10px;color:var(--muted)}
+.tender-pinned-row p{font-size:12px;margin-top:6px;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}
+.tender-translation-preview{margin:10px 0;background:var(--surface);border:1px solid var(--stroke);border-radius:9px;padding:12px}
+.tender-translation-preview small{font-size:10px;color:var(--muted)}.tender-translation-preview p{font-size:13px;line-height:1.5;white-space:pre-wrap}
+.tender-translate-buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.tender-translate-buttons .btn{flex:1 1 auto}
+.tender-widget-editor-row[draggable="true"]{cursor:grab;user-select:none}
+.tender-widget-editor-row[draggable="true"]:active{cursor:grabbing}
+.tender-profile-dialog.tender-layout-gamer .profile-dialog-identity{border-left:5px solid #906cf4}
+.tender-profile-dialog.tender-layout-gamer .profile-dialog-meta{background:#30304360;border-radius:7px;padding:9px}
+.tender-profile-dialog.tender-layout-minimal .profile-dialog-banner{height:105px!important;flex-basis:105px!important}
+.tender-profile-dialog.tender-layout-minimal .profile-dialog-content .profile-detail-section{border-bottom:0}
+.tender-profile-dialog.tender-layout-cinematic .profile-dialog-banner{height:225px!important;flex-basis:225px!important}
+.tender-profile-dialog.tender-layout-cinematic .profile-dialog-id{margin-top:-58px}
+.tender-profile-dialog.tender-layout-cinematic .profile-dialog-name-row h2{font-size:27px}
+.tender-call-window-actions{display:flex;align-items:center;gap:7px}
+.tender-call-fullscreen{width:calc(100vw - 36px)!important;max-height:calc(100dvh - 26px)!important}
+.tender-call-fullscreen .tender-call-stage{min-height:min(55dvh,520px)!important}
+.tender-profile-studio-navigation{display:flex;flex-direction:column;gap:7px;align-self:start}
+.tender-profile-studio-navigation button{display:flex;align-items:center;gap:9px;background:transparent;border:1px solid transparent;border-radius:8px;text-align:left;padding:12px 13px;color:var(--muted);font-weight:700;font-size:12px;cursor:pointer}
+.tender-profile-studio-navigation button:hover,.tender-profile-studio-navigation button:focus-visible{background:var(--surface);border-color:var(--stroke);color:var(--text);outline:none}
+.tender-profile-studio-navigation .studio-title{font-size:10px;font-weight:900;letter-spacing:.1em;color:var(--muted);margin:11px}
+@media(min-width:930px){
+ .settings-content:has(.tender-profile-studio-navigation){display:grid;grid-template-columns:190px minmax(0,1fr);gap:16px 18px;align-content:start;min-width:0}
+ .settings-content:has(.tender-profile-studio-navigation)>.settings-section-head{grid-column:1/-1}
+ .settings-content:has(.tender-profile-studio-navigation)>.tender-profile-studio-navigation{grid-column:1;grid-row:2/span 12;position:sticky;top:10px}
+ .settings-content:has(.tender-profile-studio-navigation)>.settings-profile-preview,
+ .settings-content:has(.tender-profile-studio-navigation)>.settings-card{grid-column:2;min-width:0;width:100%}
+}
+@media(max-width:929px){
+ .tender-profile-studio-navigation{flex-direction:row;flex-wrap:wrap}
+ .tender-profile-studio-navigation .studio-title{flex-basis:100%;margin:4px}
+ .tender-profile-studio-navigation button{padding:8px 11px}
+}
+@media(max-width:760px){
+ .tender-call-fullscreen{width:calc(100vw - 12px)!important;max-height:96dvh!important}
+ .tender-thread-row{padding:9px}
+ .tender-widget-editor-row{flex-wrap:wrap}
+ .tender-translate-buttons .btn{width:100%}
+}
