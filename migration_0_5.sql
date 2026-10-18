@@ -271,4 +271,157 @@ CREATE POLICY "tender safety report create" ON public.tender_safety_reports
    SELECT 1 FROM public.tender_dm_requests r WHERE r.id=request_id AND r.recipient_id=auth.uid()
   ));
 
+-- Organized forum channels are real persisted channels, not placeholder buttons.
+ALTER TABLE public.piece_channels DROP CONSTRAINT IF EXISTS piece_channels_kind_check;
+ALTER TABLE public.piece_channels ADD CONSTRAINT piece_channels_kind_check
+ CHECK(kind IN ('text','announcements','forum'));
+ALTER TABLE public.piece_posts ADD COLUMN IF NOT EXISTS channel_id uuid;
+DO $tender$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='tender_piece_post_channel_fk') THEN
+  ALTER TABLE public.piece_posts ADD CONSTRAINT tender_piece_post_channel_fk
+   FOREIGN KEY(channel_id,piece_id) REFERENCES public.piece_channels(id,piece_id) ON DELETE SET NULL (channel_id);
+ END IF;
+END $tender$;
+CREATE INDEX IF NOT EXISTS tender_forum_post_channel_idx ON public.piece_posts(channel_id,created_at DESC);
+CREATE OR REPLACE FUNCTION public.tender_channel_send_guard()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $
+DECLARE channel_kind text;
+BEGIN
+ IF NEW.channel_id IS NOT NULL THEN
+  SELECT c.kind INTO channel_kind FROM public.piece_channels c
+  WHERE c.id=NEW.channel_id AND c.piece_id=NEW.piece_id;
+  IF channel_kind='announcements' AND NOT public.is_piece_mod(NEW.piece_id) THEN
+   RAISE EXCEPTION 'Only Piece moderators can post in announcement channels';
+  ELSIF channel_kind='forum' THEN
+   RAISE EXCEPTION 'Use discussions inside forum channels';
+  END IF;
+ END IF;
+ RETURN NEW;
+END $;
+DROP TRIGGER IF EXISTS tender_channel_send_guard_trigger ON public.piece_messages;
+CREATE TRIGGER tender_channel_send_guard_trigger BEFORE INSERT ON public.piece_messages
+ FOR EACH ROW EXECUTE FUNCTION public.tender_channel_send_guard();
+
+-- Secure public/private threads with their own posts. Private membership is enforced
+-- by the DB RLS functions even if a client guesses a thread UUID.
+CREATE TABLE IF NOT EXISTS public.tender_threads(
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ root_type text NOT NULL CHECK(root_type IN ('message','piece_message')),
+ root_message_id uuid NOT NULL,
+ conversation_id uuid REFERENCES public.conversations(id) ON DELETE CASCADE,
+ piece_id uuid REFERENCES public.pieces(id) ON DELETE CASCADE,
+ channel_id uuid REFERENCES public.piece_channels(id) ON DELETE SET NULL,
+ created_by uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+ title text NOT NULL CHECK(char_length(title) BETWEEN 1 AND 80),
+ is_private boolean NOT NULL DEFAULT false,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ CHECK((conversation_id IS NULL)<>(piece_id IS NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS tender_thread_origin_idx ON public.tender_threads(root_type,root_message_id,id);
+CREATE TABLE IF NOT EXISTS public.tender_thread_members(
+ thread_id uuid NOT NULL REFERENCES public.tender_threads(id) ON DELETE CASCADE,
+ user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+ PRIMARY KEY(thread_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS public.tender_thread_posts(
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ thread_id uuid NOT NULL REFERENCES public.tender_threads(id) ON DELETE CASCADE,
+ author_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+ body text NOT NULL CHECK(char_length(trim(body)) BETWEEN 1 AND 4000),
+ created_at timestamptz NOT NULL DEFAULT now(),
+ edited_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS tender_thread_posts_idx ON public.tender_thread_posts(thread_id,created_at);
+
+CREATE OR REPLACE FUNCTION public.tender_thread_allowed(thread_uuid uuid)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $
+ SELECT EXISTS(
+  SELECT 1 FROM public.tender_threads t WHERE t.id=thread_uuid
+   AND ((t.conversation_id IS NOT NULL AND public.is_chat_member(t.conversation_id))
+     OR (t.piece_id IS NOT NULL AND public.is_piece_member(t.piece_id)))
+   AND (NOT t.is_private OR EXISTS(
+    SELECT 1 FROM public.tender_thread_members m WHERE m.thread_id=t.id AND m.user_id=auth.uid()
+   ))
+ );
+$;
+CREATE OR REPLACE FUNCTION public.tender_create_thread(
+ root_kind text,root_id uuid,thread_title text,secret boolean DEFAULT false,invited uuid[] DEFAULT '{}'::uuid[]
+) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $
+DECLARE conv uuid; pid uuid; chid uuid; tid uuid; member_id uuid;
+BEGIN
+ IF auth.uid() IS NULL OR root_id IS NULL THEN RAISE EXCEPTION 'Sign in first'; END IF;
+ IF root_kind='message' THEN
+   SELECT m.conversation_id INTO conv FROM public.messages m WHERE m.id=root_id
+   AND public.is_chat_member(m.conversation_id);
+ ELSIF root_kind='piece_message' THEN
+   SELECT m.piece_id,m.channel_id INTO pid,chid FROM public.piece_messages m WHERE m.id=root_id
+   AND public.is_piece_member(m.piece_id);
+ ELSE RAISE EXCEPTION 'Invalid thread type'; END IF;
+ IF conv IS NULL AND pid IS NULL THEN RAISE EXCEPTION 'You cannot create a thread from this message'; END IF;
+ IF array_length(invited,1)>25 THEN RAISE EXCEPTION 'Maximum 25 invited members'; END IF;
+ INSERT INTO public.tender_threads(root_type,root_message_id,conversation_id,piece_id,channel_id,created_by,title,is_private)
+ VALUES(root_kind,root_id,conv,pid,chid,auth.uid(),left(coalesce(nullif(trim(thread_title),''),'Discussion'),80),coalesce(secret,false))
+ RETURNING id INTO tid;
+ INSERT INTO public.tender_thread_members(thread_id,user_id) VALUES(tid,auth.uid());
+ IF secret THEN
+   FOR member_id IN SELECT DISTINCT unnest(coalesce(invited,'{}'::uuid[])) LOOP
+     IF member_id<>auth.uid() AND
+       ((conv IS NOT NULL AND EXISTS(SELECT 1 FROM public.conversation_members x WHERE x.conversation_id=conv AND x.user_id=member_id))
+        OR (pid IS NOT NULL AND EXISTS(SELECT 1 FROM public.piece_members x WHERE x.piece_id=pid AND x.user_id=member_id)))
+     THEN INSERT INTO public.tender_thread_members(thread_id,user_id) VALUES(tid,member_id) ON CONFLICT DO NOTHING; END IF;
+   END LOOP;
+ END IF;
+ RETURN tid;
+END $;
+REVOKE ALL ON FUNCTION public.tender_create_thread(text,uuid,text,boolean,uuid[]) FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.tender_create_thread(text,uuid,text,boolean,uuid[]) TO authenticated;
+
+ALTER TABLE public.tender_threads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tender_thread_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tender_thread_posts ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "tender threads visible" ON public.tender_threads;
+CREATE POLICY "tender threads visible" ON public.tender_threads FOR SELECT TO authenticated
+ USING(public.tender_thread_allowed(id));
+DROP POLICY IF EXISTS "tender thread members visible" ON public.tender_thread_members;
+CREATE POLICY "tender thread members visible" ON public.tender_thread_members FOR SELECT TO authenticated
+ USING(public.tender_thread_allowed(thread_id));
+DROP POLICY IF EXISTS "tender thread posts visible" ON public.tender_thread_posts;
+CREATE POLICY "tender thread posts visible" ON public.tender_thread_posts FOR SELECT TO authenticated
+ USING(public.tender_thread_allowed(thread_id));
+DROP POLICY IF EXISTS "tender thread posts send" ON public.tender_thread_posts;
+CREATE POLICY "tender thread posts send" ON public.tender_thread_posts FOR INSERT TO authenticated
+ WITH CHECK(author_id=auth.uid() AND public.tender_thread_allowed(thread_id)
+ AND EXISTS(SELECT 1 FROM public.profiles p WHERE p.id=auth.uid() AND p.account_state='active'));
+DROP POLICY IF EXISTS "tender thread posts edit" ON public.tender_thread_posts;
+CREATE POLICY "tender thread posts edit" ON public.tender_thread_posts FOR UPDATE TO authenticated
+ USING(author_id=auth.uid()) WITH CHECK(author_id=auth.uid());
+DROP POLICY IF EXISTS "tender thread posts delete" ON public.tender_thread_posts;
+CREATE POLICY "tender thread posts delete" ON public.tender_thread_posts FOR DELETE TO authenticated
+ USING(author_id=auth.uid());
+
+CREATE OR REPLACE FUNCTION public.tender_guard_thread_rate()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $
+DECLARE total integer;
+BEGIN
+ SELECT count(*) INTO total FROM public.tender_thread_posts p
+ WHERE p.author_id=NEW.author_id AND p.created_at>now()-interval '10 seconds';
+ IF total>=8 THEN RAISE EXCEPTION 'Woah, chill there buddy! Gotta slow down.. 😏'; END IF;
+ RETURN NEW;
+END $;
+DROP TRIGGER IF EXISTS tender_thread_rate_trigger ON public.tender_thread_posts;
+CREATE TRIGGER tender_thread_rate_trigger BEFORE INSERT ON public.tender_thread_posts
+ FOR EACH ROW EXECUTE FUNCTION public.tender_guard_thread_rate();
+
+-- Enable inbox and thread activity events if Realtime publication exists.
+DO $tender$ BEGIN
+ IF EXISTS(SELECT 1 FROM pg_publication WHERE pubname='supabase_realtime') THEN
+  IF NOT EXISTS(SELECT 1 FROM pg_publication_tables WHERE pubname='supabase_realtime' AND schemaname='public' AND tablename='tender_dm_requests') THEN
+   ALTER PUBLICATION supabase_realtime ADD TABLE public.tender_dm_requests;
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM pg_publication_tables WHERE pubname='supabase_realtime' AND schemaname='public' AND tablename='tender_thread_posts') THEN
+   ALTER PUBLICATION supabase_realtime ADD TABLE public.tender_thread_posts;
+  END IF;
+ END IF;
+END $tender$;
+
 COMMIT;
