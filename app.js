@@ -1477,7 +1477,7 @@ async function boot(){
    if(user)await initialize();else renderAuth();
  }catch(e){ROOT.innerHTML=empty('Could not reach Tender','Check the public Supabase URL and key in config.js.');toast(e.message||'Could not connect.',true)}
 }
-function reset(){tenderInboxClose();tenderInbox.ready=false;tenderInbox.saves=[];tenderInbox.mentions=[];tenderInbox.reminders=[];tenderInbox.messageMap.clear();clearTimeout(chatDayRefreshTimer);chatDayRefreshTimer=null;stopCallInbox();notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;channelBackendError='';state.channelId=null;presenceRoster.clear();presenceConnectionReady=false;tender05Requests=[];tender05PieceTags=[];tender05Ready=false;tender05MutualFriends=new Map();if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
+function reset(){tenderInboxClose();tenderInbox.mentionRecovery={running:false,done:false,scanned:0,found:0,error:'',cursor:null};tenderInbox.mentionsLimit=150;tenderInbox.ready=false;tenderInbox.saves=[];tenderInbox.mentions=[];tenderInbox.reminders=[];tenderInbox.messageMap.clear();clearTimeout(chatDayRefreshTimer);chatDayRefreshTimer=null;stopCallInbox();notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;channelBackendError='';state.channelId=null;presenceRoster.clear();presenceConnectionReady=false;tender05Requests=[];tender05PieceTags=[];tender05Ready=false;tender05MutualFriends=new Map();if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
 function renderSetup(){ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Your friends. Your spaces. Your flavor.</p></div><div class="login-panel"><div class="eyebrow">Tender setup</div><h2>Almost ready to connect.</h2><p>This website needs a free online Supabase project for accounts, messages and Pieces. It's not a local chat simulator.</p><div class="setup-box"><h3>🍗 Connect the shared database</h3><p>1. Create a free project at <a href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Supabase</a>.<br>2. Run <strong>schema.sql</strong> in the project's SQL editor.<br>3. Copy its Project URL and publishable (anon) key into <strong>config.js</strong> on GitHub.<br>4. Refresh this website. Everyone will connect to the same database.</p><details><summary>Important security information</summary>Only use the public publishable/anon key. Never put a service_role key or other secret in GitHub. Set URL configuration for email confirmation in Supabase Auth.</details></div><p class="hint">Your Tender HTML interface is deployed separately from the database. A GitHub Pages link alone cannot deliver live messaging.</p><a class="btn" href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Connect Supabase ${ico('external')}</a></div></div>`}
 function renderAuth(){state.mobileDetail=false;ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Stay close. Stay crispy. 🍗</p></div><div class="login-panel"><div class="eyebrow">Welcome to Tender</div><h2>${state.loginMode==='login'?'Good to have you back.':'Your people are waiting.'}</h2><p>${state.loginMode==='login'?'Sign in to catch up with your people.':'Create your account to join the conversation.'}</p><div class="login-tabs"><button class="${state.loginMode==='login'?'selected':''}" data-action="auth-tab" data-tab="login">Log in</button><button class="${state.loginMode==='signup'?'selected':''}" data-action="auth-tab" data-tab="signup">Sign up</button></div><form id="auth-form">${state.loginMode==='signup'?`<div class="field"><label for="handle">Username (3–20 letters, numbers, underscores)</label><input class="input" id="handle" name="handle" minlength="3" maxlength="20" pattern="[a-zA-Z0-9_]{3,20}" required autocomplete="username" placeholder="buffalofan"></div><div class="field"><label for="display">Display name</label><input class="input" id="display" name="display_name" maxlength="40" required placeholder="Your name"></div>`:''}<div class="field"><label for="email">Email address</label><input class="input" id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com"></div><div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" minlength="8" autocomplete="${state.loginMode==='login'?'current-password':'new-password'}" required placeholder="At least 8 characters"></div><button class="btn full top-spacer" type="submit">${state.loginMode==='login'?'Log in':'Create account'} ${ico('back')}</button></form><p class="hint top-spacer">Tender is an early beta. Please don't post private information in public Pieces.</p></div></div>`}
 async function authSubmit(form){const data=new FormData(form), email=String(data.get('email')).trim(), password=String(data.get('password'));
@@ -2109,7 +2109,7 @@ function tenderStudioPreviewRefresh(){
  target.innerHTML=tenderStudioPreviewHTML(draft);
 }
 
-let tenderInbox={open:false,tab:'unread',filter:'all',ready:false,saves:[],reminders:[],mentions:[],messageMap:new Map()};
+let tenderInbox={open:false,tab:'unread',filter:'all',ready:false,saves:[],reminders:[],mentions:[],mentionsLimit:150,mentionRecovery:{running:false,done:false,scanned:0,found:0,error:'',cursor:null},messageMap:new Map()};
 let tenderInboxReminderTimer=null,tenderInboxMentionChannel=null;
 function tenderInboxSubscribeMentions(){
  if(!tenderInbox.ready||!user||!db||tenderInboxMentionChannel)return;
@@ -2129,7 +2129,7 @@ async function tenderInboxLoad(){
  const [saves,reminders,mentions]=await Promise.all([
   q('tender_inbox_saves').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(150),
   q('tender_inbox_reminders').select('*').eq('user_id',user.id).order('remind_at',{ascending:true}).limit(150),
-  q('tender_inbox_mentions').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(150)
+  q('tender_inbox_mentions').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(tenderInbox.mentionsLimit)
  ]);
  tenderInbox.ready=!saves.error&&!reminders.error&&!mentions.error;
  if(tenderInbox.ready)tenderInboxSubscribeMentions();
@@ -2214,6 +2214,48 @@ function tenderInboxCloseArticle(){
  host.hidden=true;host.innerHTML='';
  document.querySelector('.tender-inbox-top-button')?.focus({preventScroll:true});
 }
+function tenderInboxMentionsScanStatus(){
+ const scan=tenderInbox.mentionRecovery;
+ if(scan.running)return `<div class="tender-inbox-history-banner"><span class="tender-inbox-scan-spinner" aria-hidden="true">↻</span><div><strong>Finding your old @mentions…</strong><small>Checked ${scan.scanned.toLocaleString()} older messages so far. Past mentions appear below as they are recovered.</small></div></div>`;
+ if(scan.error)return `<div class="tender-inbox-history-banner tender-inbox-history-warning"><span>⚠️</span><div><strong>Older mentions need setup</strong><small>${esc(scan.error)}</small><small>New mentions are still listed below. Historical messages were not deleted.</small></div></div>`;
+ if(scan.done)return `<div class="tender-inbox-history-banner"><span>✓</span><div><strong>History scan complete</strong><small>Searched ${scan.scanned.toLocaleString()} accessible messages and recovered ${scan.found.toLocaleString()} older mentions. Older mentions are treated as already read.</small></div></div>`;
+ return `<div class="tender-inbox-history-banner"><span>🔎</span><div><strong>${scan.scanned?'More history is available':'Recover your previous @mentions'}</strong><small>${scan.scanned?`Checked ${scan.scanned.toLocaleString()} messages and found ${scan.found}.`:'Tender can now search messages from before the original Mentions feature existed.'}</small>
+ <button type="button" class="btn secondary sm" data-action="tender-inbox-mention-scan">${scan.scanned?'Continue scanning older messages':'Find old mentions'}</button></div></div>`;
+}
+async function tenderInboxRecoverMentions(pages=16){
+ const scan=tenderInbox.mentionRecovery;
+ if(scan.running||scan.done||!user||!db||!tenderInbox.ready)return;
+ scan.running=true;scan.error='';
+ if(tenderInbox.open&&tenderInbox.tab==='mentions')tenderInboxRender();
+ try{
+  for(let i=0;i<pages;i++){
+   if(!user||!tenderInbox.open||tenderInbox.tab!=='mentions')break;
+   const args={cursor_at:scan.cursor?.at||null,cursor_kind:scan.cursor?.kind||null,cursor_id:scan.cursor?.id||null,batch_size:350};
+   const answer=await db.rpc('tender_inbox_backfill_my_mentions',args);
+   if(answer.error){
+    if(answer.error.code==='PGRST202'||/function.*not found|schema cache|tender_inbox_backfill_my_mentions/i.test(answer.error.message||'')){
+     scan.error='Run migration_0_5_4.sql in the Tender Supabase project to recover mentions from before Inbox launched.';
+    }else scan.error=answer.error.message||'Historical mention search failed.';
+    break;
+   }
+   const result=answer.data||{};
+   const count=Math.max(0,Number(result.scanned)||0);
+   scan.scanned+=count;
+   scan.found+=Math.max(0,Number(result.added)||0);
+   scan.cursor=result.cursor_at&&result.cursor_kind&&result.cursor_id?
+    {at:result.cursor_at,kind:result.cursor_kind,id:result.cursor_id}:null;
+   if(!result.has_more||!count||!scan.cursor){scan.done=true;break}
+   if(i%4===3&&tenderInbox.tab==='mentions'){
+    await tenderInboxLoad();tenderInboxRender();
+   }
+  }
+  await tenderInboxLoad();
+ }catch(error){scan.error=error?.message||'Could not complete history search';console.warn('Tender mention history:',error)}
+ finally{
+  scan.running=false;
+  if(tenderInbox.open&&tenderInbox.tab==='mentions')tenderInboxRender();
+ }
+}
 function tenderInboxContent(){
  const tab=tenderInbox.tab;
  if(tab==='updates'){
@@ -2251,12 +2293,14 @@ function tenderInboxContent(){
  if(tab==='mentions'){
   if(!tenderInbox.ready)return tenderInboxMigrationNotice();
   const mentions=tenderInbox.mentions;
-  return mentions.length?`<div class="tender-inbox-list">${mentions.map(m=>{
+  const status=tenderInboxMentionsScanStatus();
+  return status+(mentions.length?`<div class="tender-inbox-list">${mentions.map(m=>{
     const author=pby(m.author_id),message=tenderInboxMessage(m);
     const where=m.piece_id?pieces.find(p=>p.id===m.piece_id)?.name:'Private chat';
     const html=`<span class="tender-inbox-entry-avatar">${avatars(author)}</span><span class="tender-inbox-entry-main"><strong>${esc(author.display_name)} <span class="tender-mentions-at">@</span>mentioned you</strong><small>${esc(where||'Piece')} · ${relative(m.created_at)} ${m.is_read?'':'· New'}</small><span class="tender-inbox-entry-body">${esc(message?.body||m.body_excerpt)}</span></span>`;
     return tenderInboxJumpButton(m,html);
-   }).join('')}</div>`:'<div class="tender-inbox-empty-state"><div class="tender-inbox-empty-icon">@</div><h3>No mentions yet</h3><p>When someone @mentions your username in a DM, group or Piece, it appears here.</p></div>';
+   }).join('')}</div>`:'<div class="tender-inbox-empty-state"><div class="tender-inbox-empty-icon">@</div><h3>No mentions found yet</h3><p>Old @mentions can be recovered after the database upgrade. New @mentions appear automatically.</p></div>')+
+   (mentions.length>=tenderInbox.mentionsLimit&&tenderInbox.mentionsLimit<1000?'<button type="button" class="btn secondary full tender-inbox-mentions-more" data-action="tender-inbox-mentions-more">Show more older mentions</button>':'');
  }
  if(tab==='bookmarks'){
   const combined=tenderInbox.saves.map(x=>x);
@@ -2299,6 +2343,7 @@ function tenderInboxRender(){
 async function tenderInboxOpen(){
  tenderInbox.open=true;tenderInboxRender();
  await tenderInboxLoad();if(tenderInbox.open)tenderInboxRender();
+ if(tenderInbox.tab==='mentions'&&tenderInbox.ready&&!tenderInbox.mentionRecovery.done&&!tenderInbox.mentionRecovery.error)tenderInboxRecoverMentions().catch(console.warn);
 }
 function tenderInboxClose(){
  tenderInboxCloseArticle();tenderInbox.open=false;const host=document.getElementById('tender-inbox-host');if(host){host.hidden=true;host.innerHTML=''}
@@ -2306,6 +2351,7 @@ function tenderInboxClose(){
 function tenderInboxSetTab(tab){
  if(!['unread','mentions','bookmarks','reminders','updates','news'].includes(tab))return;
  tenderInbox.tab=tab;tenderInboxRender();
+ if(tab==='mentions'&&tenderInbox.ready&&!tenderInbox.mentionRecovery.done&&!tenderInbox.mentionRecovery.error)tenderInboxRecoverMentions().catch(console.warn);
 }
 
 async function tenderInboxSaveMessage(type,id){
@@ -2756,6 +2802,8 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='tender-inbox-filter'){tenderInbox.filter=id;tenderInboxRender();return}
  if(a==='tender-inbox-article'){tenderInboxOpenArticle(el.dataset.kind,id);return}
  if(a==='tender-inbox-article-close'){tenderInboxCloseArticle();return}
+ if(a==='tender-inbox-mention-scan'){await tenderInboxRecoverMentions(16);return}
+ if(a==='tender-inbox-mentions-more'){tenderInbox.mentionsLimit=Math.min(1000,tenderInbox.mentionsLimit+150);await safe(()=>tenderInboxLoad());tenderInboxRender();return}
  if(a==='tender-inbox-mark-read'){await safe(()=>tenderInboxMarkRead());return}
  if(a==='tender-inbox-jump'){await safe(()=>tenderInboxJumpTo(el.dataset.type,id,el.dataset.cid,el.dataset.pid,el.dataset.channel));return}
  if(a==='tender-inbox-save'){tenderInboxCloseContext();await safe(()=>tenderInboxSaveMessage(el.dataset.type,id));return}
