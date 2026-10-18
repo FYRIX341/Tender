@@ -375,6 +375,49 @@ async function tender05TranslateOnDevice(id,source,target){
  if(box){box.hidden=false;box.innerHTML='<strong>Translated</strong><p>'+esc(output)+'</p>'}
  if(typeof translator.destroy==='function')translator.destroy();
 }
+
+/* 0.5.2 — Equip Piece Tags from YOUR profile rather than visiting a Piece. */
+function tenderAvailableTags(){
+ if(!user)return [];
+ const joined=new Set(memberships.filter(m=>m.user_id===user.id).map(m=>m.piece_id));
+ return tender05PieceTags.filter(tag=>joined.has(tag.piece_id))
+  .map(tag=>({tag,piece:pieces.find(p=>p.id===tag.piece_id)}))
+  .filter(item=>item.piece)
+  .sort((a,b)=>a.piece.name.localeCompare(b.piece.name));
+}
+async function tenderTagPickerModal(){
+ if(!tender05Ready)return toast('Piece Tags require Tender 0.5 Supabase setup.',true);
+ const joined=memberships.filter(m=>m.user_id===user.id).map(m=>m.piece_id);
+ if(joined.length){
+  const fresh=await q('tender_piece_tags').select('*').in('piece_id',joined.slice(0,100));
+  if(fresh.error)console.warn('Piece Tag lookup:',fresh.error);
+  else{
+   tender05PieceTags=[...tender05PieceTags.filter(t=>!joined.includes(t.piece_id)),...(fresh.data||[])];
+  }
+ }
+ const tags=tenderAvailableTags();
+ const current=my?.equipped_piece_id||null;
+ modal('🏷 Equip a Piece Tag','Choose a tag from any Piece you have joined. Your selection appears next to your name throughout Tender.',`
+  <div class="tender-tag-choice-list">
+   ${tags.map(({tag,piece})=>`<button type="button" class="tender-tag-choice ${current===tag.piece_id?'is-equipped':''}" data-action="tender-v3-tag-equip" data-id="${esc(tag.piece_id)}">
+     <span class="tender-tag-choice-icon" style="--tag-color:${esc(tag.color||'#f47735')}">${esc(tag.emoji||'🍗')} ${esc(tag.tag)}</span>
+     <span class="tender-tag-choice-name"><strong>${esc(piece.name)}</strong><small>${current===tag.piece_id?'✓ Currently equipped':'Tap to equip this Piece Tag'}</small></span>
+     <span aria-hidden="true">${current===tag.piece_id?'✓':'→'}</span>
+   </button>`).join('')||'<div class="notice-inline">No available tags yet. Join a Piece whose owner has created a Piece Tag!</div>'}
+  </div>
+  <button type="button" class="btn secondary full" data-action="tender-v3-tag-equip" data-id="" ${!current?'disabled':''}>Remove equipped tag</button>
+ `);
+}
+async function tenderEquipTagFromProfile(pid){
+ if(!tender05Ready)throw Error('Piece Tag database migration is not ready.');
+ if(pid&&!tenderAvailableTags().some(x=>x.tag.piece_id===pid))throw Error('Choose a tag from a Piece you have joined.');
+ assert(await db.rpc('tender_equip_piece_tag',{pid:pid||null}));
+ cacheUpdatedProfile({equipped_piece_id:pid||null});
+ closeModal();
+ renderSidebar();renderMain();
+ toast(pid?'Piece Tag equipped! 🍗':'Piece Tag removed.');
+}
+
 function tender05TagHTML(p){
  if(!tender05Ready||!p?.equipped_piece_id)return '';
  const tag=tender05PieceTags.find(x=>x.piece_id===p.equipped_piece_id);
@@ -1314,7 +1357,7 @@ function profileStatus(p){
 }
 function profileActions(person,compact=false){
  const isSelf=person.id===user?.id;
- if(isSelf)return `<button type="button" class="btn ${compact?'sm':''}" data-action="settings-profile">${ico('edit','icon-sm')} Edit profile</button>`;
+ if(isSelf)return `<button type="button" class="btn ${compact?'sm':''}" data-action="settings-profile">${ico('edit','icon-sm')} Edit profile</button>${tender05Ready?`<button type="button" class="btn secondary ${compact?'sm':''}" data-action="tender-v3-tag-picker">🏷 Equip Piece Tag</button>`:''}`;
  const relationship=friendships.find(f=>(f.requester===user.id&&f.recipient===person.id)||(f.recipient===user.id&&f.requester===person.id));
  const dm=`<button type="button" class="btn ${compact?'sm':''}" data-action="start-dm" data-id="${esc(person.id)}">${ico('chat','icon-sm')} Message</button>`;
  const secondary=relationship?.status==='accepted'
@@ -2406,6 +2449,8 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
   else assert(await q('tender_profile_guestbook').delete().eq('id',id).eq('profile_id',user.id));
   await tender05GuestbookModal(el.dataset.person);
  });return}
+ if(a==='tender-v3-tag-picker'){await safe(()=>tenderTagPickerModal());return}
+ if(a==='tender-v3-tag-equip'){await safe(()=>tenderEquipTagFromProfile(id||null));return}
  if(a==='tender05-tag-editor'){tender05PieceTagModal(selectedPiece());return}
  if(a==='tender05-equip-tag'){await safe(async()=>{const pid=state.selected;assert(await db.rpc('tender_equip_piece_tag',{pid}));cacheUpdatedProfile({equipped_piece_id:pid});render();toast('Piece Tag equipped!')});return}
  if(a==='tender05-clear-tag'){await safe(async()=>{assert(await db.rpc('tender_equip_piece_tag',{pid:null}));cacheUpdatedProfile({equipped_piece_id:null});renderMain();toast('Piece Tag removed.')});return}
