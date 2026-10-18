@@ -6,7 +6,19 @@ Tender is a responsive social messaging app with **Buffalo** the mascot. Chat wi
 
 **[🍗 Open Tender securely](https://fyrix341.github.io/Tender/)** · [Source code](https://github.com/FYRIX341/Tender)
 
-## ✨ Tender 0.4.6 — Channel Button Repair
+## 🍗 Tender 0.5 Alpha — CONTENT UPDATE
+
+**Major alpha release.** The 0.5 source introduces message requests, DM privacy, public and private threads, safe HTML/CSS embeds, emoji shortcodes, custom stickers, the new Profile Studio with free color banners and widgets, Piece Tags, forum channels, and more.
+
+**Before enabling 0.5:** back up Supabase and run [migration_0_5.sql](migration_0_5.sql) in the **same** Supabase project as `config.js`. Browser files cannot install schema changes.
+
+- [What changed, limitations and rollout steps](RELEASE_0_5_ALPHA.md)
+- [Frontend smoke checks](tests/tender05-smoke.cjs)
+
+Multi-user voice/stage media, interactive embeds, and bots/the developer portal are **not included** in this alpha. Permanent account deletion is **not automated** until a separately authorized cleanup worker is deployed and verified; a 30-day request/cancellation workflow is provided.
+
+### Previous release: 0.4.6 — Channel Button Repair
+
 
 This **bug-fix update** addresses the Create Channel button that appeared to do nothing. Clicking the orange button now directly invokes the save handler, instead of depending only on the browser's form submission event. Tender also bypasses silent native validation on this form and reports database response codes in its existing persistent error box.
 
