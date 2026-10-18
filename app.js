@@ -581,6 +581,7 @@ function updatePresenceMarkers(){
 // Never store audio/video tracks in Supabase; only SDP/ICE and call state are stored.
 // No TURN infrastructure is bundled; symmetric NAT/firewalls may prevent connection.
 let callReady=false,activeCall=null,incomingCall=null,callInboxTimer=null,callPollBusy=false;
+let tender05CallPosition=null,tender05CallDragging=null,tender05CallExpanded=false;
 const callRoot=()=>document.getElementById('tender-call-root');
 function secureCallingAvailable(){return !!(window.isSecureContext&&navigator.mediaDevices?.getUserMedia&&window.RTCPeerConnection)}
 function callPeerName(id){return pby(id).display_name||'Tender friend'}
@@ -614,8 +615,8 @@ function showCallUI(){
    </section>`;return;
  }
  const name=callPeerName(c.peerId),volume=callVolumes(c.peerId);
- root.innerHTML=`<section class="tender-call-overlay" role="dialog" aria-label="Tender ${c.video?'video':'voice'} call with ${esc(name)}">
-  <header class="tender-call-header"><div><strong>${ico('chat','icon-sm')} ${esc(name)}</strong><p aria-live="polite">${esc(c.statusLabel||'Connecting…')}</p></div><button class="round-btn" data-action="call-hangup" title="End call" aria-label="End call">✕</button></header>
+ root.innerHTML=`<section class="tender-call-overlay ${tender05CallExpanded?'tender-call-fullscreen':''}" role="dialog" aria-label="Tender ${c.video?'video':'voice'} call with ${esc(name)}">
+  <header class="tender-call-header" data-tender-call-drag><div><strong>⋮⋮ ${ico('chat','icon-sm')} ${esc(name)}</strong><p aria-live="polite">${esc(c.statusLabel||'Connecting…')}</p></div><div class="tender-call-window-actions"><button class="round-btn" data-action="call-toggle-size" title="Expand call window" aria-label="Expand call window">⛶</button><button class="round-btn" data-action="call-hangup" title="End call" aria-label="End call">✕</button></div></header>
   <div class="tender-call-stage">
     <div class="call-remote-scene"><video id="tender-call-remote" autoplay playsinline ${c.remoteHasVideo?'':'hidden'}></video>
     <div class="call-placeholder" ${c.remoteHasVideo?'hidden':''}>${avatars(pby(c.peerId))}<strong>${esc(name)}</strong><span>${esc(c.statusLabel||'Calling…')}</span></div></div>
@@ -636,11 +637,13 @@ function showCallUI(){
   </div>
   <p class="call-security-hint">🔒 Peer-to-peer encrypted WebRTC media. Screen sharing requires your permission. On restrictive networks, calls may fail without a TURN server.</p>
  </section>`;
+ const floating=root.querySelector('.tender-call-overlay');
+ if(floating&&tender05CallPosition&&!tender05CallExpanded){floating.style.position='fixed';floating.style.left=tender05CallPosition.x+'px';floating.style.top=tender05CallPosition.y+'px';floating.style.margin='0'}
  callMediaAttach();
 }
 function stopTracks(stream){if(stream?.getTracks)stream.getTracks().forEach(track=>{try{track.stop()}catch{}})}
 function localCallCleanup(){
- const c=activeCall;activeCall=null;incomingCall=null;
+ const c=activeCall;activeCall=null;incomingCall=null;tender05CallPosition=null;tender05CallExpanded=false;
  if(c){try{c.pc?.close()}catch{}stopTracks(c.localStream);stopTracks(c.cameraExtra);stopTracks(c.screenStream)}
  showCallUI();
 }
@@ -2139,6 +2142,7 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
   });
   return;
  }
+ if(a==='call-toggle-size'){tender05CallExpanded=!tender05CallExpanded;tender05CallPosition=null;showCallUI();return}
  if(a==='call-start-voice'){await startTenderCall(false);return}
   if(a==='call-start-video'){await startTenderCall(true);return}
   if(a==='call-accept'){await answerTenderCall(true);return}
@@ -2687,6 +2691,32 @@ document.addEventListener('change',e=>{
  if(e.target.matches('.core-role-change')&&e.target.value){const uid=e.target.dataset.person,role=e.target.value;safe(async()=>{assert(await db.rpc('set_piece_member_role',{pid:state.selected,uid,new_role:role}));await refreshData();toast('Member role updated!')})}
  if(e.target.matches('.role-assign')&&e.target.value){const role=e.target.dataset.role;const userId=e.target.value;safe(async()=>{assert(await q('piece_role_assignments').insert({role_id:role,user_id:userId}));toast('Role assigned!')})}
 });
+
+document.addEventListener('pointerdown',event=>{
+ const header=event.target.closest?.('[data-tender-call-drag]');
+ if(!header||event.button!==0||event.target.closest('button')||tender05CallExpanded||window.matchMedia('(max-width:760px)').matches)return;
+ const panel=header.closest('.tender-call-overlay');if(!panel)return;
+ const rect=panel.getBoundingClientRect();
+ tender05CallDragging={pointerId:event.pointerId,originX:rect.left,originY:rect.top,startX:event.clientX,startY:event.clientY,width:rect.width,height:rect.height};
+ panel.style.position='fixed';panel.style.left=rect.left+'px';panel.style.top=rect.top+'px';panel.style.margin='0';
+ header.setPointerCapture?.(event.pointerId);event.preventDefault();
+});
+document.addEventListener('pointermove',event=>{
+ const drag=tender05CallDragging;if(!drag||drag.pointerId!==event.pointerId)return;
+ const panel=document.querySelector('.tender-call-overlay');if(!panel)return;
+ const x=Math.min(Math.max(8,drag.originX+event.clientX-drag.startX),Math.max(8,innerWidth-drag.width-8));
+ const y=Math.min(Math.max(8,drag.originY+event.clientY-drag.startY),Math.max(8,innerHeight-drag.height-8));
+ tender05CallPosition={x,y};panel.style.left=x+'px';panel.style.top=y+'px';
+});
+function tender05EndCallDrag(event){
+ if(!tender05CallDragging||tender05CallDragging.pointerId!==event.pointerId)return;
+ tender05CallDragging=null;
+ const header=document.querySelector('[data-tender-call-drag]');
+ if(header?.hasPointerCapture?.(event.pointerId))header.releasePointerCapture(event.pointerId);
+}
+document.addEventListener('pointerup',tender05EndCallDrag);
+document.addEventListener('pointercancel',tender05EndCallDrag);
+
 let dragDepth=0;
 document.addEventListener('play',e=>{if(audioPrefs().deafened&&e.target?.matches?.('audio,video'))syncDeafenedAudio()},true);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshVisibleChatDays()});
