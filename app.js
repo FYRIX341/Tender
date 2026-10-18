@@ -307,6 +307,37 @@ function tender05ReportModal(id){
 }
 
 // Tender 0.5: user-built profile widgets, free Piece Tags and moderated guestbooks.
+
+let tender05CurrentThread=null;
+async function tender05ThreadChooser(rootId,rootType){
+ if(!tender05Ready)throw Error('Threads need the Tender 0.5 database migration.');
+ const root=activeMessages.find(m=>m.id===rootId);if(!root)throw Error('Original message unavailable');
+ const rows=assert(await q('tender_threads').select('*').eq('root_message_id',rootId).eq('root_type',rootType).order('created_at',{ascending:false}).limit(25))||[];
+ modal('🧵 Message Threads','Reply in a public discussion or create an invite-only thread.',
+ `<div class="tender-thread-root"><strong>${esc(pby(root.author_id).display_name)}</strong><p>${esc((root.body||'Attachment').slice(0,240))}</p></div><div class="tender-thread-list">${rows.map(x=>`<button class="tender-thread-row" type="button" data-action="tender05-thread-open" data-id="${esc(x.id)}"><span>${x.is_private?'🔒':'🧵'}</span><div><strong>${esc(x.title)}</strong><small>${x.is_private?'Invited members only':'Public to chat members'}</small></div> →</button>`).join('')||'<p class="hint">No threads yet. Start one!</p>'}</div>
+ <button class="btn full top-spacer" data-action="tender05-thread-new" data-type="${esc(rootType)}" data-id="${esc(rootId)}">Create a thread</button>`);
+}
+function tender05ThreadCreateModal(rootId,type){
+ const root=activeMessages.find(x=>x.id===rootId);if(!root)return toast('Message unavailable.',true);
+ const people=type==='message'?(getConversation(state.selected)?.conversation_members||[]).map(m=>m.user_id):
+  memberships.filter(m=>m.piece_id===state.selected).map(m=>m.user_id);
+ const invitees=[...new Set(people)].filter(x=>x!==user.id);
+ modal('🧵 Create a thread','Private threads are visible only to invited members, enforced by Supabase.',
+ `<form id="tender05-thread-create-form"><input type="hidden" name="root" value="${esc(rootId)}"><input type="hidden" name="type" value="${esc(type)}">
+ <div class="field"><label>Thread title</label><input class="input" name="title" maxlength="80" value="Discussion" required></div>
+ <div class="field"><label>Visibility</label><select class="input" name="visibility"><option value="public">Public to chat/Piece members</option><option value="private">Private — invited members only</option></select></div>
+ <div class="field"><label>Invite members (for private threads)</label><div class="tender-thread-invites">${invitees.slice(0,35).map(x=>`<label><input name="invite" type="checkbox" value="${esc(x)}"> ${esc(pby(x).display_name)}</label>`).join('')||'<p class="hint">Nobody else to invite.</p>'}</div></div>
+ <button class="btn full" type="submit">Create thread</button></form>`);
+}
+async function tender05ThreadView(id){
+ const info=assert(await q('tender_threads').select('*').eq('id',id).single());
+ const posts=assert(await q('tender_thread_posts').select('*').eq('thread_id',id).order('created_at',{ascending:true}).limit(100))||[];
+ tender05CurrentThread=id;
+ modal((info.is_private?'🔒 ':'🧵 ')+info.title,info.is_private?'Invited participants only.':'Public within this conversation.',
+ `<div class="tender-thread-posts">${posts.map(x=>`<div class="tender-thread-post"><strong>${esc(pby(x.author_id).display_name)}</strong> <small>${fmt(x.created_at)}</small><p>${messageText(x.body)}</p></div>`).join('')||'<p class="hint">No replies yet.</p>'}</div>
+ <form id="tender05-thread-post-form"><input type="hidden" name="thread_id" value="${esc(id)}"><div class="field"><label>Your reply</label><textarea class="input textarea" name="body" rows="3" maxlength="4000" required></textarea></div><button class="btn full" type="submit">Send reply</button></form>`);
+}
+
 function tender05TagHTML(p){
  if(!tender05Ready||!p?.equipped_piece_id)return '';
  const tag=tender05PieceTags.find(x=>x.piece_id===p.equipped_piece_id);
@@ -1644,7 +1675,7 @@ function messageHTML(row,target_type='message'){
  const reply=row.reply_to?activeMessages.find(x=>x.id===row.reply_to):null;
  const replyHTML=row.reply_to?`<button type="button" class="reply-quote reply-ref" data-action="jump-reply" data-id="${esc(row.reply_to)}" title="Jump to replied message">↳ ${reply?`<strong>${esc(pby(reply.author_id).display_name)}</strong> ${esc((reply.body||'Attachment').slice(0,130))}`:'Original message is outside the loaded history'}</button>`:'';
  const gif=giftGif(row.body);
- return `<div data-message-id="${esc(row.id)}" role="group" tabindex="0" class="chat-bubble-wrap ${mine?'mine':''} ${grouped?'message-grouped':''} ${row.pending?'bubble-pending':''}">${profileFace(p)}<div class="bubble-content">${!grouped?`<div class="bubble-name">${profileName(p)}</div>`:''}${replyHTML}<div class="bubble">${messageText(row.body||'')}${row.edited_at?` <span class="inline-edited" title="Edited ${esc(new Date(row.edited_at).toLocaleString())}">(edited)</span>`:''}${gif}${attachmentHTML(row)}${row.poll_id?pollHTML(row.poll_id):''}</div><div class="bubble-meta">${fmt(row.created_at)} ${row.edited_at?'':''} ${row.pending?'· Sending…':''} ${readReceiptHTML(row)}</div>${Object.keys(emojiMap).length?`<div class="bubble-reactions">${Object.entries(emojiMap).map(([emoji,recs])=>`<button class="react-chip ${recs.some(r=>r.author_id===user.id)?'mine-react':''}" data-action="react" data-type="${target_type}" data-id="${row.id}" data-emoji="${esc(emoji)}">${esc(emoji)} ${recs.length}</button>`).join('')}</div>`:''}<div class="bubble-actions" aria-label="Message actions">${!row.pending&&(target_type==='message'||pieceRepliesReady)?`<button type="button" class="emoji-inline reply-quick-action" data-action="reply-message" data-id="${esc(row.id)}" title="Reply to message" aria-label="Reply to ${esc(p.display_name||'member')}">${ico('chat','icon-sm')}<span>Reply</span></button>`:''}<button class="emoji-inline" data-action="reaction-menu" data-type="${target_type}" data-id="${row.id}" title="React">${ico('smile','icon-sm')}</button>${target_type==='message'&&!row.pending?`<button class="emoji-inline" data-action="bookmark-message" data-id="${row.id}" title="Bookmark">${bookmarks.some(b=>b.message_id===row.id)?'★':'☆'}</button><button class="emoji-inline" data-action="forward-message" data-id="${row.id}" title="Forward text">↗</button>`:''}${mine&&!row.pending?`<button class="emoji-inline" data-action="edit-message" data-id="${row.id}" title="Edit">${ico('edit','icon-sm')}</button><button class="emoji-inline" data-action="pin-message" data-id="${row.id}" title="Pin">${row.is_pinned?'📌':'📍'}</button><button class="emoji-inline" data-action="delete-message" data-id="${row.id}" data-type="${target_type}" title="Delete">${ico('trash','icon-sm')}</button>`:''}</div></div></div>`}
+ return `<div data-message-id="${esc(row.id)}" role="group" tabindex="0" class="chat-bubble-wrap ${mine?'mine':''} ${grouped?'message-grouped':''} ${row.pending?'bubble-pending':''}">${profileFace(p)}<div class="bubble-content">${!grouped?`<div class="bubble-name">${profileName(p)}</div>`:''}${replyHTML}<div class="bubble">${messageText(row.body||'')}${row.edited_at?` <span class="inline-edited" title="Edited ${esc(new Date(row.edited_at).toLocaleString())}">(edited)</span>`:''}${gif}${attachmentHTML(row)}${row.poll_id?pollHTML(row.poll_id):''}</div><div class="bubble-meta">${fmt(row.created_at)} ${row.edited_at?'':''} ${row.pending?'· Sending…':''} ${readReceiptHTML(row)}</div>${Object.keys(emojiMap).length?`<div class="bubble-reactions">${Object.entries(emojiMap).map(([emoji,recs])=>`<button class="react-chip ${recs.some(r=>r.author_id===user.id)?'mine-react':''}" data-action="react" data-type="${target_type}" data-id="${row.id}" data-emoji="${esc(emoji)}">${esc(emoji)} ${recs.length}</button>`).join('')}</div>`:''}<div class="bubble-actions" aria-label="Message actions">${!row.pending&&(target_type==='message'||pieceRepliesReady)?`<button type="button" class="emoji-inline reply-quick-action" data-action="reply-message" data-id="${esc(row.id)}" title="Reply to message" aria-label="Reply to ${esc(p.display_name||'member')}">${ico('chat','icon-sm')}<span>Reply</span></button>`:''}<button class="emoji-inline" data-action="reaction-menu" data-type="${target_type}" data-id="${row.id}" title="React">${ico('smile','icon-sm')}</button>${target_type==='message'&&!row.pending?`<button class="emoji-inline" data-action="bookmark-message" data-id="${row.id}" title="Bookmark">${bookmarks.some(b=>b.message_id===row.id)?'★':'☆'}</button><button class="emoji-inline" data-action="forward-message" data-id="${row.id}" title="Forward text">↗</button>`:''}${!row.pending&&tender05Ready?`<button class="emoji-inline" data-action="tender05-thread-chooser" data-type="${target_type}" data-id="${esc(row.id)}" title="Message threads">🧵</button>`:''}${mine&&!row.pending?`<button class="emoji-inline" data-action="edit-message" data-id="${row.id}" title="Edit">${ico('edit','icon-sm')}</button><button class="emoji-inline" data-action="pin-message" data-id="${row.id}" title="Pin">${row.is_pinned?'📌':'📍'}</button><button class="emoji-inline" data-action="delete-message" data-id="${row.id}" data-type="${target_type}" title="Delete">${ico('trash','icon-sm')}</button>`:''}</div></div></div>`}
 function updateComposerReply(){
  const form=document.getElementById('composer-form');if(!form?.querySelector||!form.insertAdjacentHTML)return;
  form.querySelector('.composer-reply')?.remove();
@@ -2235,6 +2266,9 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='enlarge'){MODALS.innerHTML=`<div class="backdrop-img" data-action="close-modal"><img src="${esc(validUrl(el.dataset.src))}" alt="Gallery picture"></div>`;return}
  if(a==='open-attachment'){let url=assert(await db.storage.from('tender-chat').createSignedUrl(el.dataset.path,60)).signedUrl;window.open(validUrl(url),'_blank','noopener,noreferrer');return}
  if(a==='logout'){await safe(async()=>{await finishTenderCall();assert(await db.auth.signOut());unsub();reset();renderAuth()});return}
+ if(a==='tender05-thread-chooser'){await safe(()=>tender05ThreadChooser(id,el.dataset.type));return}
+ if(a==='tender05-thread-new'){tender05ThreadCreateModal(id,el.dataset.type);return}
+ if(a==='tender05-thread-open'){await safe(()=>tender05ThreadView(id));return}
  if(a==='tender05-widget-editor'){tender05WidgetModal();return}
  if(a==='tender05-widget-move'||a==='tender05-widget-remove'){await safe(()=>tender05UpdateWidget(a.endsWith('move')?'move':'remove',Number(el.dataset.index),Number(el.dataset.dir)||0));return}
  if(a==='tender05-guestbook'){await safe(()=>tender05GuestbookModal(id));return}
@@ -2277,6 +2311,18 @@ async function submitForm(form){switch(form.id){
     if(wallpaper==='image' && (!/^https:\/\//i.test(image)||validUrl(image)==='#'))throw Error('Choose an HTTPS image URL.');
     localStorage.setItem(key,JSON.stringify({wallpaper,image:image.slice(0,1200)}));closeModal();applyLocalAppearance();toast('Wallpaper saved!');return}
  case'composer-form':return sendMessage(form);
+ case'tender05-thread-create-form':return safe(async()=>{
+  const d=new FormData(form),root_kind=String(d.get('type')||''),root_id=String(d.get('root')||''),thread_title=String(d.get('title')||'').trim(),
+   secret=d.get('visibility')==='private',invited=secret?d.getAll('invite').slice(0,25):[];
+  const id=assert(await db.rpc('tender_create_thread',{root_kind,root_id,thread_title,secret,invited}));
+  await tender05ThreadView(id);toast('Thread created!');
+ });
+ case'tender05-thread-post-form':return safe(async()=>{
+  const d=new FormData(form),thread_id=String(d.get('thread_id')||''),body=String(d.get('body')||'').trim();
+  if(!body)throw Error('Write a reply first.');
+  assert(await q('tender_thread_posts').insert({thread_id,author_id:user.id,body:window.Tender05.expand(body,tender05Prefs().emoticons!==false)}));
+  await tender05ThreadView(thread_id);
+ });
  case'tender05-piece-tag-form':return safe(async()=>{
   const d=new FormData(form),pid=String(d.get('piece_id')||''),tag=String(d.get('tag')||'').toUpperCase().trim();
   if(!ownPiece(pid)||!/^[A-Z0-9]{2,5}$/.test(tag))throw Error('A Piece owner must choose a tag with 2–5 letters or digits.');
