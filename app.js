@@ -204,6 +204,39 @@ async function tender05LoadData(){
   if(!tags.error)tender05PieceTags=tags.data||[];
  }catch(e){console.warn('Tender 0.5 optional database features:',e)}
 }
+async function tender05Lifecycle(action){
+ if(!tender05Ready)throw Error('Run the Tender 0.5 migration before using account controls.');
+ if(action==='deactivate'){
+  if(!await tenderConfirm('Deactivate Tender?','Your old conversations remain. You will stop receiving new DMs. Sign in again to restore your account.','Deactivate'))return;
+  assert(await db.rpc('tender_set_deactivated',{make_inactive:true}));
+  await finishTenderCall();assert(await db.auth.signOut());unsub();reset();renderAuth();
+  return;
+ }
+ if(action==='delete'){
+  modal('⚠ Request account deletion','Deletion has a 30-day cancellation window and cannot be undone after final processing.',
+  `<form id="tender-delete-request-form">
+  <p class="notice-inline">Your account will be frozen. Final permanent erasure requires the Tender cleanup worker to be deployed and is NOT automatic with the database migration alone.</p>
+  <div class="field"><label>Type DELETE to confirm</label><input class="input" name="confirm" required autocomplete="off" placeholder="DELETE"></div>
+  <button type="submit" class="btn danger full">Request deletion</button></form>`);
+  return;
+ }
+ if(action==='cancel'){
+  assert(await db.rpc('tender_cancel_account_deletion'));
+  await refreshData();render();toast('Account deletion request cancelled. Welcome back! 🍗');
+  return;
+ }
+}
+function tender05DownloadSnapshot(){
+ if(!user||!my)return;
+ const snapshot={exported_at:new Date().toISOString(),profile:my,friendships:friendships.filter(f=>[f.requester,f.recipient].includes(user.id)),
+   pieces:memberships.filter(m=>m.user_id===user.id),
+   conversations:conversations.filter(c=>(c.conversation_members||[]).some(m=>m.user_id===user.id)).map(c=>({id:c.id,kind:c.kind,title:c.title||''})),
+   note:'Account snapshot only. This is NOT an archive of every chat message or attachment.'};
+ const blob=new Blob([JSON.stringify(snapshot,null,2)],{type:'application/json'});
+ const url=URL.createObjectURL(blob),link=document.createElement('a');
+ link.href=url;link.download='tender-account-snapshot.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+ toast('Account snapshot downloaded.');
+}
 function tender05RequestCount(){return tender05Requests.filter(r=>r.recipient_id===user?.id&&r.status==='pending').length}
 function tender05RequestModal(){
  if(!tender05Ready){toast('Message requests will be available after migration_0_5.sql is installed.',true);return}
@@ -1270,7 +1303,11 @@ function renderAuth(){state.mobileDetail=false;ROOT.innerHTML=`<div class="login
 async function authSubmit(form){const data=new FormData(form), email=String(data.get('email')).trim(), password=String(data.get('password'));
  await safe(async()=>{if(state.loginMode==='signup'){const handle=String(data.get('handle')).trim().toLowerCase(),display_name=String(data.get('display_name')).trim();if(!/^[a-z0-9_]{3,20}$/.test(handle))throw Error('Username needs 3–20 letters, numbers or underscores.');const r=await db.auth.signUp({email,password,options:{data:{handle,display_name},emailRedirectTo:location.origin+location.pathname}});assert(r);toast(r.data.session?'Welcome to Tender!':'Check your inbox to confirm your email, then sign in.');if(!r.data.session){state.loginMode='login';renderAuth()}}
  else{assert(await db.auth.signInWithPassword({email,password}));toast('Welcome back! 🍗')}})}
-async function initialize(){ROOT.innerHTML='<div class="loading-screen"><img src="buffalo.webp" alt="Buffalo"><h1>tender<span>.</span></h1><p>Loading your messages...</p></div>';try{await refreshData();applyTheme();render();scheduleChatDayRefresh();subscribe();startPresence().catch(console.warn);checkCallReady().catch(console.warn);if(extendedReady)renderNavBadges();
+async function initialize(){ROOT.innerHTML='<div class="loading-screen"><img src="buffalo.webp" alt="Buffalo"><h1>tender<span>.</span></h1><p>Loading your messages...</p></div>';try{await refreshData();
+  if(tender05Ready&&my?.account_state==='deactivated'){
+   assert(await db.rpc('tender_set_deactivated',{make_inactive:false}));await refreshData();toast('Welcome back! Your account is active again. 🍗');
+  }
+  applyTheme();render();scheduleChatDayRefresh();subscribe();startPresence().catch(console.warn);checkCallReady().catch(console.warn);if(extendedReady)renderNavBadges();
   const params=new URLSearchParams(window.location.search);
    const targetChat=params.get('chat');
    if(targetChat&&conversations.some(c=>c.id===targetChat))await goTo('chats',targetChat);
@@ -1297,7 +1334,12 @@ function subscribe(){
  subscribeTyping().catch(console.warn);
 }
 function navItem(area,name,label){return `<button data-action="area" data-area="${area}" class="rail-btn ${state.area===area?'active':''}" title="${label}" aria-label="${label}">${ico(name)}<span class="rail-label">${label}</span>${area==='chats'?renderBadge(notifications.filter(n=>!n.is_read&&n.kind==='message').length):area==='friends'?renderBadge(unreadFriends()):''}</button>`}
-function render(){if(!user)return renderAuth();ROOT.innerHTML=`<div class="screen ${state.mobileDetail?'in-detail':''} ${['pieces','discover'].includes(state.area)&&state.selected?'piece-workspace':''}" id="app-screen"><nav class="rail"><div class="rail-brand" title="Tender"><img src="buffalo.webp" alt="Buffalo"></div>${navItem('chats','chat','Chats')}${navItem('friends','users','Friends')}${navItem('pieces','pieces','Pieces')}${navItem('discover','compass','Discover')}<div class="rail-piece-zone">${railPieceHTML()}</div><div class="rail-bottom"><button class="rail-btn" data-action="open-alerts" title="Activity inbox">${ico('bell')}${renderBadge(unreadAll())}</button><button type="button" class="rail-btn rail-toggle" title="Expand or collapse sidebar" data-action="toggle-rail">${ico('pieces')}<span class="rail-label">Expand rail</span></button><button type="button" class="rail-btn" title="Show or hide member panel" data-action="toggle-info">${ico('users')}<span class="rail-label">Members</span></button></div><button class="rail-btn mobile-only ${state.area==='settings'?'active':''}" data-action="area" data-area="settings" aria-label="Settings">${ico('settings')}<span class="rail-label">Settings</span></button></nav><aside class="sidebar" id="sidebar"></aside><div class="splitter splitter-sidebar" data-split="sidebar" role="separator" aria-label="Resize conversation list" aria-orientation="vertical" aria-valuemin="210" aria-valuemax="420" tabindex="0"></div><main class="main" id="main"></main><div class="splitter splitter-info" data-split="info" role="separator" aria-label="Resize member list" aria-orientation="vertical" aria-valuemin="190" aria-valuemax="430" tabindex="0"></div><aside class="info-panel" id="info-panel" aria-label="Conversation details"></aside></div>`;
+function render(){if(!user)return renderAuth();
+ if(tender05Ready&&my?.account_state==='deletion_requested'){
+  const date=new Date(my.deletion_requested_at||Date.now()),deadline=new Date(date.getTime()+30*86400000);
+  ROOT.innerHTML=`<div class="login-layout tender-lifecycle-screen"><div class="login-panel"><div class="eyebrow">Tender account</div><h2>Deletion requested</h2><p>Your account is frozen while this request is pending.</p><p class="hint">Cancellation is available until ${esc(deadline.toLocaleDateString())}. Permanent deletion requires our server-side cleanup service and is not automatic until that service is deployed.</p><button class="btn full" data-action="tender05-cancel-delete">Cancel deletion</button><button class="btn secondary full top-spacer" data-action="logout">Log out</button></div></div>`;return;
+ }
+ ROOT.innerHTML=`<div class="screen ${state.mobileDetail?'in-detail':''} ${['pieces','discover'].includes(state.area)&&state.selected?'piece-workspace':''}" id="app-screen"><nav class="rail"><div class="rail-brand" title="Tender"><img src="buffalo.webp" alt="Buffalo"></div>${navItem('chats','chat','Chats')}${navItem('friends','users','Friends')}${navItem('pieces','pieces','Pieces')}${navItem('discover','compass','Discover')}<div class="rail-piece-zone">${railPieceHTML()}</div><div class="rail-bottom"><button class="rail-btn" data-action="open-alerts" title="Activity inbox">${ico('bell')}${renderBadge(unreadAll())}</button><button type="button" class="rail-btn rail-toggle" title="Expand or collapse sidebar" data-action="toggle-rail">${ico('pieces')}<span class="rail-label">Expand rail</span></button><button type="button" class="rail-btn" title="Show or hide member panel" data-action="toggle-info">${ico('users')}<span class="rail-label">Members</span></button></div><button class="rail-btn mobile-only ${state.area==='settings'?'active':''}" data-action="area" data-area="settings" aria-label="Settings">${ico('settings')}<span class="rail-label">Settings</span></button></nav><aside class="sidebar" id="sidebar"></aside><div class="splitter splitter-sidebar" data-split="sidebar" role="separator" aria-label="Resize conversation list" aria-orientation="vertical" aria-valuemin="210" aria-valuemax="420" tabindex="0"></div><main class="main" id="main"></main><div class="splitter splitter-info" data-split="info" role="separator" aria-label="Resize member list" aria-orientation="vertical" aria-valuemin="190" aria-valuemax="430" tabindex="0"></div><aside class="info-panel" id="info-panel" aria-label="Conversation details"></aside></div>`;
  const screen=document.getElementById('app-screen');
  screen.classList.toggle('rail-expanded',localStorage.getItem('tender-rail-expanded')==='1');
  screen.style.setProperty('--tender-sidebar-width',readSplitWidth('sidebar')+'px');
@@ -1599,7 +1641,7 @@ function renderPiece(piece){let joined=inPiece(piece.id),own=ownPiece(piece.id);
   return header(state.pieceTab==='chat'?'# '+(selectedChannel(piece.id)?.name||'general'):piece.name,state.pieceTab==='chat'?(selectedChannel(piece.id)?.topic||'Piece text channel'):(piece.is_public?'Public Piece · Chat / Forum / Gallery':'Private Piece'),buttons)+`<div class="main-body piece-body"><div class="piece-top-scroll"><div class="content-pad"><section class="piece-hero layout-${esc(piece.layout_style||'classic')}"><div class="piece-banner" style="background:${piece.banner_url?`linear-gradient(135deg,#0009,#0004),url(&quot;${esc(validUrl(piece.banner_url))}&quot;) center/cover`:`linear-gradient(135deg,${esc(tenderSafeColor(piece.color))},${esc(tenderSafeColor(piece.color_secondary,'#293758'))})`}">${own?`<button type="button" class="piece-hero-edit" data-action="edit-piece" title="Change Piece profile picture" aria-label="Change Piece picture">${pieceAvatar(piece,'piece-icon-hero')}<span class="piece-hero-pencil">✎</span></button>`:pieceAvatar(piece,'piece-icon-hero')}</div><div class="piece-info theme-${esc(piece.theme_style||'classic')}"><div><h2 class="name-font-${nameStyles.includes(piece.name_style)?piece.name_style:'classic'}">${esc(piece.name)}</h2><p>${esc(piece.description||'Welcome to this Tender Piece!')}</p>${piece.welcome_text?`<p class="hint">✨ ${esc(piece.welcome_text)}</p>`:''}</div><span class="tag">${piece.is_public?'🌎 Public':'🔒 Private'}</span></div></section><nav class="tabs" aria-label="Piece sections">${[['chat','Chat'],['forum','Forum'],['gallery','Gallery'],['events','Events']].map(([id,label])=>`<button class="${state.pieceTab===id?'active':''}" data-action="piece-tab" data-tab="${id}">${ico(id==='gallery'?'image':id==='forum'?'forum':id==='events'?'bell':'chat','icon-sm')} ${label}</button>`).join('')}</nav>${state.pieceTab!=='chat'?content:''}</div></div>${state.pieceTab==='chat'?content:''}</div>`;
 }
 function renderSettings(){
- const sections=[['profile','user','My Profile'],['account','settings','My Account'],['appearance','palette','Appearance'],['notifications','bell','Notifications'],['privacy','shield','Privacy & Safety'],['accessibility','accessibility','Accessibility']];
+ const sections=[['profile','user','My Profile'],['account','settings','My Account'],['appearance','palette','Appearance'],['chatbox','message-circle','Chat Box'],['notifications','bell','Notifications'],['privacy','shield','Privacy & Safety'],['accessibility','accessibility','Accessibility']];
  const tab=sections.some(x=>x[0]===state.settingsTab)?state.settingsTab:'profile';
  const nav=sections.map(([id,icon,label])=>`<button type="button" class="settings-nav-item ${tab===id?'active':''}" data-action="settings-tab" data-tab="${id}" aria-current="${tab===id?'page':'false'}">${ico(icon,'icon-sm')}<span>${label}</span></button>`).join('');
  let content='';
@@ -1634,9 +1676,19 @@ function renderSettings(){
 <div class="settings-card"><h3>Avatar & banner</h3><p class="hint">Your pictures are visible to other Tender members.</p>
   <div class="settings-two-fields"><div class="field"><label>Upload avatar (2 MB — PNG, WEBP, GIF)</label><input type="file" class="input" id="avatar-file" accept="image/png,image/jpeg,image/webp,image/gif"></div>
   <div class="field"><label>Upload banner (3 MB)</label><input class="input" id="banner-file" type="file" accept="image/png,image/jpeg,image/webp"></div></div></div>`;
+ if(tab==='chatbox')content=`<div class="settings-section-head"><span class="eyebrow">PERSONALIZE</span><h1>Chat Box & Embeds</h1><p>Choose how your messages feel.</p></div>
+ <div class="settings-card"><h3>Messaging shortcuts</h3><form id="tender05-chat-prefs-form" class="settings-fields">
+ <div class="field"><label>Convert classic emoticons</label><select class="input" name="emoticons"><option value="yes" ${tender05Prefs().emoticons!==false?'selected':''}>Yes — :) becomes 🙂</option><option value="no" ${tender05Prefs().emoticons===false?'selected':''}>No — keep typed punctuation</option></select></div>
+ <p class="hint">Emoji shortcodes such as :sob: and :fire: always work. HTML/CSS embeds use isolated visual previews.</p>
+ <button class="btn" type="submit">Save Chat Box settings</button></form></div>`;
  if(tab==='account')content=`<div class="settings-section-head"><span class="eyebrow">ACCOUNT</span><h1>My Account</h1><p>See your account details, current user identity and personal profile.</p></div>
   <div class="settings-card"><div class="account-identity">${avatars(my)}<div><h3>${esc(my.display_name)}</h3><p>@${esc(my.handle)}</p></div><button class="btn sm secondary" data-action="settings-tab" data-tab="profile">Edit profile</button></div><div class="settings-readonly"><span>Account email</span><strong>${esc(user.email||'Available in your sign-in provider')}</strong></div><div class="settings-readonly"><span>User ID</span><code>${esc(user.id)}</code></div><p class="hint">Password and email updates are managed securely by your sign-in provider. Never share your password.</p></div>
-  <div class="settings-card"><h3>Session</h3><p class="hint">Sign out from this browser.</p><button class="btn danger" data-action="logout">Log out of Tender</button></div>`;
+  <div class="settings-card"><h3>Session</h3><p class="hint">Sign out from this browser.</p><button class="btn danger" data-action="logout">Log out of Tender</button></div>
+ <div class="settings-card"><h3>Data & account lifecycle</h3><p class="hint">Take a copy of your visible account data, temporarily deactivate, or request permanent deletion.</p>
+ <div class="tender-account-lifecycle"><button class="btn secondary" data-action="tender05-export">Download account snapshot</button>
+ <button class="btn secondary" data-action="tender05-deactivate" ${!tender05Ready?'disabled title="Requires migration_0_5.sql"':''}>Deactivate account</button>
+ <button class="btn danger" data-action="tender05-delete" ${!tender05Ready?'disabled title="Requires migration_0_5.sql"':''}>Request account deletion</button></div>
+ <p class="hint">Deletion: 30-day cancellation window. Final permanent erasure depends on a separate privileged cleanup worker that must be deployed; this website alone cannot erase Supabase Auth records.</p></div>`;
  if(tab==='appearance')content=`<div class="settings-section-head"><span class="eyebrow">CUSTOMIZE</span><h1>Appearance</h1><p>Give your Tender client the look you want.</p></div>
   ${extendedReady?`<div class="settings-card"><h3>Synced appearance</h3><p class="hint">These options are saved to your account and follow you across devices.</p><form id="preferences-form"><div class="settings-two-fields">
   <div class="field"><label>Theme</label><select class="input" name="chat_theme">${[['dark','Tender Dark'],['light','Tender Light'],['midnight','Midnight'],['cozy','Cozy Orange']].map(([v,l])=>`<option value="${v}" ${my.chat_theme===v?'selected':''}>${l}</option>`).join('')}</select></div>
@@ -1924,6 +1976,10 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
   return;
  }
  if(a==='account-profile'){closeAccountMenu();await showProfile(user.id);return}
+ if(a==='tender05-export'){tender05DownloadSnapshot();return}
+ if(a==='tender05-deactivate'){await safe(()=>tender05Lifecycle('deactivate'));return}
+ if(a==='tender05-delete'){await tender05Lifecycle('delete');return}
+ if(a==='tender05-cancel-delete'){await safe(()=>tender05Lifecycle('cancel'));return}
  if(a==='account-settings'){closeAccountMenu();state.settingsTab='profile';await goTo('settings');return}
  if(a==='account-copy-id'){
   closeAccountMenu();
@@ -2143,6 +2199,13 @@ async function submitForm(form){switch(form.id){
     if(wallpaper==='image' && (!/^https:\/\//i.test(image)||validUrl(image)==='#'))throw Error('Choose an HTTPS image URL.');
     localStorage.setItem(key,JSON.stringify({wallpaper,image:image.slice(0,1200)}));closeModal();applyLocalAppearance();toast('Wallpaper saved!');return}
  case'composer-form':return sendMessage(form);
+ case'tender05-chat-prefs-form':{
+  const d=new FormData(form);localStorage.setItem('tender-0.5-composer',JSON.stringify({emoticons:d.get('emoticons')==='yes'}));toast('Chat Box settings saved.');return;
+ }
+ case'tender-delete-request-form':return safe(async()=>{
+  if(String(new FormData(form).get('confirm')||'')!=='DELETE')throw Error('Type DELETE exactly to confirm.');
+  assert(await db.rpc('tender_request_account_deletion'));await refreshData();closeModal();render();toast('Deletion request recorded. You have 30 days to cancel.');
+ });
  case'tender-dm-request-form':return safe(async()=>{const d=new FormData(form),recipient=String(d.get('recipient')||''),body=String(d.get('body')||'').trim();if(!body)throw Error('Write a message to send.');await tender05Contact(recipient,body)});
  case'tender-report-request-form':return safe(async()=>{const d=new FormData(form),reason=String(d.get('reason')||'').trim(),request_id=String(d.get('request_id')||'');if(reason.length<8)throw Error('Please describe the issue in at least 8 characters.');assert(await q('tender_safety_reports').insert({reporter_id:user.id,request_id,reason}));closeModal();toast('Report saved for moderator review.')});
  case'tender-html-embed-form':{
