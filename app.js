@@ -1451,9 +1451,64 @@ async function initialize(){ROOT.innerHTML='<div class="loading-screen"><img src
   if(invitation&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invitation)&&pieces.some(p=>p.id===invitation))await goTo('pieces',invitation);
  }catch(e){toast(e.message||'Unable to load the app',true);ROOT.innerHTML=empty('Something went wrong','Could not load Tender. Try refreshing.') }}
 async function refreshData(){if(!user)return;const [a,b,c,d,e]=await Promise.all([q('profiles').select('*').order('created_at',{ascending:false}).limit(300),q('friendships').select('*'),q('conversations').select('*,conversation_members(user_id)').order('created_at',{ascending:false}),q('pieces').select('*').order('created_at',{ascending:false}).limit(100),q('piece_members').select('*')]);profiles=assert(a)||[];my=profiles.find(x=>x.id===user.id)||{id:user.id,handle:'member',display_name:user.email||'Account'};friendships=assert(b)||[];conversations=assert(c)||[];pieces=assert(d)||[];memberships=assert(e)||[];await refreshExtras();await loadChannelData();await tender05LoadData();}
-function unsub(){unsubTyping();if(reconcileTimer)clearTimeout(reconcileTimer);if(realtimeChannel&&db)db.removeChannel(realtimeChannel);realtimeChannel=null;if(realtimeRefreshTimer)clearTimeout(realtimeRefreshTimer)}
+function unsub(){unsubTyping();tenderStopChatSync();if(reconcileTimer)clearTimeout(reconcileTimer);if(realtimeChannel&&db)db.removeChannel(realtimeChannel);realtimeChannel=null;if(realtimeRefreshTimer)clearTimeout(realtimeRefreshTimer)}
+
+/* 0.5.2: realtime resilience.
+ * Poll only the most recent message in the currently visible conversation.
+ * A failed/quiet WebSocket can no longer force people to manually refresh.
+ * Never replace the composer or move the user's scroll position.
+ */
+let tenderChatSyncTimer=null,tenderChatProbeBusy=false,tenderChatSocketState='connecting',tenderChatLastFullSync=0;
+const TENDER_CHAT_PROBE_MS=3400;
+async function tenderChatProbe(force=false){
+ if(tenderChatProbeBusy||!user||!db||document.visibilityState==='hidden')return;
+ const selected=state.selected,area=state.area,tab=state.pieceTab,channel=state.channelId;
+ if(!selected||!(area==='chats'||(['pieces','discover'].includes(area)&&tab==='chat')))return;
+ tenderChatProbeBusy=true;
+ try{
+  let query,latest,local;
+  if(area==='chats'){
+   query=q('messages').select('id,created_at,edited_at').eq('conversation_id',selected);
+   local=activeMessages.filter(m=>!m.pending&&m.conversation_id===selected);
+  }else{
+   query=q('piece_messages').select('id,created_at,edited_at').eq('piece_id',selected);
+   const selectedRoom=selectedChannel(selected);
+   if(channelReady&&selectedRoom&&!selectedRoom.id.startsWith('legacy-')){
+    query=selectedRoom.is_default?query.or('channel_id.eq.'+selectedRoom.id+',channel_id.is.null'):query.eq('channel_id',selectedRoom.id);
+   }
+   local=activeMessages.filter(m=>!m.pending&&m.piece_id===selected);
+  }
+  const result=await query.order('created_at',{ascending:false}).limit(1);
+  if(result.error)throw result.error;
+  latest=result.data?.[0]||null;
+  if(selected!==state.selected||area!==state.area||tab!==state.pieceTab||channel!==state.channelId)return;
+  const newest=local[local.length-1]||null;
+  const outOfSync=(!!latest)!=(!!newest)||
+   (!!latest&&(!newest||latest.id!==newest.id||String(latest.edited_at||'')!==String(newest.edited_at||'')));
+  const oldEnough=Date.now()-tenderChatLastFullSync>28000;
+  if(force||outOfSync||oldEnough){
+   await loadActive();
+   if(selected===state.selected&&area===state.area&&tab===state.pieceTab&&channel===state.channelId){
+    syncActiveStream();
+    tenderChatLastFullSync=Date.now();
+   }
+  }
+ }catch(error){console.warn('Tender live chat backup sync:',error)}
+ finally{tenderChatProbeBusy=false}
+}
+function tenderStartChatSync(){
+ tenderStopChatSync();
+ tenderChatSyncTimer=setInterval(()=>{tenderChatProbe().catch(console.warn)},TENDER_CHAT_PROBE_MS);
+}
+function tenderStopChatSync(){
+ if(tenderChatSyncTimer!==null)clearInterval(tenderChatSyncTimer);
+ tenderChatSyncTimer=null;
+}
+
 function subscribe(){
  unsub();if(!user)return;
+ tenderChatSocketState='connecting';
+ tenderStartChatSync();
  realtimeChannel=db.channel('tender-live-'+user.id)
  .on('postgres_changes',{event:'*',schema:'public',table:'messages'},e=>scheduleReconcile(true,'messages',e))
  .on('postgres_changes',{event:'*',schema:'public',table:'piece_messages'},e=>{scheduleReconcile(true,'piece_messages',e);scheduleChannelUnreadRefresh();})
@@ -1467,7 +1522,14 @@ function subscribe(){
  .on('postgres_changes',{event:'*',schema:'public',table:'piece_channels'},e=>scheduleReconcile(false))
  .on('postgres_changes',{event:'*',schema:'public',table:'tender_dm_requests',filter:'recipient_id=eq.'+user.id},()=>{tender05LoadData().then(()=>renderSidebar()).catch(console.warn)})
  .on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:'user_id=eq.'+user.id},e=>{if(e.new){if(!notifications.some(n=>n.id===e.new.id))notifications.unshift(e.new);showBrowserNotification(e.new).catch(console.warn);if(e.new.conversation_id===state.selected&&state.area==='chats'&&document.visibilityState==='visible'){markRead(state.selected).catch(console.warn)}renderNavBadges();renderSidebar()}setTimeout(()=>scheduleReconcile(false),220)})
- .subscribe();
+ .subscribe(status=>{
+  tenderChatSocketState=status;
+  if(status==='SUBSCRIBED'){
+   tenderChatProbe(true).catch(console.warn);
+  }else if(['CHANNEL_ERROR','TIMED_OUT','CLOSED'].includes(status)){
+   console.warn('Tender realtime transport:',status,'— backup chat sync remains active');
+  }
+ });
  subscribeTyping().catch(console.warn);
 }
 function navItem(area,name,label){return `<button data-action="area" data-area="${area}" class="rail-btn ${state.area===area?'active':''}" title="${label}" aria-label="${label}">${ico(name)}<span class="rail-label">${label}</span>${area==='chats'?renderBadge(notifications.filter(n=>!n.is_read&&n.kind==='message').length):area==='friends'?renderBadge(unreadFriends()):''}</button>`}
@@ -1862,7 +1924,8 @@ async function loadActive(){
  const pending=activeMessages.filter(m=>m.pending&&(area==='chats'?m.conversation_id===selected:(m.piece_id===selected&&(!channelReady||m.channel_id===state.channelId))));
  let fresh=[],reactions=[],posts=[],gallery=[];
  if(area==='chats'){
-  fresh=assert(await q('messages').select('*').eq('conversation_id',selected).order('created_at',{ascending:true}).limit(150))||[];
+  fresh=assert(await q('messages').select('*').eq('conversation_id',selected).order('created_at',{ascending:false}).limit(150))||[];
+  fresh.reverse();
   if(fresh.length)reactions=assert(await q('reactions').select('*').eq('target_type','message').in('target_id',fresh.map(x=>x.id)))||[];
  }else if(area==='pieces'||area==='discover'){
   if(tab==='chat'){
@@ -1870,7 +1933,8 @@ async function loadActive(){
     let query=q('piece_messages').select('*').eq('piece_id',selected);
     if(channelReady&&activeChannel&&!activeChannel.id.startsWith('legacy-'))
       query=activeChannel.is_default?query.or('channel_id.eq.'+activeChannel.id+',channel_id.is.null'):query.eq('channel_id',activeChannel.id);
-    fresh=assert(await query.order('created_at',{ascending:true}).limit(150))||[];
+    fresh=assert(await query.order('created_at',{ascending:false}).limit(150))||[];
+    fresh.reverse();
    if(fresh.length)reactions=assert(await q('reactions').select('*').eq('target_type','piece_message').in('target_id',fresh.map(x=>x.id)))||[];
   }
   if(tab==='forum'){
@@ -1885,7 +1949,7 @@ async function loadActive(){
  activeMessages=fresh;activeReactions=reactions;activePosts=posts;activeGallery=gallery;
  await Promise.all([prepareAttachmentUrls(),loadPolls()]);
 }
-async function goTo(area,id=null){state.area=area;state.selected=id;state.search='';state.mobileDetail=!!id||['discover','settings'].includes(area);if(area==='friends'&&!id)state.mobileDetail=true;if(area==='pieces'||area==='discover')state.pieceTab='chat';state.channelId=id&&['pieces','discover'].includes(area)?channelsFor(id).find(c=>c.is_default)?.id||channelsFor(id)[0]?.id||null:null;replyTo=null;if(id&&['chats','pieces','discover'].includes(area))await loadActive();if(state.area!==area||state.selected!==id)return;applyLocalAppearance();render();if(area==='chats'&&id){markRead(id);subscribeTyping().catch(console.warn)}else if(['pieces','discover'].includes(area)&&id&&state.pieceTab==='chat'){markChannelRead().catch(console.warn);subscribeTyping().catch(console.warn)}else{unsubTyping()}if(area==='friends')markRead(null,true);}
+async function goTo(area,id=null){state.area=area;state.selected=id;state.search='';state.mobileDetail=!!id||['discover','settings'].includes(area);if(area==='friends'&&!id)state.mobileDetail=true;if(area==='pieces'||area==='discover')state.pieceTab='chat';state.channelId=id&&['pieces','discover'].includes(area)?channelsFor(id).find(c=>c.is_default)?.id||channelsFor(id)[0]?.id||null:null;replyTo=null;if(id&&['chats','pieces','discover'].includes(area))await loadActive();if(state.area!==area||state.selected!==id)return;applyLocalAppearance();render();if(area==='chats'&&id){tenderChatLastFullSync=Date.now();markRead(id);subscribeTyping().catch(console.warn)}else if(['pieces','discover'].includes(area)&&id&&state.pieceTab==='chat'){markChannelRead().catch(console.warn);subscribeTyping().catch(console.warn)}else{unsubTyping()}if(area==='friends')markRead(null,true);}
 let confirmationResolve=null;
 function tenderConfirm(title,description,action='Confirm',danger=true){
  if(confirmationResolve){confirmationResolve(false);confirmationResolve=null}
@@ -2757,7 +2821,7 @@ document.addEventListener('pointercancel',tender05EndCallDrag);
 
 let dragDepth=0;
 document.addEventListener('play',e=>{if(audioPrefs().deafened&&e.target?.matches?.('audio,video'))syncDeafenedAudio()},true);
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshVisibleChatDays()});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){refreshVisibleChatDays();tenderChatProbe(true).catch(console.warn)}});
 document.addEventListener('scroll',e=>{if(!e.target?.matches?.('.chat-scroll'))return;const pill=document.getElementById('chat-jump-new');if(pill&&e.target.scrollHeight-e.target.scrollTop-e.target.clientHeight<55)pill.hidden=true},true);
 let tender05DraggingWidget=null;
  document.addEventListener('dragstart',event=>{
