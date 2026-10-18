@@ -55,10 +55,17 @@
   {name:"Tears",emoji:"😭"},{name:"Purple Heart",emoji:"💜"},{name:"Hype",emoji:"🥳"},
   {name:"Cat",emoji:"🐱"},{name:"Chicken",emoji:"🐔"},{name:"Star",emoji:"⭐"}
  ];
- function renderSticker(text){
-  try{const p=JSON.parse(text),e=Array.from(String(p.emoji||'' )).slice(0,8).join(''),label=String(p.name||'Sticker').slice(0,40);
-   return '<div class="tender-sticker" title="'+escape(label)+'"><span aria-hidden="true">'+escape(e)+'</span><small>'+escape(label)+'</small></div>';
-  }catch{return escape(text)}
+ function renderSticker(text,getImageUrl){
+  try{
+   const p=JSON.parse(text),e=Array.from(String(p.emoji||'')).slice(0,8).join(''),label=String(p.name||'Sticker').slice(0,40);
+   const path=String(p.image_path||'');
+   const trustedPath=/^[0-9a-f-]{36}\/sticker-[0-9a-f-]{36}\.(?:png|webp|gif)$/i.test(path);
+   const imageUrl=trustedPath&&typeof getImageUrl==='function'?String(getImageUrl(path)||''):'';
+   const rendered=imageUrl&&/^https:\/\//i.test(imageUrl)?
+    '<img src="'+escape(imageUrl)+'" loading="lazy" alt="'+escape(label)+'" class="tender-sticker-image">':
+    '<span aria-hidden="true">'+escape(e||'🍗')+'</span>';
+   return '<div class="tender-sticker" title="'+escape(label)+'">'+rendered+'<small>'+escape(label)+'</small></div>';
+  }catch{return '<div class="notice-inline">Sticker unavailable.</div>'}
  }
  window.Tender05=Object.freeze({emoji,expand,suggestions,escape,embedDoc,renderEmbed,renderSticker,stickerPresets});
 })();
