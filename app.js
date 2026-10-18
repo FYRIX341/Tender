@@ -336,7 +336,7 @@ async function tender05ThreadView(id){
  tender05CurrentThread=id;
  modal((info.is_private?'🔒 ':'🧵 ')+info.title,info.is_private?'Invited participants only.':'Public within this conversation.',
  `<div class="tender-thread-posts">${posts.map(x=>`<div class="tender-thread-post"><strong>${esc(pby(x.author_id).display_name)}</strong> <small>${fmt(x.created_at)}</small><p>${messageText(x.body)}</p></div>`).join('')||'<p class="hint">No replies yet.</p>'}</div>
- <form id="tender05-thread-post-form"><input type="hidden" name="thread_id" value="${esc(id)}"><div class="field"><label>Your reply</label><textarea class="input textarea" name="body" rows="3" maxlength="4000" required></textarea></div><button class="btn full" type="submit">Send reply</button></form>`);
+ <button type="button" class="btn secondary sm" data-action="tender05-thread-refresh" data-id="${esc(id)}">↻ Refresh thread</button><form id="tender05-thread-post-form"><input type="hidden" name="thread_id" value="${esc(id)}"><div class="field"><label>Your reply</label><textarea class="input textarea" name="body" rows="3" maxlength="4000" required></textarea></div><button class="btn full" type="submit">Send reply</button></form>`);
 }
 
 function tender05PinnedModal(){
@@ -1459,6 +1459,7 @@ function subscribe(){
  .on('postgres_changes',{event:'*',schema:'public',table:'conversation_reads'},e=>scheduleReconcile(true,'conversation_reads',e))
  .on('postgres_changes',{event:'*',schema:'public',table:'piece_events'},e=>scheduleReconcile(true))
  .on('postgres_changes',{event:'*',schema:'public',table:'piece_channels'},e=>scheduleReconcile(false))
+ .on('postgres_changes',{event:'*',schema:'public',table:'tender_dm_requests',filter:'recipient_id=eq.'+user.id},()=>{tender05LoadData().then(()=>renderSidebar()).catch(console.warn)})
  .on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:'user_id=eq.'+user.id},e=>{if(e.new){if(!notifications.some(n=>n.id===e.new.id))notifications.unshift(e.new);showBrowserNotification(e.new).catch(console.warn);if(e.new.conversation_id===state.selected&&state.area==='chats'&&document.visibilityState==='visible'){markRead(state.selected).catch(console.warn)}renderNavBadges();renderSidebar()}setTimeout(()=>scheduleReconcile(false),220)})
  .subscribe();
  subscribeTyping().catch(console.warn);
@@ -2324,7 +2325,7 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  }
  if(a==='tender05-thread-chooser'){await safe(()=>tender05ThreadChooser(id,el.dataset.type));return}
  if(a==='tender05-thread-new'){tender05ThreadCreateModal(id,el.dataset.type);return}
- if(a==='tender05-thread-open'){await safe(()=>tender05ThreadView(id));return}
+ if(a==='tender05-thread-open'||a==='tender05-thread-refresh'){await safe(()=>tender05ThreadView(id));return}
  if(a==='tender05-studio-jump'){document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'});return}
  if(a==='tender05-widget-editor'){tender05WidgetModal();return}
  if(a==='tender05-widget-move'||a==='tender05-widget-remove'){await safe(()=>tender05UpdateWidget(a.endsWith('move')?'move':'remove',Number(el.dataset.index),Number(el.dataset.dir)||0));return}
@@ -2343,7 +2344,7 @@ async function handleAction(el){const a=el.dataset.action,id=el.dataset.id,tab=e
  if(a==='decline-dm-request'){await safe(()=>tender05DeclineRequest(id));return}
  if(a==='decline-all-dm-requests'){await safe(async()=>{const pending=tender05Requests.filter(r=>r.recipient_id===user.id&&r.status==='pending');for(const row of pending)assert(await db.rpc('tender_decline_dm_request',{request_id:row.id}));await tender05LoadData();closeModal();renderSidebar();toast('Requests declined.')});return}
  if(a==='report-dm-request'){tender05ReportModal(id);return}
- if(a==='block-dm-request'){await safe(async()=>{if(!extendedReady)throw Error('Blocking requires the safety database.');if(!await tenderConfirm('Block this sender?','They will no longer be able to request or send messages.','Block user'))return;const response=await q('user_blocks').upsert({blocker_id:user.id,blocked_id:id},{onConflict:'blocker_id,blocked_id'});assert(response);await tender05LoadData();closeModal();renderSidebar();toast('Sender blocked.')});return}
+ if(a==='block-dm-request'){await safe(async()=>{if(!extendedReady)throw Error('Blocking requires the safety database.');if(!await tenderConfirm('Block this sender?','They will no longer be able to request or send messages.','Block user'))return;const response=await q('user_blocks').upsert({blocker_id:user.id,blocked_id:id},{onConflict:'blocker_id,blocked_id'});assert(response);const pending=tender05Requests.filter(r=>r.recipient_id===user.id&&r.sender_id===id&&r.status==='pending');for(const r of pending)assert(await db.rpc('tender_decline_dm_request',{request_id:r.id}));await tender05LoadData();closeModal();renderSidebar();toast('Sender blocked and request declined.')});return}
 
  if(a==='accept-friend')await safe(async()=>{assert(await q('friendships').update({status:'accepted'}).eq('id',id));await refreshData();render();toast('Friend request accepted!')});
  if(a==='remove-friend') {if(!await tenderConfirm('Remove friend?','They will be removed from your friends list. You can add them back later.','Remove friend'))return;await safe(async()=>{let f=friendships.find(f=>f.status==='accepted'&&[f.requester,f.recipient].includes(id));if(f)assert(await q('friendships').delete().eq('id',f.id));await refreshData();await goTo('friends');toast('Friend removed.')})}
