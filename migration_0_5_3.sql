@@ -111,8 +111,8 @@ BEGIN
  END IF;
  FOR recipient IN
   SELECT DISTINCT p.id
-  FROM regexp_matches(NEW.body,'(^|[^[:alnum:]_])@([a-z0-9_]{3,20})','gi') match
-  JOIN public.profiles p ON lower(p.handle)=lower(match[2])
+  FROM regexp_matches(NEW.body,'(^|[^[:alnum:]_])@([a-z0-9_]{3,20})','gi') AS capture(parts)
+  JOIN public.profiles p ON lower(p.handle)=lower((capture.parts)[2])
   WHERE p.id<>NEW.author_id
     AND ((kind='message' AND EXISTS(
       SELECT 1 FROM public.conversation_members cm
@@ -169,5 +169,21 @@ BEGIN
  END IF;
 END;
 $tender$;
+
+
+-- The existing 0.2 notification table has no client UPDATE policy; use a
+-- scoped RPC to mark only the authenticated user's alerts as read.
+CREATE OR REPLACE FUNCTION public.tender_inbox_mark_all_read()
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $tender$
+BEGIN
+ IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Sign in first'; END IF;
+ UPDATE public.notifications SET is_read=true WHERE user_id=auth.uid() AND is_read=false;
+ UPDATE public.tender_inbox_mentions SET is_read=true WHERE user_id=auth.uid() AND is_read=false
+  AND public.tender_inbox_can_access(target_type,message_id,auth.uid());
+END;
+$tender$;
+REVOKE ALL ON FUNCTION public.tender_inbox_mark_all_read() FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.tender_inbox_mark_all_read() TO authenticated;
+
 
 COMMIT;
