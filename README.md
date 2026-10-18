@@ -6,7 +6,13 @@ Tender is a responsive social messaging app with **Buffalo** the mascot. Chat wi
 
 **[🍗 Open Tender securely](https://fyrix341.github.io/Tender/)** · [Source code](https://github.com/FYRIX341/Tender)
 
-## ✨ Tender 0.4.1 — Together
+## ✨ Tender 0.4.2 — Channels & Layout
+
+**Tender 0.4.2 improves Piece channel creation and switches to a tighter Discord-inspired workspace** while retaining Tender’s identity. Staff can create channels using the main **+** button or a category **+**, and channel names containing spaces and capitals are converted into safe channel slugs automatically. Clear errors are shown for duplicates, unavailable database schema and save failures. Piece chat removes most of the oversized header so the conversation gets the space it deserves.
+
+**Backend note:** The live Supabase project must have the existing `migration_0_4.sql` applied for channel creation and read permissions to work. Publishing the static website alone cannot install database tables or policies. See [the 0.4.2 notes](RELEASE_0_4_2.md) for a quick test and troubleshooting guide.
+
+### Previous release: 0.4.1 — Together
 
 **Tender 0.4 gives Pieces real channels and makes customization free.** Your joined Pieces appear as icons in the left rail, with unread badges; channels can have their own conversations, categories, topics and unread history. Every old Piece chat remains in **#general**. DM and group icons now show live connection-aware status markers.
 
@@ -27,7 +33,7 @@ The **automatic additive Supabase migrations** preserve accounts, chats, Pieces 
 - **Call a friend:** Start a real voice or video call in a private DM, share your screen, mute/deafen, and set different voice and stream volumes. Requires microphone/camera permission and an HTTPS browser with WebRTC.
 - **Stay in the loop:** See in-app notifications while using Tender, including incoming call prompts.
 
-For details, see the [0.4.1 update notes](RELEASE_0_4_1.md), [0.4 release notes](RELEASE_0_4.md), [0.3.5 update notes](RELEASE_0_3_5.md), [0.3.4 hotfix notes](RELEASE_0_3_4.md), [0.3.3 release notes](RELEASE_0_3_3.md), [0.3.2 changelog](RELEASE_0_3_2.md), and [0.3.1 changelog](RELEASE_0_3_1.md).
+For details, see the [0.4.2 update notes](RELEASE_0_4_2.md), [0.4.1 update notes](RELEASE_0_4_1.md), [0.4 release notes](RELEASE_0_4.md), [0.3.5 update notes](RELEASE_0_3_5.md), [0.3.4 hotfix notes](RELEASE_0_3_4.md), [0.3.3 release notes](RELEASE_0_3_3.md), [0.3.2 changelog](RELEASE_0_3_2.md), and [0.3.1 changelog](RELEASE_0_3_1.md).
 
 ## 📱 Made for desktop and mobile
 
