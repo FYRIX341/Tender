@@ -133,17 +133,20 @@ async function markChannelRead(){
   renderPieceRail();
  }catch(e){console.warn('Piece read cursor failed',e)}
 }
+// Tender 0.4.4 — connection-aware presence. Saved profile preferences are NOT activity.
 let presenceChannel=null;
-let presenceRoster=new Map();
+let presenceRoster=new Map(),presenceConnectionReady=false;
 function activePresence(id){
  if(!id)return 'offline';
  if(id===user?.id){
-  const current=my?.presence_mode||'online';
-  return current==='invisible'?'offline':current;
+  if(!presenceConnectionReady)return 'offline';
+  const selected=my?.presence_mode||'online';
+  return ['online','idle','dnd'].includes(selected)?selected:'offline';
  }
- // Other users' saved profile data may be stale; the live presence roster
- // is authoritative, and Invisible users untrack themselves.
  return presenceRoster.get(id)||'offline';
+}
+function presenceLabel(status){
+ return status==='dnd'?'Do Not Disturb':status==='idle'?'Idle':status==='online'?'Online':'Offline';
 }
 function onlineForGroup(conversation){
  const ids=[...new Set((conversation?.conversation_members||[]).map(m=>m.user_id))];
@@ -151,46 +154,63 @@ function onlineForGroup(conversation){
  const offline=ids.length-online;
  return {online,offline,status:online>offline?'online':'offline'};
 }
-function presenceDotHTML(status,label=''){
+function presenceDotHTML(status,label='',id=''){
  const valid=['online','idle','dnd'].includes(status)?status:'offline';
- return `<span class="tender-presence-dot ${valid}" aria-label="${esc(label||(valid==='offline'?'Offline':valid))}" title="${esc(label||(valid==='offline'?'Offline':valid))}"></span>`;
+ return `<span class="tender-presence-dot ${valid}" ${id?`data-presence-id="${esc(id)}"`:''} aria-label="${esc(label||presenceLabel(valid))}" title="${esc(label||presenceLabel(valid))}"></span>`;
 }
 async function startPresence(){
  if(!db||!user)return;
+ presenceConnectionReady=false;presenceRoster=new Map();
+ updatePresenceMarkers();
  if(presenceChannel){await db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}
- presenceRoster=new Map();
  const sessionUser=user.id;
  const channel=db.channel('tender-online-v1',{config:{presence:{key:sessionUser}}});
  presenceChannel=channel;
  const update=()=>{
+  if(presenceChannel!==channel||user?.id!==sessionUser)return;
   const next=new Map();for(const [id,rows] of Object.entries(channel.presenceState()||{})){
    if(id===sessionUser||!Array.isArray(rows))continue;
    const item=rows.find(row=>row.user_id===id&&['online','idle','dnd'].includes(row.status));
    if(item)next.set(id,item.status);
   }
   presenceRoster=next;
-  if(user?.id===sessionUser){updatePresenceMarkers();renderInfoPanel()}
+  updatePresenceMarkers();renderInfoPanel();
  };
  channel.on('presence',{event:'sync'},update);
  channel.subscribe(async status=>{
-  if(status==='SUBSCRIBED'&&user?.id===sessionUser){
-   if(my?.presence_mode!=='invisible')await channel.track({user_id:sessionUser,status:my?.presence_mode||'online'});
+  if(presenceChannel!==channel||user?.id!==sessionUser)return;
+  if(status==='SUBSCRIBED'){
+   try{
+    if(my?.presence_mode!=='invisible'){
+     const result=await channel.track({user_id:sessionUser,status:my?.presence_mode||'online'});
+     presenceConnectionReady=result==='ok';
+    }else presenceConnectionReady=true;
+   }catch(error){presenceConnectionReady=false;console.warn('Tender presence connection failed:',error)}
+   if(presenceChannel===channel){updatePresenceMarkers();renderInfoPanel()}
+  }else if(['CHANNEL_ERROR','TIMED_OUT','CLOSED'].includes(status)){
+   presenceConnectionReady=false;presenceRoster=new Map();
+   updatePresenceMarkers();renderInfoPanel();
   }
  });
 }
 async function publishPresence(){
- if(!presenceChannel||!user)return;
- if(my?.presence_mode==='invisible')await presenceChannel.untrack();
- else await presenceChannel.track({user_id:user.id,status:my?.presence_mode||'online'});
+ if(!presenceChannel||!user){presenceConnectionReady=false;updatePresenceMarkers();return}
+ try{
+  if(my?.presence_mode==='invisible')await presenceChannel.untrack();
+  else{
+   const result=await presenceChannel.track({user_id:user.id,status:my?.presence_mode||'online'});
+   presenceConnectionReady=result==='ok';
+  }
+ }catch(error){presenceConnectionReady=false;console.warn('Tender presence update failed:',error)}
  updatePresenceMarkers();
 }
 function updatePresenceMarkers(){
  document.querySelectorAll('[data-presence-id]').forEach(el=>{
   const id=el.dataset.presenceId,status=activePresence(id);
   el.className='tender-presence-dot '+(['online','idle','dnd'].includes(status)?status:'offline');
-  el.title=status;
+  el.title=presenceLabel(status);el.setAttribute('aria-label',presenceLabel(status));
   const info=el.closest('.dm-row')?.querySelector('.grow p');
-  if(info)info.textContent=status==='offline'?'Offline':status==='dnd'?'Do Not Disturb':status==='idle'?'Idle':'Online';
+  if(info)info.textContent=presenceLabel(status);
  });
  document.querySelectorAll('[data-group-presence]').forEach(el=>{
   const c=getConversation(el.dataset.groupPresence);if(!c)return;
@@ -198,6 +218,14 @@ function updatePresenceMarkers(){
   el.className='tender-presence-dot '+summary.status;
   el.title=summary.online+' online · '+summary.offline+' offline';
   const info=el.closest('.dm-row')?.querySelector('.grow p');if(info)info.textContent=summary.online+' online · '+summary.offline+' offline';
+ });
+ // Keep already-open full profile dialogs, DM profile panes and profile
+ // pages up to date without disturbing current message drafts.
+ document.querySelectorAll('[data-profile-presence-id]').forEach(el=>{
+  const status=activePresence(el.dataset.profilePresenceId);
+  el.className='profile-presence '+status;
+  el.textContent=presenceLabel(status);
+  el.setAttribute('aria-label',presenceLabel(status));
  });
 }
 
@@ -910,9 +938,8 @@ function sharedPublicPieces(otherId){
 }
 function profileStatus(p){
  if(!p)return '';
- const presence=String(p.presence_mode||'online');
- if(presence==='invisible')return '';
- return `<span class="profile-presence ${['online','idle','dnd'].includes(presence)?presence:'online'}">${presence==='dnd'?'Do not disturb':presence==='idle'?'Idle':'Online'}</span>`;
+ const presence=activePresence(p.id),label=presenceLabel(presence);
+ return `<span class="profile-presence ${presence}" data-profile-presence-id="${esc(p.id)}" aria-label="${label}">${label}</span>`;
 }
 function profileActions(person,compact=false){
  const isSelf=person.id===user?.id;
@@ -964,7 +991,7 @@ function closeMiniProfile(){
 function miniProfileHTML(person){
  return `<div class="mini-profile-banner" style="${profileGradientStyle(person)}${person.banner_url?`background-image:linear-gradient(#0002,#0005),url(&quot;${esc(validUrl(person.banner_url))}&quot;);`:''}"></div>
  <div class="mini-profile-content">
-  <div class="mini-profile-avatar">${avatars(person)}${presenceDotHTML(activePresence(person.id))}</div>
+  <div class="mini-profile-avatar">${avatars(person)}${presenceDotHTML(activePresence(person.id),'',person.id)}</div>
   <div class="mini-profile-identity">${styledName(person,'h3')}<small>@${esc(person.handle||'member')}${person.pronouns?' · '+esc(person.pronouns):''}</small></div>
   ${person.game_status?`<p class="mini-profile-status">${esc(person.status_emoji||'🍗')} ${esc(person.game_status)}</p>`:''}
   <div class="mini-profile-bio">${esc((person.bio||'No bio yet. 🍗').slice(0,240)).replace(/\n/g,'<br>')}</div>
@@ -1035,7 +1062,7 @@ async function boot(){
    if(user)await initialize();else renderAuth();
  }catch(e){ROOT.innerHTML=empty('Could not reach Tender','Check the public Supabase URL and key in config.js.');toast(e.message||'Could not connect.',true)}
 }
-function reset(){stopCallInbox();notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;channelBackendError='';state.channelId=null;presenceRoster.clear();if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
+function reset(){stopCallInbox();notifications=[];customEmojis=[];reads=[];bookmarks=[];attachmentUrls.clear();replyTo=null;unsubTyping();my=null;blockedUsers=[];profiles=[];friendships=[];conversations=[];pieces=[];memberships=[];pieceChannels=[];channelUnread=[];channelReady=false;channelBackendError='';state.channelId=null;presenceRoster.clear();presenceConnectionReady=false;if(presenceChannel&&db){db.removeChannel(presenceChannel).catch(()=>{});presenceChannel=null}state.selected=null;state.area='chats';state.mobileDetail=false}
 function renderSetup(){ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Your friends. Your spaces. Your flavor.</p></div><div class="login-panel"><div class="eyebrow">Tender setup</div><h2>Almost ready to connect.</h2><p>This website needs a free online Supabase project for accounts, messages and Pieces. It's not a local chat simulator.</p><div class="setup-box"><h3>🍗 Connect the shared database</h3><p>1. Create a free project at <a href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Supabase</a>.<br>2. Run <strong>schema.sql</strong> in the project's SQL editor.<br>3. Copy its Project URL and publishable (anon) key into <strong>config.js</strong> on GitHub.<br>4. Refresh this website. Everyone will connect to the same database.</p><details><summary>Important security information</summary>Only use the public publishable/anon key. Never put a service_role key or other secret in GitHub. Set URL configuration for email confirmation in Supabase Auth.</details></div><p class="hint">Your Tender HTML interface is deployed separately from the database. A GitHub Pages link alone cannot deliver live messaging.</p><a class="btn" href="https://supabase.com/dashboard/projects" target="_blank" rel="noopener">Connect Supabase ${ico('external')}</a></div></div>`}
 function renderAuth(){state.mobileDetail=false;ROOT.innerHTML=`<div class="login-layout"><div class="login-art"><img src="buffalo.webp" alt="Buffalo mascot"><h1>tender<span>.</span></h1><p>Stay close. Stay crispy. 🍗</p></div><div class="login-panel"><div class="eyebrow">Welcome to Tender</div><h2>${state.loginMode==='login'?'Good to have you back.':'Your people are waiting.'}</h2><p>${state.loginMode==='login'?'Sign in to catch up with your people.':'Create your account to join the conversation.'}</p><div class="login-tabs"><button class="${state.loginMode==='login'?'selected':''}" data-action="auth-tab" data-tab="login">Log in</button><button class="${state.loginMode==='signup'?'selected':''}" data-action="auth-tab" data-tab="signup">Sign up</button></div><form id="auth-form">${state.loginMode==='signup'?`<div class="field"><label for="handle">Username (3–20 letters, numbers, underscores)</label><input class="input" id="handle" name="handle" minlength="3" maxlength="20" pattern="[a-zA-Z0-9_]{3,20}" required autocomplete="username" placeholder="buffalofan"></div><div class="field"><label for="display">Display name</label><input class="input" id="display" name="display_name" maxlength="40" required placeholder="Your name"></div>`:''}<div class="field"><label for="email">Email address</label><input class="input" id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com"></div><div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" minlength="8" autocomplete="${state.loginMode==='login'?'current-password':'new-password'}" required placeholder="At least 8 characters"></div><button class="btn full top-spacer" type="submit">${state.loginMode==='login'?'Log in':'Create account'} ${ico('back')}</button></form><p class="hint top-spacer">Tender is an early beta. Please don't post private information in public Pieces.</p></div></div>`}
 async function authSubmit(form){const data=new FormData(form), email=String(data.get('email')).trim(), password=String(data.get('password'));
@@ -1991,7 +2018,9 @@ async function submitForm(form){switch(form.id){
     upd.notification_mode=d.get('notification_mode');upd.notification_sound=d.get('notification_sound')==='yes';upd.notification_tone=d.get('notification_tone')||'pop';
    }else{upd.presence_mode=d.get('presence_mode')}
    assert(await q('profiles').update(upd).eq('id',user.id));
-   cacheUpdatedProfile(upd);applyTheme();toast('Preferences saved! 🍗');
+   cacheUpdatedProfile(upd);applyTheme();
+    if(Object.prototype.hasOwnProperty.call(upd,'presence_mode'))await publishPresence();
+    toast('Preferences saved! 🍗');
  });
  case'edit-message-form':return safe(async()=>{const d=new FormData(form),id=String(d.get('id')),body=String(d.get('body')).trim();assert(await q('messages').update({body,edited_at:new Date().toISOString()}).eq('id',id));closeModal();await loadActive();renderMain();toast('Message edited.')});
  case'forward-form':return safe(async()=>{const d=new FormData(form),id=String(d.get('message_id')),cid=String(d.get('conversation_id'));if(!cid)throw Error('Choose a conversation');const m=activeMessages.find(x=>x.id===id);if(!m)throw Error('Message no longer available');assert(await q('messages').insert({conversation_id:cid,author_id:user.id,body:'↗ Forwarded: '+m.body}));closeModal();toast('Message forwarded!')});
