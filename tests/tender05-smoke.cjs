@@ -48,7 +48,7 @@ const hotfix=read('migration_0_5_1.sql');
 assert.match(hotfix,/IF TG_TABLE_NAME='piece_messages' THEN\s+IF NOT public\.is_piece_mod\(NEW\.piece_id\) THEN/,
  'Hotfix scopes piece_id to Piece messages only');
 assert.ok(hotfix.includes('CREATE OR REPLACE FUNCTION public.tender_guard_message_rate()'),
- 'Hotfix replaces the existing function, not the user's tables');
+ "Hotfix replaces the existing function, not the user's tables");
 assert.ok(!/(DROP TABLE|TRUNCATE|DELETE FROM)/i.test(hotfix),'Hotfix must not remove data');
 assert.ok(hotfix.includes('BEGIN;') && hotfix.trimEnd().endsWith('COMMIT;'),'Hotfix is transactional');
 
